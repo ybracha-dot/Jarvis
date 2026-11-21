@@ -509,7 +509,7 @@ async function journeyA11y(browser: Browser) {
     for (const p of ["/", "/tasks", "/goals", "/completed", "/memory", "/skills", "/council", "/sources", "/voice", "/settings", "/activity"]) {
       await page.goto(base + p); await page.waitForLoadState("networkidle"); await scan(page, `${p} (${vp.n})`);
     }
-    await page.goto(base + "/"); await page.getByTestId("decision-card").first().waitFor();
+    await page.goto(base + (vp.n === "phone" ? "/decisions" : "/")); await page.getByTestId("decision-card").first().waitFor();
     await page.getByTestId("decision-card").first().click(); await page.getByRole("dialog").getByTestId("plan-chunks").waitFor(); await page.waitForTimeout(300);
     await scan(page, `decision drawer (${vp.n})`);
     await ctx.close();

@@ -14,7 +14,7 @@ import { startCouncil, getCouncil, cancelCouncil, listCouncil, PRESETS, SAMPLE_D
 import { Router, routerStatus, RouterError } from "./router";
 import { previewImport, commitImport, ImportRequest } from "./imports";
 import { connections } from "./adapters";
-import { runNow, tick, schedulerStatus, scanInbox, inboxDir } from "./scheduler";
+import { runNow, tick, schedulerStatus, scanInbox, inboxDir, weeklyFindings } from "./scheduler";
 import { inbox as inboxList } from "./notify";
 import { addAdvisorSource, AdvisorSourceInput, listAdvisorSources, deleteAdvisorSource, LENSES, advise } from "./advisors";
 import { applyPractice } from "./study";
@@ -106,7 +106,7 @@ on("POST", "/tasks/:id/receipt-fixture", (c, r) => {
   return { revisionId: x.revisionId };
 });
 on("GET", "/completed", (c, r) => ({ tasks: completedTasks(c, r.query.get("course") ?? undefined), courses: all(c.db, "SELECT external_id,code FROM courses WHERE owner_id=? ORDER BY code", c.owner) }));
-on("GET", "/review/weekly", (c) => weeklyReview(c));
+on("GET", "/review/weekly", (c) => ({ review: weeklyReview(c), blindSpots: weeklyFindings(c) }));
 
 on("GET", "/goals", (c) => ({ goals: listGoals(c) }));
 on("POST", "/goals", (c, r) => ({ id: upsertGoal(c, r.json(GoalInput)) }));
