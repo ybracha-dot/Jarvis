@@ -46,7 +46,7 @@ export const listAttachments = (ctx: Ctx, course: string) => all(ctx.db, "SELECT
 // ---------- conversations ----------
 export function getConversation(ctx: Ctx, id?: string | null, course?: string | null) {
   if (id) { const c = get(ctx.db, "SELECT * FROM conversations WHERE id=? AND owner_id=?", id, ctx.owner); if (c) return c; }
-  const ex = course ? get(ctx.db, "SELECT * FROM conversations WHERE owner_id=? AND course=? ORDER BY created_at DESC LIMIT 1", ctx.owner, course) : get(ctx.db, "SELECT * FROM conversations WHERE owner_id=? AND course IS NULL ORDER BY created_at DESC LIMIT 1", ctx.owner);
+  const ex = course ? get(ctx.db, "SELECT * FROM conversations WHERE owner_id=? AND course=? ORDER BY created_at DESC LIMIT 1", ctx.owner, course) : get(ctx.db, "SELECT * FROM conversations WHERE owner_id=? ORDER BY created_at DESC LIMIT 1", ctx.owner);
   if (ex) return ex;
   const nid = uid("conv"); run(ctx.db, "INSERT INTO conversations(id,owner_id,course,title,created_at) VALUES(?,?,?,?,?)", nid, ctx.owner, course ?? null, course ? `${course} workspace` : "Jarvis", ctx.now().toISOString());
   return get(ctx.db, "SELECT * FROM conversations WHERE id=?", nid)!;
@@ -203,7 +203,8 @@ export function handleUtterance(ctx: Ctx, o: { text: string; conversationId?: st
   if (ctx.mode === "demo" && (/\b(bio|biology|bi107)\b/i.test(text) || courseHint === "BI107")) ensureBi107(ctx);
   const resolved = resolveCourse(ctx, text, courseHint);
   const course = resolved.code;
-  const conv = getConversation(ctx, o.conversationId, courseHint ?? course); const convId = conv.id as string;
+  // One conversation for the owner; a course only helps resolve what was meant.
+  const conv = getConversation(ctx, o.conversationId, null); const convId = conv.id as string;
   const userMsg = addMessage(ctx, convId, { role: "user", text, data: { via: o.via ?? "text", attachmentIds: o.attachmentIds ?? [] } });
   const reply = (text: string, data: unknown = {}, jobId?: string, kind = "text") => ({ conversationId: convId, userMessageId: userMsg, jobId: jobId ?? null, reply: { id: addMessage(ctx, convId, { role: "jarvis", text, data, jobId, kind }), text, spoken: text, data } });
   if (/\bremember\b.*\bjarvis\b|^\s*remember[:,]/i.test(text)) {

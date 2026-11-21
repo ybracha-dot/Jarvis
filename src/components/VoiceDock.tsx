@@ -16,7 +16,7 @@ export function VoiceDock({ course, title = "Ask Jarvis" }: { course?: string | 
   const courses = useQuery<any>("/courses");
   const [selCourse, setSelCourse] = useState<string>(course ?? LS.get("jarvis_course") ?? "");
   const activeCourse = course ?? (selCourse || null);
-  const conv = useQuery<any>(`/assistant/conversation${course ? `?course=${course}` : ""}`, { poll: 2000 });   // the conversation is the owner's, not a course's
+  const conv = useQuery<any>("/assistant/conversation", { poll: 2000 });   // one conversation for the owner, wherever the dock is shown
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [mic, setMic] = useState<"off" | "listening">("off");

@@ -78,7 +78,7 @@ on("POST", "/assistant/message", (c, r) => {
   const b = r.json(z.object({ text: z.string().min(1).max(2000), conversationId: z.string().nullish(), course: z.string().max(60).nullish(), attachmentIds: z.array(z.string()).max(8).optional(), via: z.enum(["voice", "text"]).optional() }));
   const out = handleUtterance(c, b); kick(c.mode); return out;
 });
-on("GET", "/assistant/conversation", (c, r) => { const course = r.query.get("course"); const conv = getConversation(c, r.query.get("id"), course); return { conversation: conv, messages: messages(c, conv.id as string) }; });
+on("GET", "/assistant/conversation", (c, r) => { const conv = getConversation(c, r.query.get("id"), null); return { conversation: conv, messages: messages(c, conv.id as string) }; });
 on("POST", "/attachments", (c, r) => {
   const b = r.json(z.object({ course: z.string().min(1).max(60), name: z.string().min(1).max(120), dataBase64: z.string().max(4_300_000), conversationId: z.string().optional() }));
   return saveAttachment(c, { course: b.course, name: b.name, bytes: Buffer.from(b.dataBase64, "base64"), conversationId: b.conversationId });
