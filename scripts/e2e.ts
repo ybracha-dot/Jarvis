@@ -509,6 +509,84 @@ async function journeyProjects(page: Page) {
   await shot(page, "24-activity-desktop.png");
 }
 
+async function journeyAssistant(page: Page, browser: Browser) {
+  step("Assistant: type the pitch request into the normal Ask Jarvis box");
+  await post("/demo/reset", { confirm: "RESET DEMO" });
+  startWorker(400);
+  await page.goto(base + "/connections"); await page.getByTestId("load-sample").click();
+  await page.getByTestId("sources-panel").getByText(/Mail \(fixture\)/).waitFor();
+  ok((await page.getByTestId("source-row").filter({ hasText: "Blackboard portal" }).innerText()).includes("needs your sign-in"), "Blackboard says it needs your sign-in instead of pretending to read it");
+  ok(/fixture/.test(await page.getByTestId("source-row").filter({ hasText: "Mail (fixture)" }).innerText()), "fixture sources are labelled as fixtures");
+  await page.goto(base + "/");
+  await page.getByTestId("voice-dock").waitFor();
+  ok((await page.getByTestId("examples").locator("button").count()) === 3, "Ask Jarvis offers general example requests");
+  await page.getByTestId("transcript").fill("Pick up where we left off on the pitch and draft my follow-up.");
+  await page.getByTestId("send").click();
+  await page.getByTestId("goal-result-link").waitFor();
+  ok(true, "Jarvis acknowledges the request with a stable result link at once");
+  await shot(page, "30-ask-jarvis-acknowledged-desktop.png");
+  await page.getByTestId("goal-result-link").click();
+  await page.getByTestId("result-title").waitFor();
+  await page.getByTestId("result-body").waitFor({ timeout: 40000 });
+  const body = await page.getByTestId("result-body").innerText();
+  ok(/Wednesday, [A-Z][a-z]{2} \d{1,2}/.test(body), "the saved draft uses the Wednesday decision");
+  ok(!/Confirming Friday|50,000|Sam Ortiz|\$12,000/.test(body), "no other owner's material and no unsupported figure in the draft");
+  ok(/revised budget before demo day/.test(body), "the reason comes from the transcript, quoted");
+  const flags = await page.getByTestId("result-flags").innerText();
+  ok(/Monday.*earlier proposal/.test(flags) && /\$12,000.*only once/.test(flags), "Monday is marked as the older proposal and the $12,000 figure as unsupported");
+  const srcText = await page.getByTestId("result-sources").innerText();
+  ok(/confirms the date/.test(srcText) && /states the reason/.test(srcText) && /fixture/.test(srcText), "sources are listed with their role and their fixture label");
+  ok(!/Design Memo|advising/i.test(srcText), "unrelated school sources were not used");
+  ok(/read/.test(await page.getByTestId("result-reads").innerText()), "the page shows what Jarvis actually read");
+  const resultUrl = page.url();
+  await shot(page, "31-result-draft-desktop.png");
+  await page.getByTestId("result-sources").getByRole("link", { name: /Re: Lantern/ }).click();
+  await page.getByTestId("evidence-quote").waitFor();
+  ok(/Confirming Wednesday/.test(await page.getByTestId("evidence-quote").innerText()), "the source link opens the original with the quote highlighted");
+  await shot(page, "32-evidence-original-desktop.png");
+
+  step("Assistant: the same request from the Office, and the result from the worker");
+  await page.goto(base + "/office");
+  await page.getByTestId("roster-job").filter({ hasText: "Jarvis" }).first().click();
+  await page.getByTestId("inspector-open-result").waitFor();
+  ok(true, "selecting the supervisor in the Office offers the deliverable it produced");
+  await shot(page, "33-office-result-link-desktop.png");
+
+  step("Assistant: change the request from another screen, one job, new version");
+  await page.goto(resultUrl);
+  await page.getByTestId("revise-text").fill("Use the Wednesday decision and keep it to three sentences.");
+  await page.getByTestId("revise-send").click();
+  await page.getByTestId("version-list").waitFor({ timeout: 40000 });
+  ok(/Version 2/.test(await page.getByTestId("version-list").innerText()), "a second version replaced the first as the current result");
+  ok(/Keep it to 3 sentences/.test(await page.getByTestId("result-applied").innerText()), "the page shows the new instruction as applied");
+  ok((await (await fetch(`${base}/api/results`)).json()).results.length === 1, "there is still exactly one result for the request");
+
+  step("Assistant: Get me ready for tomorrow, through the same system");
+  await page.goto(base + "/");
+  await page.getByTestId("transcript").fill("Get me ready for tomorrow");
+  await page.getByTestId("send").click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="goal-result-link"]').length >= 2);
+  await page.getByTestId("goal-result-link").last().click();
+  await page.getByTestId("result-body").waitFor({ timeout: 40000 });
+  const brief = await page.getByTestId("result-body").innerText();
+  ok(/Advising check-in/.test(brief) && /Design Memo/.test(brief), "the brief covers the calendar and the changed notice");
+  ok(!/Hi Dana/.test(brief), "a different request produced a different kind of deliverable");
+  ok(/Blackboard portal/.test(await page.getByTestId("result-unavailable").innerText()), "the brief says Blackboard could not be read and why");
+  ok(/rubric/i.test(await page.getByTestId("result-flags").innerText()), "an unverified rubric is reported, not invented");
+  await shot(page, "34-result-brief-desktop.png");
+  await page.goto(base + "/");
+  await page.getByTestId("today-output").getByText(/Ready for/).first().waitFor();
+  ok(true, "Today lists the finished brief under where the output went");
+  await shot(page, "35-today-after-assistant-desktop.png");
+
+  step("Assistant on the phone");
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const m = await ctx.newPage(); watch(m, "mobile-assistant");
+  await m.goto(resultUrl); await m.getByTestId("result-body").waitFor();
+  ok((await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0, "the result page has no horizontal scroll on the phone");
+  await shot(m, "36-result-mobile.png"); await ctx.close();
+}
+
 async function journeyMobile(browser: Browser) {
   step("Phone width 390x844");
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -929,6 +1007,7 @@ async function main() {
     const only = process.env.E2E_ONLY;
     if (only === "study") { await journeyStudy(browser); }
     else if (only === "projects") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "projects"); await journeyProjects(p); await c.close(); }
+    else if (only === "assistant") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "assistant"); await journeyAssistant(p, browser); await c.close(); }
     else if (only === "mcp") { startWorker(300); await journeyMcp(); }
     else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
     else {
@@ -941,6 +1020,7 @@ async function main() {
     await journeyStudy(browser);
     await journeyMcp();
     await journeyProjects(page);
+    await journeyAssistant(page, browser);
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);

@@ -10,7 +10,7 @@ import { fmtDateTime } from "@/lib/time";
 
 const KIND: Record<string, string> = { draft: "Draft", brief: "Brief", answer: "Answer" };
 const MODE: Record<string, { label: string; tone: "accent" | "amber" | "neutral" }> = { live: { label: "live", tone: "accent" }, imported: { label: "imported by you", tone: "neutral" }, fixture: { label: "fixture", tone: "amber" }, simulated: { label: "simulated", tone: "amber" }, unavailable: { label: "unavailable", tone: "neutral" } };
-const render = (md: string) => md.split("\n").map((l, i) => { const parts = l.split(/(\*\*[^*]+\*\*)/g).map((p, j) => /^\*\*[^*]+\*\*$/.test(p) ? <b key={j} className="font-semibold">{p.slice(2, -2)}</b> : <span key={j}>{p}</span>); return l.trim() === "" ? <div key={i} className="h-3" /> : <p key={i} className={cx("text-[16px] leading-relaxed break-words", /^(- |\d\. )/.test(l) && "pl-1")}>{parts}</p>; });
+const render = (md: string) => md.split("\n").map((l, i) => { const parts = l.split(/(\*\*[^*]+\*\*)/g).map((p, j) => /^\*\*[^*]+\*\*$/.test(p) ? <b key={j} className="font-semibold">{p.slice(2, -2)}</b> : <span key={j}>{p}</span>); return l.trim() === "" ? <div key={i} className="h-3" /> : /^- /.test(l) ? <p key={i} className="text-[16px] leading-relaxed break-words pl-4 -indent-4"><span aria-hidden>• </span>{parts.map((x, k) => (k === 0 ? <span key={k}>{String((x.props as any).children).replace(/^- /, "")}</span> : x))}</p> : <p key={i} className="text-[16px] leading-relaxed break-words">{parts}</p>; });
 
 export default function ResultPage({ params }: { params: Promise<{ id: string }> }) { const { id } = use(params); return <Suspense fallback={<Spinner />}><Result id={id} /></Suspense>; }
 
