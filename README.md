@@ -7,16 +7,16 @@ A general-purpose chief of staff. You say or type an outcome (for example "Get m
 ```bash
 npm install
 npm run dev          # http://127.0.0.1:3000
-npm run worker       # in a second terminal: runs the background jobs
+npm run worker       # in a second terminal: runs the background jobs and checks Blackboard every 15 minutes
 ```
 
-1. **Connections** → **Load the sample workspace** (synthetic club, meetings, emails, a calendar and a changed notice, all labelled *fixture*).
-2. **Today** → in **Ask Jarvis** type or say: *Pick up where we left off on the pitch and draft my follow-up.* Open the result link it gives you at once.
-3. On the result page read the draft, **Check these**, **Where each claim came from** (click a source to see the original with the quote highlighted) and **What Jarvis read for this**. Then ask *Get me ready for tomorrow*.
+**With one real note (about three minutes, nothing leaves your Mac):** open <http://127.0.0.1:3000/try>. Paste one note you choose, add a later correction, ask what was decided. You get a cited answer saved under your project, with the correction winning and the original wording one click away. No key, no login, no model call.
 
-From ordinary Claude (after the connector is set up, `docs/CAPTURE-SETUP.md`): *Use Jarvis to get me ready for tomorrow*, then in a new chat *Show me my latest Jarvis result*. Results are never sent: they are drafts and briefs saved in Jarvis.
+**With the sample workspace:** Connections → *Load the sample workspace*, then in Today's Ask Jarvis box try *Which plumber should I go with…* style questions (the sample has quotes, a club, meetings and a calendar, all labelled *fixture*).
 
-`MORNING.md` has the full handoff: what is verified locally, what needs your accounts, and how to upgrade a ZIP-installed copy without losing data.
+For a decision question Jarvis opens with a recommendation and the next step, shows the calculation line by line from your own quoted wording, says what still depends on you, and can prepare a ready-to-edit draft. Nothing is sent.
+
+`MORNING.md` has the full handoff: the upgrade for a ZIP install, what is verified on fixtures versus a live account, and what still needs you.
 
 ---
 
