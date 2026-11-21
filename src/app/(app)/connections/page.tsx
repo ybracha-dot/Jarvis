@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { KeyRound, RefreshCw, Ban, Copy, Check, ShieldCheck, CircleDashed, CircleCheck } from "lucide-react";
 import { api, useQuery, useAction } from "@/components/api";
 import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Notice, Field, inputCls, cx } from "@/components/ui";
@@ -45,7 +46,7 @@ export default function ConnectionsPage() {
             <Button variant="primary" busy={create.busy} disabled={!label.trim()} onClick={() => create.run()} data-testid="token-create"><KeyRound className="size-4" />Create</Button>
           </div>
           {fresh && <div className="rounded-lg border border-amber-dim bg-[#1a1508] p-3 space-y-2" data-testid="token-fresh"><p className="text-[14px] text-[#f6d7a1]">Copy this now. It will not be shown again.</p><div className="flex gap-2 items-center flex-wrap"><code className="mono text-[13px] break-all bg-bg rounded px-2 py-1 border border-line flex-1 min-w-0" data-testid="token-value">{fresh.token}</code><CopyBtn text={fresh.token} /><Button size="sm" variant="ghost" onClick={() => setFresh(null)}>Hide</Button></div></div>}
-          {d.tokens.length > 0 && <ul className="space-y-2" data-testid="token-list">{d.tokens.map((t: any) => <li key={t.id} className="flex items-center gap-2 flex-wrap rounded-lg border border-line px-3 py-2 text-[14px]"><b className="font-medium">{t.label}</b><Badge tone={t.status === "active" ? "accent" : "neutral"}>{t.status}</Badge><Badge>{t.scopes.includes("write") ? "read + save" : "read only"}</Badge><span className="text-muted text-[13px]">{t.lastUsedAt ? `used ${fmtDateTime(t.lastUsedAt)}` : "never used"}{t.expiresAt ? ` · expires ${fmtDateTime(t.expiresAt)}` : ""}</span>
+          {d.tokens.length > 0 && <ul className="space-y-2" data-testid="token-list">{d.tokens.map((t: any) => <li key={t.id} className="flex items-center gap-2 flex-wrap rounded-lg border border-line px-3 py-2 text-[14px]"><b className="font-medium">{t.label}</b><Badge tone={t.status === "active" ? "accent" : "neutral"}>{t.status}</Badge><Badge>{t.scopes.includes("write") ? "read + save" : "read only"}</Badge><span className="text-muted text-[13px]">{t.lastUsedAt ? `used ${fmtDateTime(t.lastUsedAt)}` : "never used"}{t.lastClient ? ` · client says it is ${t.lastClient}` : ""}{t.expiresAt ? ` · expires ${fmtDateTime(t.expiresAt)}` : ""}</span>
             {t.status === "active" && <span className="ml-auto flex gap-1.5"><Button size="sm" busy={rotate.busy} onClick={() => rotate.run(t.id)}><RefreshCw className="size-4" />Rotate</Button><Button size="sm" variant="danger" busy={revoke.busy} onClick={() => revoke.run(t.id)}><Ban className="size-4" />Revoke</Button></span>}</li>)}</ul>}
         </Step>
         <Step n={2} done={!!p?.written} title="Add Jarvis to Claude as a connector">
@@ -74,10 +75,8 @@ export default function ConnectionsPage() {
         <ul className="space-y-2">{srcs.data?.sources.map((s: any) => <SourceRow key={s.id} s={s} />)}{srcs.data?.sources.length === 0 && <li className="text-[15px] text-muted">Nothing connected yet. Import a note, a transcript or an email below{sess.data?.mode !== "personal" ? ", or load the sample workspace" : ""}.</li>}</ul>
         {sess.data?.mode !== "personal" && !srcs.data?.sources.some((s: any) => s.mode === "fixture") && <div className="mt-3"><SampleLoader /></div>}
         <ImportForm /></section>
-      <section aria-label="Blackboard"><SectionTitle>Blackboard</SectionTitle><Card className="p-4 space-y-2 text-[15px]" data-testid="blackboard-card">
-        <p><b className="font-medium">Status:</b> needs your sign-in on this computer. Jarvis has no stored Blackboard login and none is asked for here.</p>
-        <p className="text-muted text-[14px]">Reading the portal needs a signed-in session, with Duo, that only you can start. That reader is not built into this version, so nothing from the portal is read today. Until then Jarvis uses what you can give it: forward or paste Blackboard&apos;s notification emails below, import the course calendar file under Sources, or paste an export. If an email says a rubric changed but does not include it, Jarvis reports the change and leaves the requirements unverified.</p>
-        <p className="text-muted text-[14px]">Any request that needed Blackboard still finishes with what is available, lists Blackboard under &ldquo;could not read&rdquo;, and has a <b className="font-medium">Check again</b> button once you have imported something.</p></Card></section>
+      <BlackboardCard />
+      <RoundTripCard />
       <section aria-label="Disconnect"><SectionTitle>Disconnect</SectionTitle><Card className="p-4 text-[14px] space-y-1.5"><p>Revoke the token above. It stops working immediately, even in a Claude conversation that is already open.</p><p>Then remove the connector in Claude: Settings, Connectors, Jarvis, Remove. What was saved stays in Jarvis until you forget it.</p></Card></section>
     </div>
   );
@@ -107,3 +106,48 @@ const PROJECT_INSTRUCTION = `When I ask for something that depends on earlier wo
 3. Call submit_goal with my request in my own words and a stable dedupKey. Tell me the receipt. Do not wait for it to finish.
 4. Later, or in a fresh chat, call get_goal and get_result and show me the result with its source links. If I want it changed, call revise_goal.
 Jarvis can only read what I have authorized. Never send anything on my behalf; Jarvis drafts, I decide.`;
+
+const BB_STATE: Record<string, { label: string; tone: "accent" | "amber" | "danger" | "neutral" }> = { ok: { label: "connected: last read succeeded", tone: "accent" }, needs_signin: { label: "needs your sign-in", tone: "amber" }, stale: { label: "stale", tone: "amber" }, failed: { label: "could not read", tone: "danger" }, pending: { label: "saved, not read yet", tone: "neutral" }, not_configured: { label: "not connected", tone: "neutral" } };
+function BlackboardCard() {
+  const q = useQuery<any>("/blackboard", { poll: 4000 }); const [url, setUrl] = useState(""); const [check, setCheck] = useState<any>(null); const [msg, setMsg] = useState<string | null>(null);
+  const test = useAction(async () => { setCheck(await api("/blackboard/check", { body: { url } })); });
+  const save = useAction(async () => { const r = await api("/blackboard/save", { body: { url } }); setCheck(r.check); setMsg(r.saved ? `Saved and read. ${r.read?.message ?? ""}` : null); if (r.saved) setUrl(""); });
+  const read = useAction(async () => { const r = await api("/blackboard/read", { body: {} }); setMsg(r.message); });
+  const remove = useAction(async () => { await api("/blackboard/remove", { body: {} }); setMsg("The link was removed from this computer."); });
+  const st = q.data; const bs = BB_STATE[st?.state ?? "not_configured"] ?? BB_STATE.pending;
+  return (
+    <section aria-label="Blackboard" data-testid="blackboard-card"><SectionTitle>Blackboard</SectionTitle>
+      <Card className="p-4 space-y-3 text-[15px]">
+        <div className="flex items-center gap-2 flex-wrap"><Badge tone={bs.tone} data-testid="bb-state">{bs.label}</Badge>{st?.linkHint && <span className="mono text-[13px] text-muted">{st.linkHint}</span>}<span className="text-[13px] text-muted">{st?.lastSuccessAt ? `last successful read ${fmtDateTime(st.lastSuccessAt)}` : "never read"}{st?.lastAttemptAt && st.lastAttemptAt !== st.lastSuccessAt ? ` · last attempt ${fmtDateTime(st.lastAttemptAt)}` : ""}</span></div>
+        {st?.message && <Notice>{st.message}</Notice>}
+        <p className="text-[14px] text-muted"><b className="text-fg font-medium">What this reads:</b> {st?.coverage} It uses the read-only calendar link that Blackboard gives a signed-in student. Jarvis never sees your password or Duo, and a saved link alone does not mean connected: it shows connected only after a read succeeds.</p>
+        <ol className="text-[14px] text-muted list-decimal pl-5 space-y-0.5"><li>In Blackboard (the official site, signed in with Duo), open Calendar and copy the calendar link.</li><li>Paste it below and press <b className="text-fg font-medium">Check the link</b>. Nothing is saved yet.</li><li>Press <b className="text-fg font-medium">Save and read now</b>. Jarvis then rechecks every 15 minutes while the worker runs.</li></ol>
+        <Field label="Calendar link" hint="Treat it like a password: anyone with it can read your calendar. It is stored only on this computer and never shown again."><input className={inputCls} type="password" autoComplete="off" value={url} onChange={(e) => { setUrl(e.target.value); setCheck(null); }} data-testid="bb-url" placeholder="https://…" /></Field>
+        <div className="flex gap-2 flex-wrap"><Button busy={test.busy} disabled={url.trim().length < 12} onClick={() => test.run()} data-testid="bb-check">Check the link</Button><Button variant="primary" busy={save.busy} disabled={url.trim().length < 12} onClick={() => save.run()} data-testid="bb-save">Save and read now</Button>
+          {st?.configured && <Button busy={read.busy} onClick={() => read.run()} data-testid="bb-read">{st.state === "needs_signin" ? "I pasted a fresh link. Read again" : "Read now"}</Button>}{st?.configured && <Button variant="ghost" busy={remove.busy} onClick={() => remove.run()}>Disconnect</Button>}</div>
+        {(test.error || save.error || read.error) && <ErrorBox error={(test.error || save.error || read.error)!} />}
+        {check && <Notice tone={check.ok ? "accent" : "amber"}><span data-testid="bb-check-result">{check.message}</span></Notice>}{msg && <Notice tone="accent">{msg}</Notice>}
+        <p className="text-[13px] text-muted">Your own Blackboard account: <b className="font-medium">{st?.ownerAccount ?? "pending"}</b>. Until then Jarvis uses notification emails or files you import below.</p>
+      </Card></section>
+  );
+}
+function RoundTripCard() {
+  const q = useQuery<any>("/roundtrip", { poll: 2500 }); const [project, setProject] = useState("Round-trip check");
+  const start = useAction(async () => { await api("/roundtrip", { body: { project } }); });
+  const edit = useAction(async (id: string) => { await api(`/roundtrip/${id}/edit`, { body: {} }); });
+  const t = q.data?.trip;
+  return (
+    <section aria-label="Round trip with Claude" data-testid="roundtrip"><SectionTitle>Prove the round trip with your Claude account</SectionTitle>
+      <Card className="p-4 space-y-3">
+        <p className="text-[14px] text-muted">Three messages. Claude saves a project decision, you change it in Jarvis, and a <b className="text-fg font-medium">new</b> Claude chat reads the changed decision with its source. Each step gets a timestamp and the client name it reported. A local test client is labelled as one: it proves the connector, not your account.</p>
+        {!t || t.complete ? <div className="flex gap-2 items-end flex-wrap"><Field label="Project for the check"><input className={inputCls} value={project} onChange={(e) => setProject(e.target.value)} data-testid="rt-project" /></Field><Button variant="primary" busy={start.busy} disabled={project.trim().length < 2} onClick={() => start.run()} data-testid="rt-start">{t ? "Run it again" : "Start the round trip"}</Button></div> : null}
+        {start.error && <ErrorBox error={start.error} />}
+        {t && <ol className="space-y-3 text-[14px]" data-testid="rt-steps">
+          <li className="flex gap-2"><span aria-hidden>{t.written ? "✔" : "○"}</span><div className="min-w-0 flex-1"><b className="font-medium">1. In a Claude chat with the Jarvis connector, send:</b><pre className="mono text-[13px] whitespace-pre-wrap rounded-lg bg-bg border border-line p-2.5 mt-1 select-all" data-testid="rt-say-write">{t.say.write}</pre>{t.written && <p className="text-accent mt-1">Received {fmtDateTime(t.written.at)} from {t.written.client}.</p>}</div></li>
+          <li className="flex gap-2"><span aria-hidden>{t.edited ? "✔" : "○"}</span><div className="min-w-0 flex-1"><b className="font-medium">2. Change it in Jarvis.</b> This replaces the decision with <span className="mono">{t.valueB}</span>.<div className="mt-1"><Button size="sm" busy={edit.busy} disabled={!t.written || !!t.edited} onClick={() => edit.run(t.id)} data-testid="rt-edit">Change the decision</Button> <Link className="text-accent underline underline-offset-2 ml-2" href={`/projects/${t.projectId}`}>Open the project</Link></div>{t.edited && <p className="text-accent mt-1">Changed {fmtDateTime(t.edited.at)}.</p>}{edit.error && <ErrorBox error={edit.error} />}</div></li>
+          <li className="flex gap-2"><span aria-hidden>{t.read ? "✔" : "○"}</span><div className="min-w-0 flex-1"><b className="font-medium">3. Open a new Claude chat and send:</b><pre className="mono text-[13px] whitespace-pre-wrap rounded-lg bg-bg border border-line p-2.5 mt-1 select-all" data-testid="rt-say-read">{t.say.read}</pre>{t.read ? <p className={t.read.sawChange ? "text-accent mt-1" : "text-amber mt-1"}>{t.read.sawChange ? `Read ${fmtDateTime(t.read.at)} by ${t.read.client}, and it saw your change (${t.read.origin === "jarvis-ui" ? "edited in Jarvis" : t.read.origin}).` : "Read, but it did not see your change."}</p> : <p className="text-muted mt-1">Claude should quote <span className="mono">{t.valueB}</span> and say it was edited in Jarvis.</p>}</div></li>
+        </ol>}
+        {t?.complete && <Notice tone="accent"><span data-testid="rt-verdict">{t.verdict}</span></Notice>}
+      </Card></section>
+  );
+}

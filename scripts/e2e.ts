@@ -18,7 +18,7 @@ const stopWorker = (sig: NodeJS.Signals = "SIGKILL") => { if (worker?.pid) { try
 function startWorker(pace: number) {
   if (!dataDir) return;
   stopWorker();
-  worker = spawn("npx", ["tsx", "scripts/worker.ts"], { env: { ...process.env, JARVIS_DATA_DIR: dataDir, JARVIS_JOB_PACE_MS: String(pace), JARVIS_JOB_LEASE_MS: "3000" }, stdio: "ignore", detached: true });
+  worker = spawn("npx", ["tsx", "scripts/worker.ts"], { env: { ...process.env, JARVIS_DATA_DIR: dataDir, JARVIS_JOB_PACE_MS: String(pace), JARVIS_JOB_LEASE_MS: "3000", JARVIS_ALLOW_LOCAL_FEEDS: "1" }, stdio: "ignore", detached: true });
 }
 let restarting = false;
 async function restartServer() { restarting = true; const d = dataDir!; stopWorker(); if (server?.pid) { try { process.kill(-server.pid, "SIGTERM"); } catch { /* gone */ } } await new Promise((r) => setTimeout(r, 1200)); await startServer(d); restarting = false; }
@@ -33,7 +33,7 @@ const step = (s: string) => { steps.push(s); console.log(`\n# ${s}`); };
 async function startServer(reuseDir?: string) {
   if (process.env.E2E_URL) return;
   const dir = reuseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-e2e-")); dataDir = dir;
-  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...process.env, JARVIS_DATA_DIR: dir, JARVIS_INAPP_RUNNER: "0", JARVIS_MCP_TOKEN: "e2e-token-0123456789abcdef" }, stdio: "ignore", detached: true });
+  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...process.env, JARVIS_DATA_DIR: dir, JARVIS_INAPP_RUNNER: "0", JARVIS_MCP_TOKEN: "e2e-token-0123456789abcdef", JARVIS_ALLOW_LOCAL_FEEDS: "1" }, stdio: "ignore", detached: true });
   for (let i = 0; i < 60; i++) { try { const r = await fetch(`${base}/api/health`); if (r.ok) return; } catch { /* waiting */ } await new Promise((r) => setTimeout(r, 500)); }
   throw new Error("Server did not start. Run npm run build first.");
 }
@@ -609,6 +609,95 @@ async function journeyQuizLatency(page: Page) {
   await page.unroute(/\/api\/quiz\/[^/]+$/).catch(() => {});
 }
 
+async function journeyDecision(page: Page, browser: Browser) {
+  step("Decision: ask which provider, with evidence the app has never seen");
+  await post("/demo/reset", { confirm: "RESET DEMO" }); startWorker(300);
+  const imp = (kind: string, title: string, text: string, day: string, author?: string) => post("/evidence/import", { kind, title, text, at: `2026-11-${day}T15:00:00.000Z`, author, label: author ? `Mail from ${author}` : "Notes" });
+  await imp("email", "Quote for bathroom re-pipe", "Hi Alex, Bellini Plumbing quote for the bathroom re-pipe: $4,800 including the permit. We can start December 7.", "09", "Marco Bellini");
+  await imp("email", "Revised quote after site visit", "Alex, after seeing the second-floor pipes I have to revise the bathroom re-pipe quote to $5,350, plus a permit estimated at $400. We can still start December 7.", "11", "Marco Bellini");
+  await imp("email", "Okafor & Sons estimate", "Okafor & Sons will do the bathroom re-pipe for $5,100 with the permit included. We can start November 30.", "12", "Tom Okafor");
+  await imp("note", "Bathroom plan", "Budget cap $5,500 all-in. Need it done before the in-laws arrive December 20. Only two quotes so far.", "15");
+  await page.goto(base + "/"); await page.getByTestId("transcript").fill("Which plumber should I go with for the bathroom re-pipe, and what will it really cost? Draft the follow-up.");
+  await page.getByTestId("send").click(); await page.waitForFunction(() => document.querySelectorAll('[data-testid="goal-result-link"]').length >= 1);
+  await page.getByTestId("goal-result-link").last().click(); await page.getByTestId("result-body").waitFor({ timeout: 40000 });
+  const body = await page.getByTestId("result-body").innerText();
+  ok(/^\s*RECOMMENDATION|Recommendation/i.test(body) && /Okafor & Sons fits best on your stated budget/.test(body), "the answer opens with a recommendation that names the option and the criterion");
+  ok(body.indexOf("Next step") > 0 && body.indexOf("Next step") < body.indexOf("Why"), "the next step comes before the reasoning");
+  const calc = (await page.getByTestId("calculation").textContent()) ?? "";
+  ok(/about \$5,750/.test(calc) && /\$5,100/.test(calc) && /\$250 over your \$5,500 limit/.test(calc) && /\$400 under your \$5,500 limit/.test(calc), "the calculation shows both totals and how far each is from the cap");
+  ok(/\$4,800/.test(calc) && /replaced/.test(calc), "the superseded quote is kept as history");
+  ok(/start December 7, which does not say when it will be finished|unconfirmed/.test(calc + body), "a start date is not treated as a completion date");
+  ok(/rules/.test(await page.getByTestId("exec-mode").innerText()), "the execution mode is labelled");
+  const draft = page.getByTestId("draft-text"); await draft.waitFor();
+  ok(/completed before December 20/.test(await draft.inputValue()), "the draft asks the provider to confirm completion before the deadline");
+  await draft.fill("Hi Tom, my own words about the finish date."); await page.getByTestId("draft-save").click(); await page.getByText(/Saved with this version/).waitFor();
+  await page.reload(); await page.getByTestId("draft-text").waitFor(); ok(/my own words/.test(await page.getByTestId("draft-text").inputValue()), "the edited draft survives a reload");
+  await shot(page, "40-decision-desktop.png");
+  const m = await (await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })).newPage(); watch(m, "mobile-decision");
+  await m.goto(page.url()); await m.getByTestId("result-body").waitFor(); ok((await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0, "the decision page has no horizontal scroll on the phone"); await shot(m, "41-decision-mobile.png");
+  ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole run made zero model calls");
+}
+
+async function journeyPrivate(browser: Browser) {
+  step("Private run: one note, one correction, one question (invented material)");
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
+  const p = await ctx.newPage(); watch(p, "private"); startWorker(300);
+  await p.goto(base + "/try"); await p.getByTestId("try-privacy").waitFor();
+  ok(/local-only/.test(await p.getByTestId("try-privacy").innerText()) && (await p.getByTestId("try-switch").count()) === 0, "the page says everything stays local and this is the private workspace");
+  await p.getByTestId("try-project").fill("Garden co-op"); await p.getByTestId("try-title").fill("Seed swap plan");
+  await p.getByTestId("try-text").fill("We will rent the community hall on March 12 for the seed swap. The hall fee is $180. Maya brings the folding tables."); await p.getByTestId("try-save1").click(); await p.getByText(/local-only/).first().waitFor();
+  await p.getByTestId("try-correction").fill("Correction: the seed swap moved to March 19. The hall fee is now $210."); await p.getByTestId("try-save2").click(); await p.getByText(/Saved as a correction/).waitFor();
+  await p.getByTestId("try-ask").click(); await p.getByTestId("try-done").waitFor({ timeout: 40000 });
+  await p.getByTestId("try-open-result").click(); await p.getByTestId("result-body").waitFor();
+  const t = await p.getByTestId("result-body").innerText(); ok(/Mar 19/.test(t) && /\$210/.test(t) && /replaced/.test(t), "the corrected date and amount win and the old ones are marked replaced");
+  const src = await p.getByTestId("result-sources").innerText(); ok(/original wording, replaced/.test(src) && /Notes I imported/.test(src) && !/fixture/i.test(src), "the original wording is linked and no fixture source is involved");
+  await p.getByTestId("result-sources").getByRole("link", { name: "Seed swap plan", exact: true }).first().click(); await p.getByTestId("evidence-body").waitFor(); ok(/March 12/.test(await p.getByTestId("evidence-body").innerText()), `the link opens the original note (${(await p.getByTestId("evidence-body").innerText()).slice(0, 80)})`);
+  await p.goto(base + "/connections"); const row = await p.getByTestId("source-row").filter({ hasText: "Notes I imported" }).innerText(); ok(/imported by you/.test(row) && /last read/.test(row), "the source shows its origin and when it was last read");
+  await shot(p, "42-private-trial-desktop.png"); await ctx.close();
+}
+
+async function journeyBlackboard(browser: Browser) {
+  step("Blackboard: calendar feed protocol against a local server (the owner's account stays pending)");
+  const http = await import("node:http"); let mode: "ok" | "moved" | "401" = "ok"; const hits: string[] = [];
+  const ics = (due: string) => ["BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", "UID:u1", "SUMMARY:Seminar paper due", `DTSTART;TZID=America/New_York:${due}`, "LAST-MODIFIED:20261114T150000Z", "DESCRIPTION:Submit via the course site.", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+  const srv = http.createServer((req, res) => { hits.push(String(req.headers["if-none-match"] ?? "")); if (mode === "401") { res.writeHead(401); return res.end("no"); } const body = ics(mode === "ok" ? "20261119T170000" : "20261120T170000"); const etag = `"${mode}"`; if (req.headers["if-none-match"] === etag) { res.writeHead(304); return res.end(); } res.writeHead(200, { "content-type": "text/calendar", etag }); res.end(body); });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r)); const link = `http://127.0.0.1:${(srv.address() as any).port}/feed/SECRET-LINK-XYZ789`;
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]); const p = await ctx.newPage(); watch(p, "blackboard"); startWorker(300);
+  await p.goto(base + "/connections"); await p.getByTestId("blackboard-card").waitFor();
+  ok(/not connected/.test(await p.getByTestId("bb-state").innerText()), "Blackboard starts as not connected");
+  await p.getByTestId("bb-url").fill(link); await p.getByTestId("bb-check").click(); await p.getByTestId("bb-check-result").waitFor();
+  ok(/Readable: 1 events/.test(await p.getByTestId("bb-check-result").innerText()) && /does not include rubrics/.test(await p.getByTestId("bb-check-result").innerText()), "the setup check reads the feed and states exactly what it covers");
+  ok(/not connected/.test(await p.getByTestId("bb-state").innerText()), "a successful check alone does not make it connected");
+  await p.getByTestId("bb-save").click(); await p.getByTestId("bb-state").filter({ hasText: /connected: last read succeeded/ }).waitFor({ timeout: 20000 });
+  ok(!(await p.locator("body").innerText()).includes("SECRET-LINK-XYZ789"), "the link is never shown back on the page");
+  mode = "moved"; await p.getByTestId("bb-read").click(); await p.getByText(/1 changed/).first().waitFor({ timeout: 15000 }); ok(hits.some((h) => h === '"ok"'), "the second read was a conditional request");
+  mode = "401"; await p.getByTestId("bb-read").click(); await p.getByTestId("bb-state").filter({ hasText: /needs your sign-in/ }).waitFor({ timeout: 15000 });
+  ok(/Duo/.test(await p.locator("body").innerText()), "when it fails the page says to sign in on Blackboard, including Duo, and paste a fresh link");
+  await p.goto(base + "/office"); await p.getByTestId("handoff-needs").getByText(/Blackboard did not accept the calendar link/).waitFor({ timeout: 15000 }); ok(true, "the Office shows the pending sign-in as something that needs you");
+  await p.goto(base + "/connections"); mode = "moved"; await p.getByTestId("bb-read").click(); await p.getByTestId("bb-state").filter({ hasText: /connected: last read succeeded/ }).waitFor({ timeout: 15000 }); ok(true, "after a fresh link works the source is connected again");
+  await shot(p, "43-blackboard-desktop.png"); srv.close(); await ctx.close();
+}
+
+async function journeyRoundTrip(browser: Browser) {
+  step("Claude round trip: exact messages, receipts, and what counts as a real account");
+  await post("/demo/reset", { confirm: "RESET DEMO" });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1000 } }); const p = await ctx.newPage(); watch(p, "roundtrip");
+  await p.goto(base + "/connections"); await p.getByTestId("token-create").click(); await p.getByTestId("token-fresh").waitFor(); const token = (await p.getByTestId("token-value").innerText()).trim();
+  await p.getByTestId("rt-project").fill("Round trip check"); await p.getByTestId("rt-start").click(); await p.getByTestId("rt-say-write").waitFor();
+  const w = await p.getByTestId("rt-say-write").innerText(); ok(/apply_project_update/.test(w) && /ALPHA-RT-[0-9A-F]{4}/.test(w), "the exact message to send in Claude names the tool and a unique code");
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js"); const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+  const open = async (name: string) => { const c = new Client({ name, version: "1" }); await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } })); return c; };
+  const code = w.match(/RT-[0-9A-F]{4}/)![0]; const a = await open("claude-ai"); await a.callTool({ name: "apply_project_update", arguments: { project: "Round trip check", eventId: `${code}-1`, changes: [{ op: "decide", key: "roundtrip-check", text: `ALPHA-${code}` }] } });
+  await p.getByText(/Received .* from claude-ai/).waitFor({ timeout: 10000 }); await p.getByTestId("rt-edit").click(); await p.getByText(/Changed /).first().waitFor({ timeout: 10000 }); await a.close();
+  const b = await open("claude-ai"); await b.callTool({ name: "get_project_context", arguments: { project: "Round trip check" } });
+  await p.getByTestId("rt-verdict").waitFor({ timeout: 10000 }); ok(/reported themselves as Claude/.test(await p.getByTestId("rt-verdict").innerText()) && /cannot verify an account/.test(await p.getByTestId("rt-verdict").innerText()), "the receipt says both ends called themselves Claude and that Jarvis cannot verify an account");
+  ok(/saw your change/.test(await p.getByTestId("rt-steps").innerText()), "the third step shows the fresh read saw the change made in Jarvis"); await b.close();
+  await p.getByTestId("rt-start").click(); await p.waitForFunction((old) => { const e = document.querySelector('[data-testid="rt-say-write"]'); return !!e && e.textContent !== old; }, w).catch(async (e) => { throw new Error(`${e.message}\n${(await p.locator("main").innerText()).slice(0, 1500)}`); }); const code2 = (await p.getByTestId("rt-say-write").innerText()).match(/RT-[0-9A-F]{4}/)![0];
+  const t = await open("e2e-test-client"); await t.callTool({ name: "apply_project_update", arguments: { project: "Round trip check", eventId: `${code2}-1`, changes: [{ op: "decide", key: "roundtrip-check", text: `ALPHA-${code2}` }] } }); await p.getByTestId("rt-edit").click(); await p.getByText(/Changed /).first().waitFor(); await t.callTool({ name: "get_project_context", arguments: { project: "Round trip check" } });
+  await p.getByTestId("rt-verdict").waitFor({ timeout: 10000 }); ok(/local test client/.test(await p.getByTestId("rt-verdict").innerText()) && /does not prove your Claude account/.test(await p.getByTestId("rt-verdict").innerText()), "a test client is labelled as one and does not count as the account"); await t.close();
+  await shot(p, "44-roundtrip-desktop.png"); await ctx.close();
+}
+
 async function journeyMobile(browser: Browser) {
   step("Phone width 390x844");
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -1032,6 +1121,10 @@ async function main() {
     else if (only === "projects") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "projects"); await journeyProjects(p); await c.close(); }
     else if (only === "assistant") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "assistant"); await journeyAssistant(p, browser); await c.close(); }
     else if (only === "quizlatency") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "quiz"); startWorker(300); await journeyQuizLatency(p); await c.close(); }
+    else if (only === "decision") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "decision"); await journeyDecision(p, browser); await c.close(); }
+    else if (only === "private") { await journeyPrivate(browser); }
+    else if (only === "blackboard") { await journeyBlackboard(browser); }
+    else if (only === "roundtrip") { await journeyRoundTrip(browser); }
     else if (only === "mcp") { startWorker(300); await journeyMcp(); }
     else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
     else {
@@ -1046,6 +1139,10 @@ async function main() {
     await journeyProjects(page);
     await journeyAssistant(page, browser);
     await journeyQuizLatency(page);
+    await journeyDecision(page, browser);
+    await journeyPrivate(browser);
+    await journeyBlackboard(browser);
+    await journeyRoundTrip(browser);
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);

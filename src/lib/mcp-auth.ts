@@ -59,7 +59,7 @@ export function startProbe(ctx: Ctx) {
   return probeState(ctx, id)!;
 }
 export function probeState(ctx: Ctx, id?: string) {
-  const p = id ? get(ctx.db, "SELECT * FROM connection_probes WHERE id=? AND owner_id=?", id, ctx.owner) : get(ctx.db, "SELECT * FROM connection_probes WHERE owner_id=? ORDER BY created_at DESC LIMIT 1", ctx.owner); if (!p) return null;
+  const p = id ? get(ctx.db, "SELECT * FROM connection_probes WHERE id=? AND owner_id=?", id, ctx.owner) : get(ctx.db, "SELECT * FROM connection_probes WHERE owner_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1", ctx.owner); if (!p) return null;
   return { id: p.id as string, code: p.code as string, createdAt: p.created_at as string, written: p.written_at ? { at: p.written_at as string, via: p.written_client as string | null, noteId: p.note_id as string | null } : null, edited: p.edited_at ? { at: p.edited_at as string, marker: p.edit_marker as string } : null, read: p.read_at ? { at: p.read_at as string, via: p.read_client as string | null, sawMarker: p.read_stamp === p.edit_marker } : null,
     complete: !!(p.written_at && p.edited_at && p.read_at && p.read_stamp === p.edit_marker),
     say: { write: `Use Jarvis to save this exactly: "Remember for Jarvis: connection check ${p.code}"`, read: `Ask Jarvis what it has saved for connection check ${p.code}, and tell me the marker word it shows.` } };

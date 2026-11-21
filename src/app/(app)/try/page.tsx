@@ -7,7 +7,7 @@ import { Button, Card, Badge, Notice, Field, ErrorBox, Spinner, inputCls, cx } f
 
 const today = () => new Date().toISOString().slice(0, 10);
 export default function TryPage() {
-  const sess = useQuery<any>("/session"); const demo = sess.data?.mode !== "personal";
+  const sess = useQuery<any>("/session"); const demo = !!sess.data && sess.data.mode !== "personal";
   const [s1, setS1] = useState({ project: "", title: "", text: "", date: today() }); const [n1, setN1] = useState<any>(null);
   const [s2, setS2] = useState({ title: "", text: "" }); const [n2, setN2] = useState<any>(null);
   const [q, setQ] = useState("What is the current plan, and what changed since the first note?"); const [goal, setGoal] = useState<any>(null);

@@ -15,7 +15,7 @@ export function startRoundTrip(ctx: Ctx, o: { project: string }) {
   return roundTripState(ctx, id)!;
 }
 export function roundTripState(ctx: Ctx, id?: string) {
-  const r = id ? get(ctx.db, "SELECT * FROM roundtrips WHERE id=? AND owner_id=?", id, ctx.owner) : get(ctx.db, "SELECT * FROM roundtrips WHERE owner_id=? ORDER BY created_at DESC LIMIT 1", ctx.owner); if (!r) return null;
+  const r = id ? get(ctx.db, "SELECT * FROM roundtrips WHERE id=? AND owner_id=?", id, ctx.owner) : get(ctx.db, "SELECT * FROM roundtrips WHERE owner_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1", ctx.owner); if (!r) return null;
   const w = classifyClient(r.written_client as string | null), rd = classifyClient(r.read_client as string | null);
   const done = !!(r.written_at && r.edited_at && r.read_at && r.read_saw === r.value_b);
   const asClaude = done && w.kind === "claude" && rd.kind === "claude";
@@ -39,8 +39,8 @@ export function editRoundTrip(ctx: Ctx, id: string) {
 }
 /** Hook for get_project_context: a read that shows the Jarvis-side change counts as the third step. */
 export function noteRoundTripRead(ctx: Ctx, ctxp: { project: { id: string }; current: { key: string; text: string; origin: string }[] }, client: string | null) {
-  const r = get(ctx.db, "SELECT * FROM roundtrips WHERE owner_id=? AND project_id=? AND edited_at IS NOT NULL AND read_at IS NULL ORDER BY created_at DESC LIMIT 1", ctx.owner, ctxp.project.id); if (!r) return;
+  const r = get(ctx.db, "SELECT * FROM roundtrips WHERE owner_id=? AND project_id=? AND edited_at IS NOT NULL AND read_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1", ctx.owner, ctxp.project.id); if (!r) return;
   const f = ctxp.current.find((x) => x.key === KEY); if (!f) return;
   run(ctx.db, "UPDATE roundtrips SET read_at=?, read_client=?, read_saw=?, read_origin=? WHERE id=?", ctx.now().toISOString(), client ?? "unknown client", f.text, f.origin, r.id);
 }
-export const roundTrips = (ctx: Ctx) => all(ctx.db, "SELECT id FROM roundtrips WHERE owner_id=? ORDER BY created_at DESC LIMIT 5", ctx.owner).map((r) => roundTripState(ctx, r.id as string)!);
+export const roundTrips = (ctx: Ctx) => all(ctx.db, "SELECT id FROM roundtrips WHERE owner_id=? ORDER BY created_at DESC, rowid DESC LIMIT 5", ctx.owner).map((r) => roundTripState(ctx, r.id as string)!);
