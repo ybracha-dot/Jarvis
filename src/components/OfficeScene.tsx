@@ -128,7 +128,7 @@ function DeskFront({ x, y, label, sub, glow, tone, selected }: { x: number; y: n
       {/* nameplate: compact, high contrast */}
       <rect x={x - 54} y={y + 15} width="108" height="31" rx="2" fill="#0b1630" stroke={selected ? "#67d4ff" : tone} strokeWidth={selected ? 3 : 2} />
       <text x={x} y={y + 29} textAnchor="middle" fill="#f6f1e6" fontSize="14" fontWeight="700" letterSpacing="1" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{label.toUpperCase()}</text>
-      <text x={x} y={y + 42} textAnchor="middle" fill="#bcd0ee" fontSize="12" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{sub.length > 19 ? `${sub.slice(0, 18)}…` : sub}</text>
+      <text x={x} y={y + 42} textAnchor="middle" fill="#bcd0ee" fontSize="12" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{sub.length > 17 ? `${sub.slice(0, 16)}…` : sub}</text>
     </g>
   );
 }

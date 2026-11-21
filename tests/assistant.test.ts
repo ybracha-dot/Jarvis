@@ -219,3 +219,25 @@ describe("QA regression: unseen requests over emails and notes (first attempt fa
     expect(v.body).toMatch(/Alex: I will pay it/); expect(v.body).toMatch(/Priya Shah: I will send you the 1099/); expect(v.flags.some((f: any) => f.kind === "owner_unknown")).toBe(true);
   });
 });
+
+
+// Regression from QA round 2 (verdict: partial). Kept as the QA agent described it.
+describe("QA round 2 regression: which plumber and what will it cost", () => {
+  it("keeps the user's own budget note, carries the permit caveat, and does not turn availability into promises", async () => {
+    const { ctx, clock } = fresh();
+    imp(ctx, { kind: "email", title: "Quote for bathroom re-pipe", text: "Hi Alex, Bellini Plumbing quote for the bathroom re-pipe: $4,800 including the permit. We can start December 7.", at: "2026-11-09T15:00:00.000Z", author: "Marco Bellini" });
+    imp(ctx, { kind: "email", title: "Revised quote after site visit", text: "Alex, after seeing the second-floor pipes I have to revise the bathroom re-pipe quote to $5,350. The permit is not included, which is about $400 extra. We can still start December 7.", at: "2026-11-11T15:00:00.000Z", author: "Marco Bellini" });
+    imp(ctx, { kind: "email", title: "Okafor & Sons estimate", text: "Okafor & Sons will do the bathroom re-pipe for $5,100 with the permit included. We can start November 30.", at: "2026-11-12T15:00:00.000Z", author: "Tom Okafor" });
+    imp(ctx, { kind: "note", title: "Bathroom plan", text: "Budget cap $5,500 all-in. Need it done before the in-laws arrive December 20. Only two quotes so far.", at: "2026-11-14T15:00:00.000Z" });
+    imp(ctx, { kind: "email", title: "Catering quote", text: "Bellini's Pizzeria catering quote for the party: $4,800.", at: "2026-11-10T15:00:00.000Z", author: "Marco Bellini" });
+    const r: any = await ask(ctx, clock, "Which plumber should I go with for the bathroom re-pipe, and what will it really cost?"); const v = resultView(ctx, r.reply.data.resultId);
+    expect(v.sources.some((s: any) => /Bathroom plan/.test(s.title))).toBe(true); expect(v.body).toMatch(/Budget cap \$5,500/); expect(v.body).toMatch(/December 20/);
+    expect(v.body).toMatch(/permit is not included/i);
+    expect(v.sources.some((s: any) => /Catering/.test(s.title))).toBe(false);
+    expect(v.body).toMatch(/\$4,800[^.]*replaced by \$5,350/);
+    expect(v.body).not.toMatch(/- Sons: |- We: /); expect(v.body).not.toMatch(/due (Monday|Sunday), (Nov 30|Dec 7)/);
+    expect(v.title).toMatch(/^Answer: Which plumber should I go with/);
+    const nf = v.flags.find((f: any) => f.kind === "not_found"); expect(nf?.text ?? "").not.toMatch(/should|really|cost|plumber/);
+    expect(v.flags.find((f: any) => f.kind === "extractive")!.text).toMatch(/does not compare options or recommend/);
+  });
+});

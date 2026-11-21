@@ -69,10 +69,13 @@ export function extractFacts(body: string, at: string, author: string | null, ow
       if (!dates.length && (CONFIRM.test(sent) || PROPOSE.test(sent))) { const f: RawFact = { kind: cue === "confirmed" ? "decision" : "proposal", subject: sub, text: sent, value: null, who, quote: sent, start, end, stamp, status: cue, why: reasonHere }; out.push(f); prevDecision = f; }
       if (!reasonHere && prevDecision && /^(?:the reason|that way|this way|reason is|it'?s because)/i.test(sent)) prevDecision.why = prevDecision.why ?? sent;
       // commitments: "I'll send", "Dana will", "I owe"
-      const cm = /\b(?:(I)'?(?:ll| will| can)|I'?m going to|(?:([A-Z][a-z]+) (?:will|to|can))|I owe)\s+([^.!?]{3,120})/.exec(sent);
+      const cm = /\b(?:(I)'?(?:ll| will)|I'?m going to|((?:[A-Z][\w'-]*(?:\s&)?\s){0,2}[A-Z][\w'-]*)\s+(?:will|to)\b|I owe)\s+([^.!?]{3,120})/.exec(sent);
       if (cm && !/^(be|have|see|think|say|try|go with|let)\b/i.test(cm[3].trim())) {
-        const owner = cm[1] || /^I owe/.test(cm[0]) ? who : (cm[2] ?? who);
-        out.push({ kind: "commitment", subject: sub, text: sent, value: dates[0]?.v ?? null, who: owner === who && speaker && new RegExp(`^${ownerName}\\b`, "i").test(speaker) ? ownerName : owner, quote: sent, start, end, stamp, status: "confirmed", why: null });
+        const PRON = /^(We|They|You|It|He|She|This|That|There|Who|What)$/i;
+        const named = cm[2] && !PRON.test(cm[2].trim()) ? cm[2].trim() : null;
+        const first = !!cm[1] || /^I /.test(cm[0]);
+        const owner = named ?? who;
+        out.push({ kind: "commitment", subject: sub, text: sent, value: /\b(by|before|due|until|no later than|deadline)\b/i.test(sent) ? (dates[0]?.v ?? null) : null, who: first && speaker && new RegExp(`^${ownerName}\\b`, "i").test(speaker) ? ownerName : owner, quote: sent, start, end, stamp, status: "confirmed", why: null });
       }
       for (const re of [MONEY, PCT, COUNT]) { re.lastIndex = 0; let fm: RegExpExecArray | null; while ((fm = re.exec(sent))) out.push({ kind: "figure", subject: sub, text: sent, value: fm[0].trim(), who, quote: sent, start, end, stamp, status: "confirmed", why: null }); }
       const cmd = /`([^`]{3,200})`/.exec(sent); if (cmd) out.push({ kind: "command", subject: sub, text: sent, value: cmd[1], who, quote: sent, start, end, stamp, status: "confirmed", why: null });

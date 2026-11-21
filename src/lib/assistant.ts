@@ -20,7 +20,7 @@ const DRAFT_STRONG = /\b(draft|write|compose|reply to|respond to|email|message|p
 const BRIEF = /\b(get me ready|ready for|prepare me|prep me|prep for|brief me|catch me up|agenda|what(?:'s| is) (?:on|coming up)|what do i have|heads[- ]up)\b/i;
 const PRIOR = /\b(last time|where we left off|pick up|picked up|previous|earlier|prior)\b/i;
 const ANAPHORA = /\b(that|the last|the previous|the) (meeting|call|sync|standup|interview)\b/i;
-const GENERIC = new Set("ready tomorrow today tonight morning promise promised meeting call sync follow-up followup ready brief please help thing things stuff".split(" "));
+const GENERIC = new Set("ready tomorrow today tonight morning promise promised meeting call sync follow-up followup brief please help thing things stuff should really cost much many want best which whom whose actually still land confirmed".split(" "));
 
 export function resolveWhen(text: string, now: Date, tz = DEFAULT_TZ): Intent["when"] {
   const today = localDate(now, tz);
@@ -211,22 +211,27 @@ function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string
   if (!hits.length) return { mode: "digest", gap: `Nothing saved matches “${intent.terms.join(" ")}”. Share the conversation, forward the email or import the note, then ask again.`, items: [] as any[], terms: intent.terms, reads: 0 };
   const scored = hits.map((h) => ({ h, m: matchedTerms(intent.terms, `${h.title} ${authorizedItem(ctx, h.itemId)?.body ?? ""}`) }));
   const top = Math.max(...scored.map((x) => x.m.length)); const need = Math.max(1, Math.ceil(top / 2));
-  const use = scored.filter((x) => x.m.length >= need).sort((a, b) => String(b.h.at).localeCompare(String(a.h.at)));
-  const aside = scored.filter((x) => x.m.length < need);
+  // A term that most of the strongest matches share is what the question is about. An item that has it belongs, even if it matches little else.
+  const strong = scored.filter((x) => x.m.length >= need); const subject = intent.terms.filter((t) => strong.length >= 2 && strong.filter((x) => x.m.includes(t)).length >= Math.ceil(strong.length * 0.6));
+  const keep = (x: (typeof scored)[number]) => x.m.length >= need || x.m.some((t) => subject.includes(t));
+  const use = scored.filter(keep).sort((a, b) => String(b.h.at).localeCompare(String(a.h.at)));
+  const aside = scored.filter((x) => !keep(x));
   // Coherence: sources that share no subject matter with the rest of the matches (beyond the words you asked with) are probably a different thing that happens to use the same word.
+  const OWN = new Set(["note", "claude", "export"]);   // what you wrote or shared yourself is never set aside as "someone else's"
   if (use.length >= 3) {
     const qs = new Set(intent.terms.map(stem)); const ctxToks = use.map((x) => new Set(tokens(`${x.h.title} ${authorizedItem(ctx, x.h.itemId)?.body ?? ""}`).map(stem).filter((t) => !qs.has(t) && t.length > 2)));
     const comp = use.map((_, i) => i); const find = (i: number): number => (comp[i] === i ? i : (comp[i] = find(comp[i])));
     for (let i = 0; i < use.length; i++) for (let j = i + 1; j < use.length; j++) if ([...ctxToks[i]].some((t) => ctxToks[j].has(t))) comp[find(i)] = find(j);
     const sizes = new Map<number, number>(); for (let i = 0; i < use.length; i++) sizes.set(find(i), (sizes.get(find(i)) ?? 0) + 1);
-    const best = [...sizes].sort((a, b) => b[1] - a[1])[0]; if (best && best[1] >= 2) for (let i = use.length - 1; i >= 0; i--) if (find(i) !== best[0]) { aside.push({ ...use[i], m: use[i].m.slice(0, 2) }); use.splice(i, 1); ctxToks.splice(i, 1); }
+    const best = [...sizes].sort((a, b) => b[1] - a[1])[0]; if (best && best[1] >= 2) for (let i = use.length - 1; i >= 0; i--) if (find(i) !== best[0] && !OWN.has(use[i].h.kind)) { aside.push({ ...use[i], m: use[i].m.slice(0, 2) }); use.splice(i, 1); ctxToks.splice(i, 1); }
   }
   for (const x of aside) recordRead(ctx, requestId, revision, { kind: "search", ref: x.h.itemId, source: x.h.sourceLabel, label: `${x.h.title} (${x.h.kind}, not used: matched only “${x.m.join(", ")}” and shares nothing else with the other matches)`, used: false });
   const items = use.map(({ h, m }) => { const it = authorizedItem(ctx, h.itemId)!; recordRead(ctx, requestId, revision, { kind: "thread", ref: it.id, source: it.sourceLabel, itemRevision: it.revision, label: `${it.title} (${it.kind}, ${fmtDay(localDate(it.at))})`, excerpt: h.excerpt });
-    const sents = sentencesOf(it.body); const relevant = sents.filter((s2) => matchedTerms(intent.terms, s2).length > 0).slice(0, 2);
+    const sents = sentencesOf(it.body); const SALIENT = /\b(not included|excluding|extra|additional|replaces|replaced|revised|instead|cap|budget|deadline|must|total|only|need(?:s|ed)?)\b|[$€£]\s?\d|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b/i;
+    const relevant = [...new Set([...sents.filter((s2) => matchedTerms(intent.terms, s2).length > 0).slice(0, 2), ...sents.filter((s2) => SALIENT.test(s2)).slice(0, 3)])].slice(0, 4);
     return { id: it.id, title: it.title, kind: it.kind, at: it.at, revision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode, author: it.author, participants: it.participants, matched: m, say: relevant.length ? relevant : sents.slice(0, 1), todo: sents.filter((s2) => TODO.test(s2)), unknown: sents.filter((s2) => UNKNOWN.test(s2) && !TODO.test(s2)),
       facts: it.facts.map((f) => ({ ...f, itemTitle: it.title, itemKind: it.kind, itemAt: it.at, itemRevision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode })) }; });
-  return { mode: "digest", items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
+  return { mode: "digest", question: String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? ""), items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
 }
 
 function researchBrief(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
@@ -352,11 +357,11 @@ function composeDigest(ctx: Ctx, b: any) {
   const sources: SrcRef[] = []; const flags: any[] = []; const items: any[] = b.items ?? [];
   const src = (it: any, role: string, quote: string) => { if (!sources.some((s) => s.itemId === it.id && s.role === role && s.quote === quote)) sources.push({ itemId: it.id, revision: it.revision, title: it.title, kind: it.kind, at: it.at, sourceLabel: it.sourceLabel, mode: it.mode, role, quote }); };
   const lines: string[] = [`**What the sources say** (newest first)`, ""];
-  for (const it of items) { const q = it.say[0] ?? ""; lines.push(`- **${it.title}** (${it.kind}, ${fmtDay(localDate(it.at))}): “${q}”`); if (q) src(it, "says", q); }
+  for (const it of items) { lines.push(`- **${it.title}** (${it.kind}, ${fmtDay(localDate(it.at))}): ${it.say.map((q: string) => `“${q}”`).join(" ")}`); for (const q of it.say) src(it, "says", q); }
   // What changed: the same kind of figure stated twice by related items; the later one stands and the earlier is marked replaced.
   const figs = items.flatMap((it) => it.facts.filter((f: any) => f.kind === "figure").map((f: any) => ({ ...f, it })));
   const changed: string[] = [];
-  for (const f of figs) { const later = figs.find((g: any) => g.it.id !== f.it.id && unitOf(g.value) === unitOf(f.value) && g.value.replace(/\s+/g, "").toLowerCase() !== f.value.replace(/\s+/g, "").toLowerCase() && String(g.it.at) > String(f.it.at) && tokens(g.it.title).filter((t) => tokens(f.it.title).includes(t)).length >= 1); if (later) { changed.push(`- ${f.value} (${fmtDay(localDate(f.it.at))}, “${f.it.title}”) was replaced by ${later.value} (${fmtDay(localDate(later.it.at))}, “${later.it.title}”).`); src(later.it, "changed value", later.quote); src(f.it, "older value, replaced", f.quote); } }
+  for (const f of figs) { const later = [...figs].sort((a: any, b: any) => String(a.it.at).localeCompare(String(b.it.at))).find((g: any) => g.it.id !== f.it.id && unitOf(g.value) === unitOf(f.value) && g.value.replace(/\s+/g, "").toLowerCase() !== f.value.replace(/\s+/g, "").toLowerCase() && String(g.it.at) > String(f.it.at) && ((g.it.author && f.it.author && g.it.author === f.it.author) || tokens(g.it.title).filter((t) => tokens(f.it.title).includes(t)).length >= 2)); if (later) { changed.push(`- ${f.value} (${fmtDay(localDate(f.it.at))}, “${f.it.title}”) was replaced by ${later.value} (${fmtDay(localDate(later.it.at))}, “${later.it.title}”).`); src(later.it, "changed value", later.quote); src(f.it, "older value, replaced", f.quote); } }
   if (changed.length) lines.push("", "**What changed**", "", ...[...new Set(changed)]);
   const todo = items.flatMap((it) => it.todo.map((t: string) => ({ it, t })));
   if (todo.length) { lines.push("", "**Still to do or not settled**", ""); for (const x of todo) { lines.push(`- ${x.t} (${x.it.title})`); src(x.it, "still to do", x.t); } }
@@ -365,11 +370,11 @@ function composeDigest(ctx: Ctx, b: any) {
   const commits = items.flatMap((it) => it.facts.filter((f: any) => f.kind === "commitment").map((f: any) => ({ ...f, it })));
   if (commits.length) { lines.push("", "**Promises mentioned**", ""); for (const c of commits) { lines.push(`- ${c.who ?? "Someone"}: ${clean(c.quote)}${c.value ? ` (due ${fmtDay(c.value)})` : ""}`); src(c.it, `${firstName(String(c.who ?? "someone"))}'s promise`, c.quote); } }
   if (b.setAside?.length) flags.push({ kind: "set_aside", text: `Set aside as less related: ${b.setAside.map((t: string) => `“${t}”`).join(", ")}. They matched only part of your question.` });
-  flags.push({ kind: "extractive", text: "This is an extractive answer: passages, changes and open items found by search and rules, each with its source. It does not infer what is not written. A written summary needs a configured Claude model, which is off." });
-  const missing = (b.terms ?? []).filter((t: string) => !items.some((it) => it.matched.includes(t)) && t.length > 3).slice(0, 4);
+  flags.push({ kind: "extractive", text: "This is an extractive answer: passages, changes and open items found by search and rules, each with its source. It does not infer what is not written. It does not compare options or recommend one. Doing that needs a configured Claude model, which is off." });
+  const used = items.flatMap((it: any) => tokens(`${it.title} ${it.say.join(" ")}`)); const missing = (b.terms ?? []).filter((t: string) => t.length >= 5 && !used.some((u: string) => u.slice(0, 5) === t.slice(0, 5))).slice(0, 4);
   if (missing.length) flags.push({ kind: "not_found", text: `Nothing in the sources mentions: ${missing.join(", ")}.` });
   const head = items.length ? `Found ${items.length} source${items.length === 1 ? "" : "s"}${changed.length ? `, ${changed.length} changed value${changed.length === 1 ? "" : "s"}` : ""}${todo.length ? `, ${todo.length} open item${todo.length === 1 ? "" : "s"}` : ""}.` : "Nothing found.";
-  return { title: `Answer: ${(b.terms ?? []).slice(0, 4).join(" ")}`.trim(), body: lines.join("\n"), summary: head, sources, flags, applied: [] as string[], unapplied: [] as string[] };
+  return { title: `Answer: ${String(b.question ?? (b.terms ?? []).join(" ")).replace(/[?.!]+$/, "").slice(0, 80)}`.trim(), body: lines.join("\n"), summary: head, sources, flags, applied: [] as string[], unapplied: [] as string[] };
 }
 
 function composeMeeting(ctx: Ctx, b: any) {
