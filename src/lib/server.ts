@@ -23,6 +23,8 @@ import { ingestRevision } from "./ingest";
 import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJarvis } from "./capture";
 import { officeState, cancelJob, getJob, TERMINAL } from "./jobs";
 import { kick, runnerStatus } from "./runner";
+import { saveAttachment, readAttachment, listAttachments, getConversation, messages, handleUtterance, answerJob, retryJob } from "./study-guide";
+import { getDocument, listDocuments, editGuide, renderPdf, startQuiz, quizState, answerQuestion, missedQuestions, quizHistory, ensureBi107, courseRow, findPreviousGuide, extractCoverage } from "./guides";
 
 export const MODE_COOKIE = "jarvis_mode";
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
@@ -36,7 +38,7 @@ export class Req {
     return schema.parse(raw) as z.output<S>;
   }
 }
-export interface Res { status?: number; body: unknown; headers?: Record<string, string> }
+export interface Res { status?: number; body: unknown; headers?: Record<string, string>; binary?: { data: Buffer; contentType: string; filename?: string } }
 
 /** Reject foreign origins on mutations and non-loopback hosts everywhere (DNS rebinding). */
 export function guard(req: Req, opts: { allowedHosts?: Set<string> } = {}) {
@@ -64,6 +66,40 @@ const idBody = z.object({}).passthrough();
 const demoOnly = (c: Ctx) => { if (c.mode !== "demo") throw new HttpError(403, "Only available in the demo workspace"); };
 
 on("GET", "/health", () => ({ ok: true }));
+
+// ---- Talk to Jarvis, study guides, quizzes ----
+on("POST", "/assistant/message", (c, r) => {
+  const b = r.json(z.object({ text: z.string().min(1).max(2000), conversationId: z.string().nullish(), course: z.string().max(60).nullish(), attachmentIds: z.array(z.string()).max(8).optional(), via: z.enum(["voice", "text"]).optional() }));
+  const out = handleUtterance(c, b); kick(c.mode); return out;
+});
+on("GET", "/assistant/conversation", (c, r) => { const course = r.query.get("course"); const conv = getConversation(c, r.query.get("id"), course); return { conversation: conv, messages: messages(c, conv.id as string) }; });
+on("POST", "/attachments", (c, r) => {
+  const b = r.json(z.object({ course: z.string().min(1).max(60), name: z.string().min(1).max(120), dataBase64: z.string().max(4_300_000), conversationId: z.string().optional() }));
+  return saveAttachment(c, { course: b.course, name: b.name, bytes: Buffer.from(b.dataBase64, "base64"), conversationId: b.conversationId });
+});
+on("GET", "/attachments/:id/raw", (c, r) => { const a = readAttachment(c, r.params.id); (r as any).binary = { data: a.bytes, contentType: a.mime }; return null; });
+on("GET", "/courses", (c) => { if (c.mode === "demo") ensureBi107(c); return { courses: all(c.db, "SELECT code,name,external_id FROM courses WHERE owner_id=? ORDER BY code", c.owner) }; });
+on("GET", "/courses/:code", (c, r) => {
+  if (c.mode === "demo" && /^bi107$/i.test(r.params.code)) ensureBi107(c);
+  const course = courseRow(c, r.params.code); if (!course) throw new HttpError(404, "Course not found");
+  const code = course.code as string;
+  return { course: { code, name: course.name, externalId: course.external_id }, documents: listDocuments(c, code), attachments: listAttachments(c, code), coverage: extractCoverage(c, code), previousGuide: findPreviousGuide(c, code),
+    materials: all(c.db, `SELECT s.title, s.kind, MAX(r.published_at) latest FROM sources s JOIN source_revisions r ON r.source_id=s.id WHERE s.course_id=? GROUP BY s.id ORDER BY latest DESC`, course.id), synthetic: c.mode === "demo" };
+});
+on("GET", "/documents/:id", (c, r) => { const v = r.query.get("version"); const d = getDocument(c, r.params.id, v ? Number(v) : undefined); if (!d) throw new HttpError(404, "Guide not found"); return { ...d, history: quizHistory(c, r.params.id), missed: missedQuestions(c, d.doc.course as string) }; });
+on("PUT", "/documents/:id", (c, r) => { const b = r.json(z.object({ content: z.unknown(), baseVersion: z.number().int() })); return editGuide(c, r.params.id, b.content, b.baseVersion); });
+on("GET", "/documents/:id/pdf", async (c, r) => {
+  const v = r.query.get("version"); const d = getDocument(c, r.params.id, v ? Number(v) : undefined); if (!d) throw new HttpError(404, "Guide not found");
+  const answers = r.query.get("answers") === "1";
+  const data = await renderPdf(d.content, { version: d.version, answers });
+  (r as any).binary = { data, contentType: "application/pdf", filename: `${String(d.content.title).replace(/[^\w]+/g, "-")}-v${d.version}${answers ? "-answer-key" : ""}.pdf` }; return null;
+});
+on("POST", "/quiz/start", (c, r) => startQuiz(c, r.json(z.object({ docId: z.string(), mode: z.enum(["all", "missed"]).default("all"), version: z.number().int().optional() }))));
+on("GET", "/quiz/missed", (c, r) => ({ missed: missedQuestions(c, r.query.get("course") ?? "") }));
+on("GET", "/quiz/:id", (c, r) => quizState(c, r.params.id));
+on("POST", "/quiz/:id/answer", (c, r) => { const b = r.json(z.object({ questionId: z.string(), chosen: z.string().regex(/^[A-F]$/) })); return answerQuestion(c, r.params.id, b.questionId, b.chosen); });
+on("POST", "/office/jobs/:id/answer", (c, r) => { const out = answerJob(c, r.params.id, r.json(z.object({ guideId: z.string().optional(), importText: z.string().max(60000).optional(), importTitle: z.string().max(120).optional() }))); kick(c.mode); return out; });
+on("POST", "/office/jobs/:id/retry", (c, r) => { const out = retryJob(c, r.params.id); kick(c.mode); return out; });
 
 // ---- Capture and the Live Office ----
 on("POST", "/captures", (c, r) => { const rec = captureToJarvis(c, { ...r.json(CaptureInput), via: "app" }); kick(c.mode); return rec; });
@@ -265,6 +301,7 @@ export async function handle(method: string, pathname: string, query: URLSearchP
       const ctx = makeCtx(req.mode);
       if (ctx.mode === "demo" && !isSeeded(ctx) && pathname !== "/demo/reset") seedDemo(ctx);   // first open of the example workspace
       const out = await rt.h(ctx, req);
+      if ((req as any).binary) return { body: null, binary: (req as any).binary };
       return { body: out };
     }
     if (method === "POST" && pathname === "/mode") {

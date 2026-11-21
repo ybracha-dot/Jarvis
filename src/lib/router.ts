@@ -3,10 +3,12 @@
 import { Ctx, all, get, run, uid, getSetting, sha } from "./db";
 import { localDate } from "./time";
 
-export type Role = "extract_small" | "brief" | "study_plan" | "advisor" | "skill_candidate" | "essay_review" | "council_editor" | "deep_review";
+export type Role = "vision" | "guide_writer" | "extract_small" | "brief" | "study_plan" | "advisor" | "skill_candidate" | "essay_review" | "council_editor" | "deep_review";
 export interface RoleConfig { model: string; effort: "low" | "medium" | "high"; premium: boolean; maxTokens: number }
 
 export const ROLE_DEFAULTS: Record<Role, RoleConfig> = {
+  vision: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 8000 },
+  guide_writer: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 16000 },
   // max_tokens includes thinking tokens on these models, so the ceilings leave room for reasoning plus the answer.
   extract_small: { model: "claude-haiku-5-5", effort: "low", premium: false, maxTokens: 2000 },
   brief: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 6000 },
@@ -32,7 +34,8 @@ export const estimateCostUsd = (model: string, inTok: number, outTok: number) =>
 };
 export const roughTokens = (s: string) => Math.ceil(s.length / 4);
 
-export interface CompleteReq { model: string; effort: string; system: string; user: string; maxTokens: number; signal?: AbortSignal }
+export interface ImageInput { mediaType: "image/png" | "image/jpeg"; data: string }
+export interface CompleteReq { model: string; effort: string; system: string; user: string; maxTokens: number; images?: ImageInput[]; signal?: AbortSignal }
 export interface CompleteRes { text: string; usage: { input: number; output: number } | null }
 export type Transport = (r: CompleteReq) => Promise<CompleteRes>;
 
@@ -46,7 +49,7 @@ export function anthropicTransport(apiKey: string, baseUrl = "https://api.anthro
       method: "POST", signal: r.signal,
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       // Effort goes in output_config. No temperature, no prefill, no forced tool_choice, no thinking budget: current models reject them.
-      body: JSON.stringify({ model: r.model, max_tokens: r.maxTokens, output_config: { effort: r.effort }, system: r.system, messages: [{ role: "user", content: r.user }] }),
+      body: JSON.stringify({ model: r.model, max_tokens: r.maxTokens, output_config: { effort: r.effort }, system: r.system, messages: [{ role: "user", content: r.images?.length ? [...r.images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mediaType, data: im.data } })), { type: "text", text: r.user }] : r.user }] }),
     });
     if (!res.ok) { const e: any = new Error(`Claude API ${res.status}`); e.status = res.status; e.retryAfter = Number(res.headers.get("retry-after") ?? 0); throw e; }
     const j: any = await res.json();
@@ -87,9 +90,9 @@ export class Router {
   }
 
   /** Reserve estimated cost, call with timeout and bounded retry, then reconcile with measured usage. */
-  async call(role: Role, req: { system: string; user: string; initiator: string; retryKey?: string; premiumOptIn?: boolean; signal?: AbortSignal; timeoutMs?: number }): Promise<{ text: string; runId: string; model: string; effort: string; usage: CompleteRes["usage"]; costEstimateUsd: number }> {
+  async call(role: Role, req: { system: string; user: string; images?: ImageInput[]; initiator: string; retryKey?: string; premiumOptIn?: boolean; signal?: AbortSignal; timeoutMs?: number }): Promise<{ text: string; runId: string; model: string; effort: string; usage: CompleteRes["usage"]; costEstimateUsd: number }> {
     const c = roleConfig(role);
-    const est = estimateCostUsd(c.model, roughTokens(req.system + req.user), c.maxTokens);
+    const est = estimateCostUsd(c.model, roughTokens(req.system + req.user) + (req.images?.length ?? 0) * 1600, c.maxTokens);
     const r = this.resolve(role, { premiumOptIn: req.premiumOptIn, estimateUsd: est });
     if (r.status !== "ready") throw new RouterError(r.status === "no_provider" ? "no_provider" : r.status === "premium_blocked" ? "premium_blocked" : r.status === "budget_off" ? "budget_off" : "budget_exhausted", r.message);
     const runId = uid("run");
@@ -109,7 +112,7 @@ export class Router {
         const timer = setTimeout(() => ac.abort(), req.timeoutMs ?? 60_000);
         const onAbort = () => ac.abort(); req.signal?.addEventListener("abort", onAbort);
         let res: CompleteRes;
-        try { res = await this.transport!({ model: c.model, effort: c.effort, system: req.system, user: req.user, maxTokens: c.maxTokens, signal: ac.signal }); }
+        try { res = await this.transport!({ model: c.model, effort: c.effort, system: req.system, user: req.user, images: req.images, maxTokens: c.maxTokens, signal: ac.signal }); }
         finally { clearTimeout(timer); req.signal?.removeEventListener("abort", onAbort); }
         const cost = res.usage ? estimateCostUsd(c.model, res.usage.input, res.usage.output) : est;
         run(this.ctx.db, "UPDATE runs SET status='ok', finished_at=?, usage=?, cost_estimate_usd=? WHERE id=?", this.ctx.now().toISOString(), JSON.stringify({ ...(res.usage ?? {}), elapsedMs: Date.now() - t0, costIsEstimate: true }), cost, runId);
