@@ -10,7 +10,7 @@ import { splitSentences } from "./extract";
 export interface Src { itemId: string; revision: number; title: string; kind: string; at: string; author: string | null; sourceLabel: string; mode: string }
 export interface SentenceIn extends Src { text: string; start: number; end: number }
 export interface FactIn extends Src { id: string; kind: string; value: string | null; quote: string; start: number; end: number }
-export interface ItemIn extends Src { facts: FactIn[]; sentences: { text: string; start: number; end: number }[]; ownerAuthored: boolean }
+export interface ItemIn extends Src { facts: FactIn[]; sentences: { text: string; start: number; end: number }[]; ownerAuthored: boolean; corrects?: string | null }
 
 export const COMPONENTS = ["permit", "fee", "tax", "deposit", "shipping", "delivery", "setup", "installation", "insurance", "licence", "license", "service charge", "materials", "labor", "labour", "disposal", "cleanup", "travel", "tip", "surcharge", "registration"];
 const SYMBOL: Record<string, string> = { "$": "USD", "€": "EUR", "£": "GBP" };
@@ -264,8 +264,8 @@ export { fmtDate, parseMonthDay };
 
 const OWN_KINDS = new Set(["note", "claude", "export"]);
 /** Adapt an authorized evidence item (body and facts) to the engine's input. Sentences carry their offsets so each term can point at its quote. */
-export function itemInFrom(it: { id: string; title: string; kind: string; at: string; revision: number; author: string | null; sourceLabel: string; mode: string; body: string; facts: { id: string; kind: string; value: string | null; quote: string; start: number; end: number }[] }): ItemIn {
+export function itemInFrom(it: { corrects?: string | null; id: string; title: string; kind: string; at: string; revision: number; author: string | null; sourceLabel: string; mode: string; body: string; facts: { id: string; kind: string; value: string | null; quote: string; start: number; end: number }[] }): ItemIn {
   const sentences: { text: string; start: number; end: number }[] = []; let cur = 0;
   for (const line of it.body.split("\n")) { const ls = it.body.indexOf(line, cur); cur = ls + line.length; let sc = 0; for (const s of splitSentences(line)) { const i = line.indexOf(s, sc); if (i < 0) continue; sc = i + s.length; sentences.push({ text: s, start: ls + i, end: ls + i + s.length }); } }
-  return { itemId: it.id, revision: it.revision, title: it.title, kind: it.kind, at: it.at, author: it.author, sourceLabel: it.sourceLabel, mode: it.mode, facts: it.facts.map((f) => ({ ...f, itemId: it.id, revision: it.revision, title: it.title, kind: f.kind, at: it.at, author: it.author, sourceLabel: it.sourceLabel, mode: it.mode })), sentences, ownerAuthored: OWN_KINDS.has(it.kind) || !it.author };
+  return { corrects: it.corrects ?? null, itemId: it.id, revision: it.revision, title: it.title, kind: it.kind, at: it.at, author: it.author, sourceLabel: it.sourceLabel, mode: it.mode, facts: it.facts.map((f) => ({ ...f, itemId: it.id, revision: it.revision, title: it.title, kind: f.kind, at: it.at, author: it.author, sourceLabel: it.sourceLabel, mode: it.mode })), sentences, ownerAuthored: OWN_KINDS.has(it.kind) || !it.author };
 }

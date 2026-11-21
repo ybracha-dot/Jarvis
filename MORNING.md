@@ -1,8 +1,29 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Field test: finish the calculation before drafting** (this round), **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Project scope fix and the handoff table** (this round), **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
 
-# Field test: finish the calculation before drafting (latest)
+# Project scope fix and the handoff table (latest)
+
+Baseline `4a3a7a4`. Paid model calls stayed off in every run (zero model calls).
+
+**1. The project fix from the outside tester: applied as given.** The patch applied cleanly (`git apply --check`), with its four regression tests (all pass) and migration 8 (replay keys are scoped to the project; request and result IDs and links unchanged). The same words asked in two projects now give two requests, two results and two read logs; an unknown project name is an error before a request exists. Proven through the normal UI (`/try`, desktop) in the browser journey `handoff`: Lantern exhibit and Maple exhibit, same question text, both results opened, reloaded and reopened, each with its own table and sources, neither mentioning the other.
+
+**2. The missing handoff table: reproduced, then repaired.** First failed result (kept, `/tmp` copy not committed): the answer quoted only the original note about Mara, left out Inez, was a paragraph, the read log listed one note, `outcomes` was empty and the receipt said **Finished**. Causes: retrieval ignored the linked correction (it shares no search words with the question), and no “table” outcome existed to verify.
+- Linked corrections are followed in both directions and added to the read log (“added: your later correction …”); for “turn these notes into a table” the selected project’s notes are the material.
+- The table is a requested outcome with its own check (columns as asked, every open task has a cited row, nothing completed or cancelled is in a row, no silently dropped sentence). **Finished** is only said when that check passes. Otherwise: *“Finished, but only partly done: …”*, with the part, the reason and what is missing. A sentence that names a person or task but cannot be read is listed under “Check these” and a banner above the table says the rows may be stale.
+- Lantern now gives exactly: Mara | Send the proof | Waiting for the final photo credits; Inez | Book the label printer | None reported, each row linking both notes; Theo and the finished wall work are in “Left out or changed”.
+- Same for the ordinary Claude connector’s local test client: `get_result` returns the table, per-row sources, the per-part status and the draft.
+
+**3. Independent QA, four rounds, new people and wording each time. Honest tally of the FIRST attempt in each round:** round 1: 0 of 7 usable; round 2: 0 of 6; round 3: 1 of 12; round 4: 0 of 10. Each round’s wrong-or-stale findings were turned into regression tests and repaired (general verbs, “now with / handed to / falls to / taking over / covering for / swapped”, passive voice, cancellations, changed deadlines, shared owners, full and non-English names, unblocking and completion, “status table”, “numbered list by deadline”, “what’s on X’s plate”, “who is responsible for …”, an email-ready summary built from the list). The tests built from QA’s own notes pass, but they are **tuned**, so they prove those cases, not the general reader.
+- **What this means:** the reader is rule-based and wording-limited. On wording it does not know, it now says so (“could not be read”, “partly done”, “none of the requested parts could be done”, a banner above any table built from partly read notes) instead of presenting stale rows. It will still miss tasks written in unfamiliar shapes. Round 4 showed it again. I stopped iterating on phrasings rather than keep tuning to each tester.
+- **Known remaining gaps:** quantity changes (“now 14, not 12”), “only starts after X” dependencies, an ambiguous pronoun (“she will take it”), a task stated twice in different words, times of day as deadlines, and unrelated notes in the same project (they are read as project material: the answer lists “Built from these notes” so you can see it).
+- **The realistic route to wider coverage** is a model-assisted reader for the same artifact, validated by the same checks. It is off (no key, no budget) and I did not build it.
+
+**4. Checks actually run.** 310 unit tests; the full browser suite on the final build: 322 checks, 0 problems, including the two-project journey; typecheck and production build. The QA rounds ran against a disposable server and worker through the API; none opened the browser pages, which the `handoff` journey covers.
+
+**5. Still needs you / not verified live.** (a) Run one real note with a correction at `/try`, ask for a table, and tell me which rows are wrong. (b) A person outside this session should try one more unfamiliar wording; I could not make my own QA rounds independent once I tuned to them. (c) Real Claude account round trip and real Blackboard remain pending as before. Synthetic, real-account and paid-model results are separate: this entry is synthetic only.
+
+# Field test: finish the calculation before drafting (previous)
 
 Checked against `f4f316c`, the commit the independent tester used. Both failures reproduced there exactly.
 

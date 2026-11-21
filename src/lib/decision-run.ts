@@ -73,7 +73,7 @@ export type AnalysisJson = ReturnType<typeof analysisJson>;
 
 export function toItems(ctx: Ctx, ids: string[]): ItemIn[] {
   const out: ItemIn[] = [];
-  for (const id of ids) { const it = getItem(ctx, id); if (it && "body" in it && !it.forgotten && !it.revoked) out.push(itemInFrom({ id: it.id, title: it.title, kind: it.kind, at: it.at, revision: it.revision, author: it.author, sourceLabel: it.sourceLabel, mode: it.mode, body: it.body, facts: it.facts })); }
+  for (const id of ids) { const it = getItem(ctx, id); if (it && "body" in it && !it.forgotten && !it.revoked) out.push(itemInFrom({ corrects: (it as any).corrects ?? null, id: it.id, title: it.title, kind: it.kind, at: it.at, revision: it.revision, author: it.author, sourceLabel: it.sourceLabel, mode: it.mode, body: it.body, facts: it.facts })); }
   return out;
 }
 export const fxRates = (ctx: Ctx) => getSetting<Record<string, number>>(ctx.db, "fx_rates", {});
@@ -187,7 +187,7 @@ function tableJson(t: TableAnalysis, itemIds: string[], headline: string) {
     recommendation: { kind: "recommend" as const, option: null, label: null, headline, tradeoff: [] as string[], question: null, nextAction: { kind: "none", text: "Paste it where you need it." }, basis: [] as string[], qualifiers: [] as string[] } };
 }
 export type TableJson = ReturnType<typeof tableJson>;
-export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?: boolean }, request: string, wish: TableSpec, o: { applied: string[]; unapplied: string[] }): DecisionOut | { reason: string } {
+export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?: boolean }, request: string, wish: TableSpec, o: { applied: string[]; unapplied: string[]; wantDraft?: boolean }): DecisionOut | { reason: string } {
   const ids = [...new Set(b.items.map((i) => i.id))]; const items = toItems(ctx, ids);
   const t = buildTaskTable(items, wish);
   if (!t.taskCount) return { reason: `No task could be read from the notes, so no ${wish.form === "checklist" ? "checklist" : "table"} was built and nothing was invented.${t.unparsed.length ? ` Sentences I did not understand: ${t.unparsed.slice(0, 4).map((u) => `“${u.text}”`).join(" ")}` : ""}` };
@@ -197,6 +197,7 @@ export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?:
   for (const l of t.leftOut) for (const c of l.cites.slice(-1)) addSrc(c, `left out: ${l.text}`);
   for (const u of t.unparsed) addSrc({ src: items.find((i) => i.itemId === u.src.itemId) ?? (u.src as any), quote: u.text, role: "not applied" }, "not applied");
   const lines: string[] = [];
+  if (t.unparsed.length) lines.push(`**Check before you paste this.** ${t.unparsed.length} sentence${t.unparsed.length === 1 ? "" : "s"} in your notes could not be applied, so a row below may be out of date or missing. They are listed under “Check these”.`, "");
   if (!t.rows.length && t.filtered) lines.push(`**Nothing found for “${t.filtered}”**`, "", `No open task in the notes matches “${t.filtered}”.`, "");
   else if (!t.rows.length) lines.push(`**No open tasks**`, "", `All ${t.taskCount} task${t.taskCount === 1 ? "" : "s"} in the notes are complete or cancelled, so there is nothing left to hand off.`, "");
   else if (t.form === "checklist") lines.push(`**Checklist**`, "", checklistMarkdown(t), "");
@@ -204,12 +205,19 @@ export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?:
   const ch = t.leftOut.filter((l) => l.reason.startsWith("handed over")); const done = t.leftOut.filter((l) => l.reason === "complete" || l.reason === "cancelled");
   if (done.length || ch.length) { lines.push("**Left out or changed**", ""); for (const l of done) lines.push(`- ${l.text}: ${l.reason === "cancelled" ? "cancelled" : "complete"}, so it has no ${t.form === "checklist" ? "item" : "row"}.`); for (const l of ch) lines.push(`- ${l.text}.`); lines.push(""); }
   if (t.notes.length) lines.push("**Check these**", "", ...t.notes.map((n) => `- ${n}`));
+  const used = [...new Set(items.map((i) => i.title))]; lines.push("", `**Built from these notes:** ${used.join("; ")}.`);
   for (const u of t.unparsed) flags.push({ kind: "not_applied", text: `Not applied, because I could not read it as a task, a handover or a status: “${u.text}” (${u.src.title}).`, itemId: u.src.itemId });
   if (t.missingColumns.length) flags.push({ kind: "unfilled_column", text: `No note states ${t.missingColumns.join(", ")}, so those cells say “Not stated”.` });
   if (t.addedTaskColumn) flags.push({ kind: "task_column", text: "You did not ask for a Task column, but a row without the work it is about is not a handoff, so one was added first." });
   const headline = t.rows.length ? `${t.rows.length} open task${t.rows.length === 1 ? "" : "s"}: ${t.rows.map((r) => r.owner ?? "Unassigned").join(", ")}` : "No open tasks";
-  return { title: t.form === "checklist" ? "Checklist of open work" : "Handoff table", body: lines.join("\n"), summary: headline, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: tableJson(t, ids, headline), draft: null, needsJudgment: false, localOnly: !!b.localOnly };
+  return { title: t.form === "checklist" ? "Checklist of open work" : "Handoff table", body: lines.join("\n"), summary: headline, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: tableJson(t, ids, headline), draft: o.wantDraft && t.rows.length ? ledgerDraft(t, ownerName(ctx)) : null, needsJudgment: false, localOnly: !!b.localOnly };
 }
+/** An email-ready summary of the same rows, in the user's own name. Nothing is sent. */
+function ledgerDraft(t: TableAnalysis, me: string) {
+  const ix = (k: string) => t.keys.indexOf(k); const bullets = t.rows.map((r) => { const nx = ix("next") >= 0 && r.cells[ix("next")] !== "Not stated" ? r.cells[ix("next")] : r.task; const bl = ix("blocker") >= 0 && !/^None/.test(r.cells[ix("blocker")]) ? ` (${r.cells[ix("blocker")].replace(/^Blocked\.\s*/, "")})` : ""; return `- ${r.owner ?? "Unassigned"}: ${nx}${r.due ? `, due ${r.due}` : ""}${bl}`; });
+  return { to: null, subject: "Where things stand", purpose: "summary", body: ["Hi all,", "", "Here is where things stand:", "", ...bullets, "", "Thanks,", me].join("\n") };
+}
+
 
 export function optionsOf(a: AnalysisJson): OptionResult[] { return a.options as unknown as OptionResult[]; }
 

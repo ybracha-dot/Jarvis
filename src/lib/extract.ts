@@ -27,7 +27,7 @@ export function splitSentences(text: string): string[] {
     .replace(/\b([ap])\.m\./gi, "$1\u0001m.")
     .replace(/\b(e\.g|i\.e|etc|vs|dr|prof)\./gi, (m) => m.replace(/\./g, "\u0001"));
   return protectedText
-    .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])|\n+/)
+    .split(/(?<=[.!?])\s+(?=[A-ZÀ-ÝĀ-ſḀ-ỿ0-9"'(])|\n+/)
     .map((s) => s.replace(/\u0001/g, ".").trim())
     .filter(Boolean);
 }

@@ -22,7 +22,7 @@ export type Deliverable = "draft" | "brief" | "answer";
 export interface Intent { deliverable: Deliverable; terms: string[]; projectId: string | null; projectName: string | null; when: { kind: "day"; date: string; label: string } | { kind: "prior" } | null; anaphora: "last_meeting" | null; capabilities: string[]; signature: string }
 
 const DRAFT_STRONG = /\b(draft|write|compose|reply to|respond to|email|message|put together a (?:note|letter|message))\b/i;
-const BRIEF = /\b(get me ready|ready for|prepare me|prep me|prep for|brief me|catch me up|agenda|what(?:'s| is) (?:on|coming up)|what do i have|heads[- ]up)\b/i;
+const BRIEF = /\b(get me ready|ready for|prepare me|prep me|prep for|brief me|catch me up|agenda|what(?:'s| is) (?:on(?!\s+(?:[\w]+['’]s|my|our|his|her|their|the)\s+plate)|coming up)|what do i have|heads[- ]up)\b/i;
 const PRIOR = /\b(last time|where we left off|pick up|picked up|previous|earlier|prior)\b/i;
 const ANAPHORA = /\b(that|the last|the previous|the) (meeting|call|sync|standup|interview)\b/i;
 const GENERIC = new Set("ready tomorrow today tonight morning promise promised meeting call sync follow-up followup brief please help thing things stuff should really cost much many want best which whom whose actually still land confirmed".split(" "));
@@ -38,12 +38,13 @@ export function resolveWhen(text: string, now: Date, tz = DEFAULT_TZ): Intent["w
 }
 
 export function understand(ctx: Ctx, text: string, o: { projectHint?: string | null } = {}): Intent {
-  const deliverable: Deliverable = DECISION_Q.test(text) || PLAN_Q.test(text) ? "answer" : DRAFT_STRONG.test(text) ? "draft" : BRIEF.test(text) ? "brief" : "answer";   // a decision request that also asks for a draft is a decision with a next-step draft
+  let deliverable: Deliverable = DECISION_Q.test(text) || PLAN_Q.test(text) ? "answer" : DRAFT_STRONG.test(text) ? "draft" : BRIEF.test(text) ? "brief" : "answer";   // a decision request that also asks for a draft is a decision with a next-step draft
   const when = resolveWhen(text, ctx.now()); const tk = tokens(text);
   const projects = all(ctx.db, "SELECT id,name,aliases FROM projects WHERE owner_id=? AND status!='archived'", ctx.owner);
   const low = text.toLowerCase();
   let proj = o.projectHint ? projects.find((p) => p.id === o.projectHint || String(p.name).toLowerCase() === o.projectHint!.toLowerCase()) : undefined;
   proj = proj ?? projects.find((p) => { const pt = tokens(String(p.name)); return (pt.length > 0 && pt.every((t) => tk.includes(t))) || (JSON.parse(p.aliases as string) as string[]).some((a) => a && low.includes(a.toLowerCase())); });
+  if (proj && deliverable !== "answer" && parseOutcomes(text, { project: true }).some((o) => o.kind === "table")) deliverable = "answer";   // "an email-ready summary of what each person is doing" is an answer built from the project's notes, not a follow-up template
   const terms = deliverable === "brief" ? [] : tk.filter((t) => !GENERIC.has(t)).slice(0, 8);
   const enabled = capabilities(ctx);
   const intent: Omit<Intent, "signature"> = { deliverable, terms, projectId: (proj?.id as string) ?? null, projectName: (proj?.name as string) ?? null, when, anaphora: ANAPHORA.test(text) && /\b(meeting|call|sync|promise|after)\b/i.test(text) ? "last_meeting" : null, capabilities: enabled };
@@ -135,8 +136,8 @@ export function receipt(ctx: Ctx, requestId: string) {
   const kids = job ? all(ctx.db, "SELECT status, result, error FROM jobs WHERE root_id=? AND status='blocked'", job.root_id ?? job.id) : []; for (const k of kids) { const q = k.result ? JSON.parse(k.result as string)?.ask?.question : null; if (q) blockers.push(q); }
   const status = (job?.status ?? "queued") as string; const done = status === "done" && (res?.version as number) > 0;
   const quotesOnly = done && !!get(ctx.db, "SELECT 1 x FROM result_versions WHERE result_id=? AND version=? AND flags LIKE '%\"kind\":\"extractive\"%'", r.result_id, res!.version);
-  const parts: OutcomeStatus[] = done ? JSON.parse(String(get(ctx.db, "SELECT outcomes FROM result_versions WHERE result_id=? AND version=?", r.result_id, res!.version)?.outcomes ?? "[]")) : []; const completion = completionOf(parts);
-  return { requestId, revision: r.revision as number, title: r.title as string, origin: r.origin as string, jobId: (r.job_id as string) ?? null, resultId: r.result_id as string, status: kids.length && status !== "blocked" ? "blocked" : status, plain: kids.length ? PLAIN.blocked : done && completion === "complete" && quotesOnly && !parts.length ? "Finished, but only as quoted passages: nothing was computed, listed or organised for you" : done && completion !== "complete" ? completion === "incomplete" ? `Finished, but none of the requested parts could be done (${completionLine(parts)})` : `Finished, but only partly done: ${completionLine(parts)}` : (PLAIN[status] ?? status), completion, parts, step: job?.stage ?? null, blockers, ready: done, version: (res?.version as number) ?? 0, resultState: (res?.state as string) ?? "pending", links: links(r.result_id as string, requestId) };
+  const parts: OutcomeStatus[] = done ? JSON.parse(String(get(ctx.db, "SELECT outcomes FROM result_versions WHERE result_id=? AND version=?", r.result_id, res!.version)?.outcomes ?? "[]")) : []; const completion = quotesOnly && !parts.length ? "quotes_only" : completionOf(parts);
+  return { requestId, revision: r.revision as number, title: r.title as string, origin: r.origin as string, jobId: (r.job_id as string) ?? null, resultId: r.result_id as string, status: kids.length && status !== "blocked" ? "blocked" : status, plain: kids.length ? PLAIN.blocked : done && completion === "quotes_only" ? "Finished, but only as quoted passages: nothing was computed, listed or organised for you" : done && completion !== "complete" ? completion === "incomplete" ? `Finished, but none of the requested parts could be done (${completionLine(parts)})` : `Finished, but only partly done: ${completionLine(parts)}` : (PLAIN[status] ?? status), completion, parts, step: job?.stage ?? null, blockers, ready: done, version: (res?.version as number) ?? 0, resultState: (res?.state as string) ?? "pending", links: links(r.result_id as string, requestId) };
 }
 
 // ---------- instruction revisions ----------
@@ -397,7 +398,7 @@ function composeAnswer(ctx: Ctx, b: any, instr?: ReturnType<typeof parseInstruct
   if (b.mode !== "digest") return composeMeeting(ctx, b);
   if (b.table) {
     const wish = ((b.asked ?? parseOutcomes(String(b.question ?? ""))) as ReturnType<typeof parseOutcomes>).find((o) => o.kind === "table")?.table;
-    const tb = wish ? composeTable(ctx, b, String(b.question ?? ""), wish, { applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] }) : null;
+    const tb = wish ? composeTable(ctx, b, String(b.question ?? ""), wish, { applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [], wantDraft: ((b.asked ?? []) as ReturnType<typeof parseOutcomes>).some((x) => x.kind === "draft") }) : null;
     if (tb && "body" in tb) return tb;
     const dg: any = composeDigest(ctx, b); dg.tableReason = tb && "reason" in tb ? `${tb.reason} Here is what the sources say.` : "No table could be built from the notes. Here is what the sources say."; dg.flags.unshift({ kind: "no_table", text: dg.tableReason }); return dg;
   }
@@ -508,7 +509,7 @@ export function resultView(ctx: Ctx, id: string, version?: number) {
   const sources = v ? (JSON.parse(v.sources as string) as SrcRef[]).map((s) => ({ ...s, link: `/evidence/${s.itemId}?q=${encodeURIComponent(s.quote.slice(0, 80))}`, url: `${deepLinkBase()}/evidence/${s.itemId}`, live: (() => { const it = getItem(ctx, s.itemId); return !!it && !("forgotten" in it && it.forgotten) && !("revoked" in it && it.revoked); })() })) : [];
   const revs = all(ctx.db, "SELECT revision, text, origin, at FROM request_revisions WHERE request_id=? ORDER BY revision", req.id).map((r) => ({ revision: r.revision as number, text: String(r.text).replace(/^\(asked again\)\s*/, ""), origin: String(r.origin).split("#")[0], at: r.at as string }));
   return { id: res.id as string, kind: res.kind as string, title: res.title as string, state: res.state as string, projectId: res.project_id as string | null, projectName: res.project_id ? (get(ctx.db, "SELECT name FROM projects WHERE id=?", res.project_id)?.name as string) : null, version: (v?.version as number) ?? 0, latestVersion: res.version as number, versions: vers.map((x) => ({ version: x.version as number, requestRevision: x.request_revision as number, summary: x.summary as string, at: x.created_at as string, stale: x.stale as string | null })),
-    outcomes: (v?.outcomes ? JSON.parse(v.outcomes as string) : []) as OutcomeStatus[], completion: completionOf(v?.outcomes ? JSON.parse(v.outcomes as string) : []),
+    outcomes: (v?.outcomes ? JSON.parse(v.outcomes as string) : []) as OutcomeStatus[], completion: (() => { const o = v?.outcomes ? JSON.parse(v.outcomes as string) : []; if (!o.length && v && String(v.flags).includes('"kind":"extractive"')) return "quotes_only"; return completionOf(o); })(),
     analysis: v?.analysis ? JSON.parse(v.analysis as string) : null, mode: (v?.mode as string) ?? "rules", draft: (() => { if (!v) return null; const d = get(ctx.db, "SELECT * FROM result_drafts WHERE result_id=? AND version=?", res.id, v.version); return d ? { to: d.to_addr as string | null, subject: d.subject as string, body: (d.edited_body ?? d.body) as string, original: d.body as string, edited: !!d.edited_body, purpose: d.purpose as string } : null; })(),
     body: (v?.body as string) ?? null, summary: (v?.summary as string) ?? null, sources, flags: v ? JSON.parse(v.flags as string) : [], unavailable: v ? JSON.parse(v.unavailable as string) : [], stale: (v?.stale as string) ?? null,
     request: { id: req.id as string, text: req.text as string, revision: req.revision as number, origin: req.origin as string, revisions: revs, synthetic: !!req.synthetic }, receipt: rcpt, reads: readsFor(ctx, req.id as string, v ? (v.request_revision as number) : undefined),
