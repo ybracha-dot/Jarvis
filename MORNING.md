@@ -1,6 +1,77 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. This file has two parts: **Addendum build** (this round), then **Overnight build** (unchanged, further down).
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. This file has three parts: **Redesign build** (this round), **Addendum build**, then **Overnight build** (both unchanged, further down).
+
+# Redesign build: Claude and Jarvis share projects, and the Office shows the handoff
+
+## Launch
+```bash
+git fetch origin claude/upbeat-cannon-wf5kxf && git checkout claude/upbeat-cannon-wf5kxf
+npm install && npm run dev
+```
+Open **http://127.0.0.1:3000**. (If you installed from a ZIP, use the upgrade steps below instead of `git`.)
+
+## The first three clicks
+1. **Office** → **Send as synthetic Claude message**. Look only at the room. A cyan line runs from the Jarvis desk down the aisle to the **Planner**, who types at a desk (who assigned it, who is working). The **Reviewer** then checks the plan and walks to the **YOU** desk with a paper and an amber question bubble (who needs you). The strip above the room says the same in words.
+2. **Projects** → open a project. This is the page Claude reads and writes through the connector. Every item says where it came from.
+3. **Connections** → run the two-way check. This is the only thing that proves your own Claude account reaches Jarvis.
+
+## Was live ordinary Claude used? No.
+Nothing in this round touched a Claude account, a live model, a microphone or a public server. The connector is tested with the official MCP SDK client, in process and against the running production server, using a real token created in the UI. That proves the code path. **It does not prove your account can reach your Jarvis.** The exact pending steps are under "Needs Yonathan" below.
+
+## Upgrade your existing ZIP-installed Mac copy without losing data
+Pulling the branch on GitHub does not change the folder you downloaded. Pick one.
+
+**Data-preserving upgrade (recommended).** Download the new ZIP, unzip it **next to** the old folder, then:
+```bash
+cd ~/Downloads/Jarvis-new            # the newly unzipped folder
+npm install
+npm run backup -- adopt ~/Downloads/Jarvis-old/data
+npm run dev
+```
+`adopt` reads the old folder (it is never modified), copies your personal and example data and your vault files, upgrades the copy's database, runs an integrity check and prints what it kept. If this folder already holds personal data it stops and tells you; `--force` keeps the existing data aside first. Keep the old folder until you have looked around.
+
+**Back up first, any time:**
+```bash
+npm run backup                              # writes ../jarvis-backups/jarvis-<time>/ and verifies it
+npm run backup -- verify ../jarvis-backups/jarvis-<time>
+npm run backup -- restore ../jarvis-backups/jarvis-<time>   # copies what is there aside first
+```
+
+**Clean start (throw away the example data, keep nothing):** unzip the new ZIP somewhere new, `npm install`, `npm run dev`. The private workspace starts empty.
+
+If your old copy is the original ZIP and you cannot find a `data` folder inside it, you never saved anything privately; a clean start loses nothing.
+
+## What changed
+- **Projects (Claude ↔ Jarvis).** Two new connector tools: `get_project_context` and `apply_project_update`. A project keeps current decisions, open options, open questions and dated history apart. Every write is an event with an id, origin, expected revision and a receipt that names the workspace. Replays return the same receipt and write nothing. A stale update (you edited since Claude read) is refused and returns the current state instead of overwriting you. An out-of-order older message never replaces a newer decision. Similar project names are never merged; an ambiguous or unknown name is refused. Tentative wording waits for your confirmation. "Off the record" saves nothing. Forgetting erases the text from everything Claude can read.
+- **Golden Iceland scenario** is a regression test (`tests/projects.test.ts`, `tests/connect.test.ts`): options, a decision that settles them, a changed mind, replay, out-of-order, stale patch, a second similar project, forget, new Claude session, your edit read back.
+- **Connector security.** Tokens are created in Jarvis, shown once, stored only as a hash, scoped (read, or read + save), optionally expiring, rotatable and revocable (a revoked token stops working inside an open session). Rate limited. Never in a URL, the database, logs or the API list. `JARVIS_MCP_TOKEN` still works.
+- **Hosted connector files.** `deploy/` (Dockerfile, compose, Caddyfile, README) puts only `/mcp` and `/healthz` on the internet over HTTPS; the app returns 404 for everything else (`JARVIS_PUBLIC_MODE=mcp-only`, `src/proxy.ts`), and the private app stays on loopback. One database serves both. **Not deployed or run against a server.**
+- **Office.** A new Jarvis-owned pixel room (plank floor, navy walls, paired desks, plants, aisle), characters that walk the aisle to desks, type or read, a cyan assignment trace, an arrival ring, an amber question bubble, a YOU desk. Plus the handoff strip, a contextual inspector and a mobile roster. Details and the Pixel Agents evaluation: `docs/REDESIGN-NOTES.md`.
+- **Reviewer + verification loop.** Planner finishes, Reviewer verifies, then one decision with the checks attached. One retry, then plain words to you.
+- **Shell.** Four places: Today, Projects, Office, Memory. Everything else under More and in the command palette (⌘K). The permanent right panel is gone; Today shows decisions beside it only when something needs you. Ink background, warm off-white text, a single cool signal color, a restrained metal highlight, Geist + IBM Plex Mono, working text at least 14px. The assistant light (idle / listening / speaking) follows the real microphone and speech playback.
+- **Today** answers "what matters, what are the agents doing, where did the output go". **Activity and outcomes** lists goal → result → receipt; Completed is linked from there and keeps its address.
+- **Memory** gives a current answer and why, then pin, edit, move, merge, supersede, one-step undo and forget.
+
+## Verification
+| Check | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm test` | **142 tests**, all pass (was 118) |
+| `npm run build` | passes |
+| `npm run e2e` | **229 checks, 0 problems** (was 199): real Chromium on the production server, including the handoff, Projects, the connector, the two-way check, revoke, and axe-core on every page |
+| Upgrade | a schema-3 database with real rows is adopted: rows, search index and vault files preserved, old folder byte-for-byte unchanged |
+| Contrast | AA on the new tokens (`tests/contrast.test.ts`); axe-core on every page, desktop and phone |
+
+Screenshots: `docs/screenshots/` (after, from the browser suite), `docs/screenshots/before/` (the previous release) and `docs/screenshots/sizes/` (13-inch 1280x800, wide 1920x1080 and a 390px phone: Today, Office, Projects, Memory, Connections). I looked at them for overlap, tiny characters and stranded controls. Findings fixed: the YOU desk fell below the fold at 13-inch (the room now fits the viewport height) and stacked question bubbles overlapped (only the first waiting worker shows a bubble; the rest show a "?" badge). Known: on a phone the pixel room is replaced by the handoff strip and roster, because characters would be unreadably small there.
+
+## Needs Yonathan
+1. **Your Office screenshot did not arrive.** I built from the written description and say so. Send it and I will compare at the same scale and adjust.
+2. **See real Claude Code sessions in the official Pixel Agents office.** In a terminal on your Mac: `npx pixel-agents --host 127.0.0.1 --port 3100`, open the printed address (it has a secret `?token=`; do not share it), then start `claude` in another terminal. It edits hook configuration under `~/.claude` (it says so); that is why I did not run it for you. Jarvis's own background workers will not appear there. That is expected and labeled.
+3. **Prove ordinary Claude reaches Jarvis.** Deploy `deploy/` (or use Claude Desktop with `npm run mcp`), add the connector, run Connections → the two-way check. Whether your Claude plan accepts a fixed `Authorization` header on a custom connector is not confirmed.
+4. Hosting, domain, any cost, and any public exposure are yours to decide.
+5. Paid model calls remain off. Nothing here needs a key.
+
 
 # Addendum build: Office, capture, and the spoken BI107 guide
 

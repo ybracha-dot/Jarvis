@@ -62,8 +62,12 @@ export function projectContext(ctx: Ctx, ref: string) {
   const options = live.filter((f) => f.status === "option"); const suggestions = live.filter((f) => f.status === "suggested");
   const history = rows.filter((f) => ["superseded", "retracted"].includes(f.status));
   const sources = all(ctx.db, "SELECT event_id, origin, client, at, resulting_revision rev FROM project_events WHERE project_id=? AND undone_at IS NULL ORDER BY at DESC, rowid DESC LIMIT 12", p.id);
-  const answer = [current.length ? `Current: ${current.map((f) => `${f.key.replace(/-/g, " ")}: ${f.text} (${f.origin}, rev ${f.revision}, ${f.asOf.slice(0, 10)})`).join("; ")}.` : "Nothing is decided yet.",
-    options.length ? `Open options: ${options.map((f) => f.text).join("; ")}.` : "", history.some((f) => f.status === "superseded" && f.kind !== "option") ? `Earlier: ${history.filter((f) => f.status === "superseded" && f.kind !== "option").map((f) => `${f.text} (replaced)`).join("; ")}.` : "",
+  const label = (k: string) => k.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const byKey = new Map<string, string[]>(); for (const o of options) byKey.set(o.key, [...(byKey.get(o.key) ?? []), o.text]);
+  const earlier = history.filter((f) => f.status === "superseded" && f.kind !== "option");
+  const answer = [current.length ? current.map((f) => `${label(f.key)}: ${f.text}.`.replace(/\.\.$/, ".")).join(" ") : "Nothing is decided yet.",
+    byKey.size ? [...byKey].map(([k, v]) => `Still deciding ${k.replace(/-/g, " ")}: ${v.join(" or ")}.`).join(" ") : "",
+    earlier.length ? `Earlier: ${earlier.map((f) => `${f.text} (replaced)`).join("; ")}.` : "",
     suggestions.length ? `Waiting for your confirmation: ${suggestions.map((f) => f.text).join("; ")}.` : ""].filter(Boolean).join(" ");
   return { project: { id: p.id as string, name: p.name as string, slug: p.slug as string, kind: p.kind as string, revision: p.revision as number, updatedAt: p.updated_at as string, lastOrigin: p.last_origin as string | null, course: p.course as string | null },
     workspace: workspaceIdentity(ctx), current, options, suggestions, actions: cur(["action"]), questions: cur(["question"]), history, sources, answer };

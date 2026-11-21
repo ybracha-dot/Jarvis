@@ -44,7 +44,7 @@ function watch(page: Page, label: string) {
   page.on("requestfailed", (r) => { if (!/_next\/webpack-hmr|\.map$/.test(r.url()) && !/ERR_ABORTED/.test(r.failure()?.errorText ?? "") && !(restarting && /ERR_CONNECTION_REFUSED/.test(r.failure()?.errorText ?? ""))) problems.push(`requestfailed(${label}): ${r.url()} ${r.failure()?.errorText}`); });
   page.on("response", (r) => { if (r.status() >= 400 && !r.url().includes("/__expect")) problems.push(`http ${r.status()}(${label}): ${r.request().method()} ${r.url()}`); });
 }
-const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, name), fullPage: false });
+const shot = async (page: Page, name: string) => { await page.evaluate(() => { (document.querySelector('[data-testid="handoff-strip"]') ?? document.querySelector("h1"))?.scrollIntoView({ block: "start" }); window.scrollBy(0, -64); }).catch(() => {}); return page.screenshot({ path: path.join(SHOTS, name), fullPage: false }); };
 const post = (p: string, body: unknown) => fetch(`${base}/api${p}`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify(body) });
 
 async function journeyDesktop(ctx: BrowserContext) {

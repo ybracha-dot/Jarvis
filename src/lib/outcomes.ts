@@ -4,6 +4,7 @@ import { Ctx, all, get } from "./db";
 
 export interface Outcome { id: string; at: string; source: "agent" | "claude" | "you" | "task"; status: "verified" | "waiting" | "done" | "failed" | "cancelled"; goal: string; result: string; receipt: string | null; href: string }
 
+const PHRASE: Record<string, string> = { decide: "decided", option: "option for", fact: "noted", action: "to do:", question: "open question:", retract: "withdrew" };
 export function outcomes(ctx: Ctx, limit = 20): Outcome[] {
   const out: Outcome[] = [];
   for (const j of all(ctx.db, "SELECT * FROM jobs WHERE owner_id=? AND parent_id IS NULL AND status IN ('done','failed','cancelled','blocked') ORDER BY COALESCE(finished_at, created_at) DESC LIMIT ?", ctx.owner, limit)) {
@@ -24,7 +25,7 @@ export function outcomes(ctx: Ctx, limit = 20): Outcome[] {
   }
   for (const e of all(ctx.db, "SELECT e.event_id, e.origin, e.at, e.resulting_revision rev, e.receipt, p.name, p.id pid FROM project_events e JOIN projects p ON p.id=e.project_id WHERE e.owner_id=? AND e.undone_at IS NULL ORDER BY e.at DESC LIMIT ?", ctx.owner, limit)) {
     const r = JSON.parse(e.receipt as string); const n = (r.changes ?? []).filter((c: any) => c.status !== "retracted").length;
-    out.push({ id: e.event_id as string, at: e.at as string, source: e.origin === "claude" ? "claude" : "you", status: "done", goal: `${e.name}`, result: `${e.origin === "claude" ? "Updated from Claude" : "Edited in Jarvis"}: ${r.changes.map((c: any) => `${c.op} ${String(c.key).replace(/-/g, " ")}`).join(", ")}.`, receipt: `Revision ${e.rev}, ${n} change${n === 1 ? "" : "s"}`, href: `/projects/${e.pid}` });
+    out.push({ id: e.event_id as string, at: e.at as string, source: e.origin === "claude" ? "claude" : "you", status: "done", goal: `${e.name}`, result: `${e.origin === "claude" ? "" : "Edited in Jarvis: "}${r.changes.map((c: any) => `${PHRASE[c.op] ?? c.op} ${String(c.key).replace(/-/g, " ")}`).join(", ")}.`.replace(/^./, (c: string) => c.toUpperCase()), receipt: `Revision ${e.rev}, ${n} change${n === 1 ? "" : "s"}`, href: `/projects/${e.pid}` });
   }
   for (const t of all(ctx.db, "SELECT id,title,completed_at FROM tasks WHERE owner_id=? AND status='done' AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT ?", ctx.owner, limit))
     out.push({ id: t.id as string, at: t.completed_at as string, source: "task", status: "done", goal: String(t.title), result: "Marked done.", receipt: null, href: `/completed` });
