@@ -35,7 +35,7 @@ const supervise_capture: Handler = async (api: JobApi) => {
     if (rr.status !== "done") throw new Error(`Reviewer ${rr.status}`);
     verdict = rr.result;
     if (verdict.verdict !== "retry") break;
-    api.event("retry", "The reviewer found a gap and sent the work back once", { problems: verdict.problems });
+    await api.step(`retry${round}`, "The reviewer found a gap and sent the work back once", () => { api.event("retry", "The reviewer found a gap and sent the work back once", { problems: verdict.problems }); return true; });
   }
   await api.step("close", "Recording what was verified", () => ({ ok: true }));
   return { ...plannerResult, ...verdict };
