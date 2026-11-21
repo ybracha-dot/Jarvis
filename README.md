@@ -38,7 +38,7 @@ The server binds to loopback only. It rejects other hosts and other origins on e
 | Command | What it does |
 |---|---|
 | `npm run verify` | typecheck, all tests, production build |
-| `npm test` | 75 tests: domain, API boundary, imports, scheduler, router, council, skills, MCP over stdio, Postgres RLS |
+| `npm test` | 118 tests: domain, API boundary, imports, scheduler, router, council, skills, jobs and Office, capture, study guides and quizzes, MCP over stdio and HTTP, Postgres RLS |
 | `npm run e2e` | real-browser journey (needs `npm run build` first). Saves screenshots to `docs/screenshots/` |
 | `npm run worker` | unattended scheduler and job runner with a heartbeat (checks 08:00 and 16:00 New York, weekly Sunday 15:00; runs Office jobs) |
 | `npm run mcp:smoke -- <url> <token>` | smoke test for an authorized MCP connector (see docs/CAPTURE-SETUP.md) |

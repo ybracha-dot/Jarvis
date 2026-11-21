@@ -1,6 +1,105 @@
 # MORNING
 
-Branch: `claude/upbeat-cannon-wf5kxf` in the private `Jarvis` repo. No pull request was opened.
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. This file has two parts: **Addendum build** (this round), then **Overnight build** (unchanged, further down).
+
+# Addendum build: Office, capture, and the spoken BI107 guide
+
+## First thing to open
+
+```bash
+git fetch origin claude/upbeat-cannon-wf5kxf && git checkout claude/upbeat-cannon-wf5kxf
+npm install && npm run dev
+```
+
+Open **http://127.0.0.1:3000/office** and press **Send as synthetic Claude message**. Watch the supervisor assign a Capacity specialist, click the helper to see its task, evidence, step and heartbeat, and watch one decision arrive in the right panel. Press **Replay the same message**: nothing doubles.
+
+Then **Today → Ask Jarvis** for the BI107 voice journey. `docs/MAC-CHECKLIST.md` is the short list for the microphone, audible replies and the live Claude call.
+
+## One clickable path per journey
+
+| Journey | Path |
+|---|---|
+| Capture → Office → one decision | `/office` → Send as synthetic Claude message → click the Capacity specialist → open the decision in the right panel |
+| Replay and Undo | same page → Replay the same message (shows "duplicate: nothing new") → Undo on the receipt |
+| Kill the worker mid-job | `npm run worker` in one terminal, capture something, press Ctrl+C or `kill -9` the worker mid-run, start it again. The job finishes once. (The e2e does exactly this with a real process kill) |
+| Spoken BI107 guide | Today → Ask Jarvis → Tap to talk (or type) → Attach photos (`fixtures/bi107/`, one is partly blurred) → Send → hear the acknowledgment → leave to Office → come back to `/courses/BI107` → Open guide |
+| Edit and versions | guide → Edit → Save as a new version → Versions |
+| Quiz and "what I missed" | guide → Quiz me, miss some → say or type "Quiz me on what I missed" |
+| PDF | guide → Export PDF, or PDF with answer key |
+| Connector | `docs/CAPTURE-SETUP.md`, then `npm run mcp:smoke -- <url> <token>` |
+
+## What was built
+
+- **Capture**: one handler for every route (Office box, MCP tools `save_to_jarvis` and `recall_from_jarvis` over stdio and over an authenticated HTTP `/mcp` route, voice). Stable dedup key, receipt with a deep link, Undo. Recall searches saved Jarvis records only and says exactly what to share when nothing matches. It does not claim to read your Claude chats.
+- **Deadline watch**: an email that brings a deadline forward for a commitment you already have updates that commitment once and raises one decision. Replays and later dates change nothing. It never sends anything.
+- **Durable job engine** (`src/lib/jobs.ts`): leases, memoized steps, idempotent delegation, depth and concurrency bounds, children inherit a subset of the parent's tools and budget, cancellation cascades, a restarted worker recovers expired jobs. Idle desks make zero model calls.
+- **Live Office** (`/office`): an original SVG pixel office with Intake, Research, Planning and Decisions rooms, driven only by saved job events, with a roster, an inspector, a mobile roster, and reduced motion. Synthetic source events are labeled.
+- **Voice front door** on Today and the course workspace: tap-to-talk, visible microphone state, disclosure of the external speech service before first use, editable transcript, text fallback, photo attach with a per-photo quality check, voice picker preferring British English at a measured pace, preview, mute, stop, interrupt-by-talking, and a spoken completion even if you were on another screen.
+- **BI107 study guide**: previous guide found by course and type (asks only for competing matches, or to paste one once), format read from it, photos checked on real pixels, coverage read from the final announcement (marked provisional if missing), answer key checked against course materials (including recomputing Hardy-Weinberg arithmetic), saved as an editable, versioned document under BI107 → Study Guides → Final, quizzes pinned to the exact version, missed-question retrieval, PDF export.
+
+## Verification: live, fixture, pending
+
+**Live verified: nothing in this round.** No Claude account, API key, microphone, speaker or real photo was used here.
+
+**Tested with fixtures and fakes (what actually ran):**
+
+| Check | How |
+|---|---|
+| `npm run verify` | typecheck, **118 tests**, production build: all pass |
+| Full browser suite `npm run e2e` | **199 checks, 0 problems**, real Chromium on the production server, run again from the clean checkout state each time |
+| Capture → one commitment, one helper, one decision; replay; Undo | unit tests and e2e |
+| Worker killed mid-job, replaced, still one commitment and one decision | **real process kill (SIGKILL)** in e2e, plus unit tests that crash before and after a step |
+| Office reconnect | page reload rebuilds from saved state |
+| MCP connector | official SDK client over stdio and over HTTP (in process and against the running server), bad or missing token refused |
+| Spoken journey | **fake speech engines** injected into the browser. This tests the app's logic (voice choice, pace, interruption, announcement, speaking once), not real audio or real speech recognition |
+| Photos | two synthetic images: the local check flags exactly "bottom right" on the partly blurred one and passes the sharp one. Reading what they say uses a **labeled fixture reading** that exists only for those two images |
+| Claude image reading and question writing | tested with a mock transport (image block sent, style notes and materials in the writer prompt, invalid questions dropped). **Never run against the live API** |
+| Guide edit, versions, stale-edit refusal, quiz, missed items, restart persistence, duplicate request, cancel | unit tests and e2e, including a real server restart |
+| PDF | text extracted from the generated PDF: practice copy has no answers, key copy has them |
+| axe-core on every page including Office, Courses, the course workspace and a guide | no serious or critical issues, desktop and phone |
+| Hosted-backend RLS | unchanged from the overnight build |
+
+**Pending, needs a device, account or key:** real microphone capture and real audible playback (steps 2 and 3 of the Mac checklist), a real Claude image read of your actual test photos and Claude-written questions (step 5), adding the connector to your Claude account, and anything on the list below.
+
+## Screenshots (`docs/screenshots/`)
+
+Office: `15-office-desktop.png`, `15b-office-after-restart-desktop.png`, `17-office-study-desktop.png`, `16-office-mobile.png`. Finished guide: `18-guide-desktop.png` (v1 from your two photos), `19-guide-mobile.png` (a later version without photos), `20-voice-dock-desktop.png`, `21-course-workspace-desktop.png`, `22-course-workspace-mobile.png`. A sample answer-key PDF: `BI107-final-study-guide-sample.pdf`.
+
+## Bugs found and fixed this round
+
+1. The decisions panel never refreshed when a background helper raised a decision. It now polls.
+2. The API never exported `PUT`, so saving a guide edit silently failed.
+3. A cancel that arrived while the supervisor was mid-run was ignored once it began waiting on a helper, leaving a "waiting" supervisor and a stray blocked helper. Fixed in the engine, with a regression test.
+4. "Reset demo" did not clear the new tables (jobs, captures, documents, photos), so a reset left old guides behind. Fixed, with a test.
+5. A helper that stops to ask which earlier guide to match had no way to be answered in the UI. The question now appears in the conversation, is spoken, and can be answered there or in the Office.
+6. The completion message was suppressed by the acknowledgment sharing a job id (found by a unit test).
+7. Re-opening BI107 after deleting its guides silently re-created them (found by a unit test).
+8. Cosmetic: "partly unclear: Partly unclear", "Fixture: Fixture generator", a doubled supervisor row, small Office sprites, a parser that split "the smoke-test team" wrongly.
+9. Test harness: Chromium has a native `SpeechRecognition` that bypassed my fake until I defined both names.
+
+## Known gaps in this round
+
+- **The fixture question bank ignores the photos.** In the example workspace, photo readings are recorded and shown, but the fixture writer picks from a built-in bank for the synthetic BI107 notes. Only the Claude writer uses your photo style. The guide labels which one ran.
+- **Photos you upload are only read with a Claude key.** Without one they are quality-checked, kept, and the guide says "not read (needs a Claude provider)". Nothing is made up.
+- **Not built:** importing a selected Claude conversation export, Gmail OAuth watching, WhatsApp Business webhook, Apple Messages. WhatsApp and Messages work as reviewed paste only. Table in `docs/CAPTURE-SETUP.md`.
+- **Connector auth is a static bearer token.** If claude.ai requires OAuth for remote connectors on your plan, that is not built, and a localhost URL cannot serve Claude mobile.
+- PDF uses a built-in Latin font. Non-Latin text (for example Hebrew) would not render. Diagrams appear as a caption, and photos are not embedded.
+- Office specialist templates have a minimal approve flow. Recurring schedules for them are not offered.
+- Speech: Firefox has no speech recognition. The dock says so and typing works. A voice is your device's own. I did not test Safari or a real British voice.
+- One screenshot (`19`) is the third guide version, which had no photos attached.
+
+## Smallest remaining setup
+
+1. Mac checklist steps 2 and 3 (microphone, speaker): about five minutes, no account.
+2. Step 5: `ANTHROPIC_API_KEY` in `.env`, a small daily budget in Settings, **Test Claude**, then repeat the journey with your real photos.
+3. Connector: `docs/CAPTURE-SETUP.md`. Option A (Claude Desktop, stdio) needs no deployment.
+4. Everything in "Needs Yonathan" below, unchanged.
+
+---
+
+# Overnight build (unchanged)
+
+The counts and screenshots in this part are from the first build. Current counts are in the addendum above.
 
 ## Launch
 
