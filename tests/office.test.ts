@@ -199,3 +199,30 @@ describe("cancel that lands while a supervisor is running", () => {
     expect(count(ctx, "jobs", "kind='kid'")).toBe(0);
   });
 });
+
+import { ingestRevision } from "@/lib/ingest";
+describe("an email that brings a deadline forward for a commitment you already have", () => {
+  const email = (id: string, text: string, at = "2026-11-17T09:00:00-05:00") => ({ provider: "example-email", externalId: id, title: "Email from Priya", courseExternalId: "example-admin", courseCode: "ADMIN", courseName: "Administrative", kind: "email" as const, text, publishedAt: at });
+  it("updates that commitment once and raises one decision; replays and later dates change nothing; nothing is sent", async () => {
+    const { ctx, clock } = fresh();
+    captureToJarvis(ctx, { text: TAMID, sourceKind: "claude-chat" }); await processQueue(ctx, base(ctx, clock));
+    const cmt = () => get(ctx.db, "SELECT due_date FROM commitments WHERE action='three pitch angles'")!.due_date;
+    expect(cmt()).toBe("2026-11-19");
+    const before = count(ctx, "decisions");
+    const r = ingestRevision(ctx, email("m1", "Update for the TAMID team: please send the three pitch angles by Wednesday. The review meeting moved up."));
+    expect(r.changes.some((c) => c.type === "commitment_moved")).toBe(true);
+    expect(cmt()).toBe("2026-11-18");
+    expect(count(ctx, "decisions")).toBe(before + 1);
+    expect(count(ctx, "commitment_events", "kind='due_moved'")).toBe(1);
+    const d = listDecisions(ctx).find((x) => /now by 2026-11-18/.test(x.title))!;
+    expect(d.kind).toBe("commitment_plan"); expect(d.options.map((o: any) => o.id)).toContain("reserve");
+    // the same email arrives again (different message id, same words), and a later-dated reminder: no change
+    ingestRevision(ctx, email("m2", "Update for the TAMID team: please send the three pitch angles by Wednesday. The review meeting moved up."));
+    ingestRevision(ctx, email("m3", "Reminder for the TAMID team: the three pitch angles are expected by Friday."));
+    expect(cmt()).toBe("2026-11-18"); expect(count(ctx, "decisions")).toBe(before + 1); expect(count(ctx, "commitment_events", "kind='due_moved'")).toBe(1);
+    // an unrelated email that shares one word does nothing
+    ingestRevision(ctx, email("m4", "Lunch on Tuesday. Bring angles of the new logo."));
+    expect(cmt()).toBe("2026-11-18");
+    expect(count(ctx, "deliveries")).toBe(0);     // nothing was sent anywhere
+  });
+});

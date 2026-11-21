@@ -32,7 +32,7 @@ const step = (s: string) => { steps.push(s); console.log(`\n# ${s}`); };
 async function startServer(reuseDir?: string) {
   if (process.env.E2E_URL) return;
   const dir = reuseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-e2e-")); dataDir = dir;
-  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...process.env, JARVIS_DATA_DIR: dir, JARVIS_INAPP_RUNNER: "0" }, stdio: "ignore", detached: true });
+  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...process.env, JARVIS_DATA_DIR: dir, JARVIS_INAPP_RUNNER: "0", JARVIS_MCP_TOKEN: "e2e-token-0123456789abcdef" }, stdio: "ignore", detached: true });
   for (let i = 0; i < 60; i++) { try { const r = await fetch(`${base}/api/health`); if (r.ok) return; } catch { /* waiting */ } await new Promise((r) => setTimeout(r, 500)); }
   throw new Error("Server did not start. Run npm run build first.");
 }
@@ -696,7 +696,7 @@ async function journeyStudy(browser: Browser) {
   const doc = (await api(`/documents/${docId}`)).content;
   const body = await bodyText(page);
   ok(/Answer key check: 8 of 8 questions supported by your course materials/.test(body), "the answer key check is shown");
-  ok(/Fixture: Fixture generator/.test(body), "the fixture generator is labeled, not passed off as live");
+  ok(/Fixture generator: questions come from a small built-in bank/.test(body), "the fixture generator is labeled, not passed off as live");
   ok(/test-photo-1\.png: read/.test(body) && /partly unclear: bottom right/.test(body), "each photo's status is recorded in the guide");
   ok(/Format from:\s*BI107 Midterm study guide \(v1\)/.test(body), "it says which earlier guide was used");
   ok(!body.includes(doc.questions[0].rationale), "answers and explanations are hidden in the practice view");
@@ -804,6 +804,21 @@ async function journeyStudy(browser: Browser) {
   ok((await over()) <= 0, "the quiz has no horizontal scroll on the phone");
   await mctx.close();
 }
+
+async function journeyMcp() {
+  step("Connector: an authorized MCP client saves a promise, replays it, recalls it; no token, no entry");
+  const url = `${base}/mcp`;
+  const anon = await fetch(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: "{}" });
+  ok(anon.status === 401, "a request without the token is refused");
+  const bad = await fetch(url, { method: "POST", headers: { authorization: "Bearer nope-nope-nope-nope", "content-type": "application/json", accept: "application/json, text/event-stream" }, body: "{}" });
+  ok(bad.status === 401, "a wrong token is refused");
+  const out = await new Promise<{ code: number; text: string }>((res) => { const c = spawn("npx", ["tsx", "scripts/mcp-smoke.ts", url, "e2e-token-0123456789abcdef"], { env: process.env }); let t = ""; c.stdout.on("data", (d) => (t += d)); c.stderr.on("data", (d) => (t += d)); c.on("close", (code) => res({ code: code ?? 1, text: t })); });
+  ok(out.code === 0 && /MCP smoke test passed/.test(out.text), `the smoke script passes against the running server (${out.text.split("\n").filter((l) => l.startsWith("ok")).length} checks)`);
+  await waitFor("the supervisor to handle the connector capture", async () => (await api("/office")).jobs.some((j: any) => /smoke-test team/.test(j.title) && j.status === "done"), 40000);
+  const d = await api("/decisions"); ok(d.decisions.filter((x: any) => /smoke-test team/.test(x.title)).length === 1, "the connector capture produced exactly one decision after a replay");
+  const caps = await api("/captures"); const c = caps.captures.find((x: any) => /smoke-test/.test(x.parsed.owedTo ?? ""));
+  ok(!!c && c.source.includes("Ordinary Claude chat") && c.synthetic === true, "the capture is labeled with its real source and as synthetic");
+}
 async function main() {
   fs.mkdirSync(SHOTS, { recursive: true });
   await startServer();
@@ -812,6 +827,7 @@ async function main() {
   try {
     const only = process.env.E2E_ONLY;
     if (only === "study") { await journeyStudy(browser); }
+    else if (only === "mcp") { startWorker(300); await journeyMcp(); }
     else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
     else {
     const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
@@ -821,6 +837,7 @@ async function main() {
     await journeyBreak(page); await journeySettings(page);
     await journeyOffice(page, browser);
     await journeyStudy(browser);
+    await journeyMcp();
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);

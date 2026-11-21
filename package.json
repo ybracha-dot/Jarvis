@@ -17,7 +17,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "tsx scripts/e2e.ts",
-    "verify": "npm run typecheck && npm run test && npm run build"
+    "verify": "npm run typecheck && npm run test && npm run build",
+    "mcp:smoke": "tsx scripts/mcp-smoke.ts",
+    "fixtures": "tsx scripts/make-fixtures.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

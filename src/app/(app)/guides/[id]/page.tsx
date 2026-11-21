@@ -42,7 +42,7 @@ function Guide({ id }: { id: string }) {
 function Provenance({ c }: { c: any }) {
   return <Card className="p-4 space-y-2 text-sm" data-testid="provenance">
     {c.coverage.provisional && <Notice><span data-testid="provisional">Coverage is provisional. {c.coverage.basis}</span></Notice>}
-    {c.generator && <p className="text-[13px] text-muted" data-testid="generator-note">{c.generator.live ? "" : "Fixture: "}{c.generator.note}</p>}
+    {c.generator && <p className="text-[13px] text-muted" data-testid="generator-note">{c.generator.note}</p>}
     {c.keyCheck && <p className="text-[13px]" data-testid="key-check">Answer key check: {c.keyCheck.supported} of {c.keyCheck.checked} questions supported by your course materials.{c.keyCheck.removed.length ? ` ${c.keyCheck.removed.length} dropped for failing the check.` : ""}{c.keyCheck.unverified.length ? ` ${c.keyCheck.unverified.length} could not be verified and are flagged.` : ""}</p>}
     <div className="text-[13px] space-y-1"><div><span className="text-muted">Format from:</span> {c.sources.format ?? "none"}</div>
       <div><span className="text-muted">Question style from photos:</span> {c.sources.photos.length ? <ul className="list-disc pl-5">{c.sources.photos.map((p: any, i: number) => <li key={i}>{p.name}: {p.status}</li>)}</ul> : "no photos attached"}</div>

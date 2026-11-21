@@ -7,6 +7,7 @@ import { emitDecision } from "./decisions";
 import { planWork } from "./planner";
 import { findPromises } from "./commitments";
 import { resolveWeekday } from "./extract";
+import { watchDeadlines } from "./deadline-watch";
 
 export const SOURCE_KINDS = ["syllabus", "announcement", "email", "assignment", "calendar", "reference", "receipt", "other"] as const;
 export const IngestInput = z.object({
@@ -130,6 +131,7 @@ function applyFacts(ctx: Ctx, a: { courseId: string; courseExternalId: string; s
     }
   }
 
+  if (input.kind === "email") for (const m of watchDeadlines(ctx, { text: input.text, publishedAt: input.publishedAt, revisionId, sourceTitle: input.title })) { if (m.decisionId) decisionIds.push(m.decisionId); changes.push({ type: "commitment_moved", summary: `Commitment moved up: ${m.from} to ${m.to}`, decisionId: m.decisionId ?? undefined }); }
   const tasks = all(ctx.db, "SELECT * FROM tasks WHERE owner_id=? AND course_id=?", ctx.owner, courseId);
   const matched = facts.taskRefs.map((r) => tasks.find((t) => t.external_id === r.externalId)).filter(Boolean) as typeof tasks;
   const unmatchedRefs = facts.taskRefs.filter((r) => !tasks.find((t) => t.external_id === r.externalId));

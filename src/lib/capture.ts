@@ -35,7 +35,7 @@ export function parseCapture(text: string, publishedAt: string): Parsed {
     const wd = new RegExp(`\\b(${WD})\\b`, "i").exec(s); if (wd) return resolveWeekday(wd[1], publishedAt);
     const d = findDates(s, publishedAt)[0]; return d ? d.localDate : null;
   };
-  let m = /\bI owe\s+(?:the\s+)?((?:[A-Z][\w&-]*)(?:\s+[A-Z][\w&-]*)*(?:\s+(?:team|group|club|committee|board))?|\w+)\s+(.+?)\s+by\s+(.+?)[.!]?$/.exec(body);
+  let m = /\bI owe\s+(?:the\s+)?((?:[\w&-]+\s+){0,2}(?:team|group|club|committee|board)|(?:[A-Z][\w&-]*)(?:\s+[A-Z][\w&-]*)*|\w+)\s+(.+?)\s+by\s+(.+?)[.!]?$/.exec(body);
   if (m) {
     const action = m[2].trim();
     const n = NUM[action.split(/\s+/)[0].toLowerCase()] ?? Number(action.split(/\s+/)[0]) ?? 0;

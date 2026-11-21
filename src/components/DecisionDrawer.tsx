@@ -119,7 +119,7 @@ export function DecisionDrawer({ id, onClose }: { id: string; onClose: () => voi
           </div>}
           {d.kind === "date_conflict" && <Button variant="ghost" busy={handled.busy} onClick={() => handled.run()}>Already handled</Button>}
           {(d.kind === "new_task" || d.kind === "promise_found") && <div className="flex gap-2"><Button variant="primary" busy={accept.busy} onClick={() => accept.run()}>{d.kind === "new_task" ? "Add task" : "Track it"}</Button><Button variant="ghost" busy={handled.busy} onClick={() => handled.run()}>Dismiss</Button></div>}
-          {["requirement_added", "requirement_waived", "needs_read"].includes(d.kind) && <Button variant="primary" busy={handled.busy} onClick={() => handled.run()}>{d.kind === "needs_read" ? "Already handled" : "Got it"}</Button>}
+          {["requirement_added", "requirement_waived", "needs_read", "commitment_moved"].includes(d.kind) && <Button variant="primary" busy={handled.busy} onClick={() => handled.run()}>{d.kind === "needs_read" ? "Already handled" : "Got it"}</Button>}
           <button onClick={() => waited.run()} className="text-[12px] text-muted hover:text-fg underline underline-offset-2">That could have waited</button>
         </div>
       ) : undefined}>
@@ -185,7 +185,7 @@ export function DecisionDrawer({ id, onClose }: { id: string; onClose: () => voi
           </div>))}</div>
       </section>}
 
-      {["new_task", "promise_found", "requirement_added", "requirement_waived", "needs_read"].includes(d.kind) && <section>
+      {["new_task", "promise_found", "requirement_added", "requirement_waived", "needs_read", "commitment_moved"].includes(d.kind) && <section>
         <SectionTitle>Source</SectionTitle>
         <p className="text-sm mb-2">{d.summary}</p>
         {ev.quote && <Quote source={<>{ev.sourceTitle}{ev.publishedAt ? ` · ${fmtDateTime(ev.publishedAt)}` : ""}</>}>{ev.quote}</Quote>}
