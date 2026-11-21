@@ -106,7 +106,7 @@ export function ingestRevision(ctx: Ctx, raw: IngestInput): IngestResult {
 
 function providerLabel(p: string): string {
   return ({ "example-blackboard": "Blackboard (example)", "example-email": "Email (example)", "example-calendar": "Calendar (example)",
-    "paste": "Pasted text", "inbox-folder": "Watched folder", "ics": "Calendar file", "eml": "Email file", "json-bundle": "JSON bundle" } as Record<string, string>)[p] ?? p;
+    "example-library": "Library (example)", "import": "File import", "paste": "Pasted text", "inbox-folder": "Watched folder", "ics": "Calendar file", "eml": "Email file", "json-bundle": "JSON bundle" } as Record<string, string>)[p] ?? p;
 }
 
 function applyFacts(ctx: Ctx, a: { courseId: string; courseExternalId: string; sourceId: string; revisionId: string; input: IngestInput }) {

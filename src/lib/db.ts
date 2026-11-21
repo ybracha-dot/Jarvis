@@ -1,21 +1,19 @@
-import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
-const req = createRequire(import.meta.url);
-// node:sqlite is a Node >=22.13 builtin. Loaded via require so bundlers do not try to resolve it.
-const { DatabaseSync } = req("node:sqlite") as typeof import("node:sqlite");
+// node:sqlite is a Node >=22.13 builtin. Loaded at runtime so bundlers do not try to resolve it.
+const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 export type DB = InstanceType<typeof DatabaseSync>;
 
 export type Mode = "demo" | "personal";
 export const OWNER = "local";
 
 export function dataRoot(): string {
-  return path.resolve(process.env.JARVIS_DATA_DIR || path.join(process.cwd(), "data"));
+  return path.resolve(/*turbopackIgnore: true*/ process.env.JARVIS_DATA_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), "data"));
 }
 export function modeDir(mode: Mode): string {
-  return path.join(dataRoot(), mode);
+  return path.join(/*turbopackIgnore: true*/ dataRoot(), mode);
 }
 
 export function uid(prefix: string): string {

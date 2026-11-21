@@ -1,0 +1,42 @@
+"use client";
+import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
+import { api, useQuery, useAction } from "@/components/api";
+import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Notice, Field, inputCls, cx } from "@/components/ui";
+import { fmtDateTime } from "@/lib/time";
+
+export default function SettingsPage() {
+  const q = useQuery<any>("/settings"); const sess = useQuery<any>("/session"); const sched = useQuery<any>("/scheduler"); const router = useQuery<any>("/router");
+  const demo = sess.data?.mode !== "personal";
+  const [f, setF] = useState<any>(null); const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { if (q.data && !f) setF({ m: q.data.checkTimes[0], a: q.data.checkTimes[1], w: q.data.weeklyTime, qs: q.data.quietDaily[0]?.start ?? "", qe: q.data.quietDaily[0]?.end ?? "", ds: q.data.dayStart, de: q.data.dayEnd, budget: String(q.data.dailyBudgetUsd), enabled: q.data.schedulerEnabled, capture: q.data.channels.capture, premium: q.data.premiumOptIn }); }, [q.data, f]);
+  const save = useAction(async () => { await api("/settings", { body: { checkTimes: [f.m, f.a], weeklyTime: f.w, quietDaily: f.qs && f.qe ? [{ start: f.qs, end: f.qe }] : [], dayStart: f.ds, dayEnd: f.de, dailyBudgetUsd: Number(f.budget), schedulerEnabled: f.enabled, capture: f.capture, premiumOptIn: f.premium } }); setMsg("Saved."); });
+  const pause = useAction(async (paused: boolean) => { await api("/scheduler/pause", { body: { paused } }); });
+  const claude = useAction(async () => { const r = await api("/connections/claude-test", { body: {} }); setMsg(r.ok ? `Claude responded on ${r.model} (${r.effort}). Estimated cost $${r.costEstimateUsd.toFixed(5)}.` : `Claude test did not run: ${r.message}`); });
+  const [confirm, setConfirm] = useState(""); const wipe = useAction(async () => { await api(demo ? "/demo/reset" : "/erase", { body: { confirm: demo ? "RESET DEMO" : "ERASE PERSONAL" } }); setConfirm(""); setMsg(demo ? "Demo reset to Monday 08:00." : "Private workspace erased."); });
+  const [adv, setAdv] = useState("2026-11-17T08:05"); const tick = useAction(async () => { const r = await api("/scheduler/tick", { body: { advanceTo: new Date(adv).toISOString() } }); setMsg(`Simulated ${adv}: ${r.ran.length} check(s) ran${r.missed.length ? `, ${r.missed.length} missed cycle(s) caught up once` : ""}. ${r.skipped ?? ""}`); });
+  if (!f || !sess.data) return <Spinner />;
+  const s = sched.data;
+  return <div className="space-y-6 max-w-2xl">
+    <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+    {msg && <Notice tone="accent">{msg}</Notice>}{(save.error || pause.error || claude.error || wipe.error || tick.error) && <ErrorBox error={(save.error || pause.error || claude.error || wipe.error || tick.error)!} />}
+    <section><SectionTitle>Workspace</SectionTitle><Card className="p-4 text-sm space-y-1"><p><Badge tone={demo ? "amber" : "accent"}>{demo ? "Example" : "Private"}</Badge> <span className="ml-1">{sess.data.label}</span></p><p className="text-muted">Data folder: <Mono className="break-all">{sess.data.dataDir}</Mono>. The example and private workspaces use separate folders and databases.</p></Card></section>
+    <section><SectionTitle>Schedule</SectionTitle><Card className="p-4 space-y-3">
+      {s && <p className="text-sm" data-testid="scheduler-message">{s.message}</p>}
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-[#5fe3c7]" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Run scheduled checks{!demo && " (off by default for a private workspace)"}</label>
+      <div className="grid grid-cols-3 gap-3"><Field label="Morning"><input type="time" className={inputCls} value={f.m} onChange={(e) => setF({ ...f, m: e.target.value })} /></Field><Field label="Afternoon"><input type="time" className={inputCls} value={f.a} onChange={(e) => setF({ ...f, a: e.target.value })} /></Field><Field label="Weekly (Sunday)"><input type="time" className={inputCls} value={f.w} onChange={(e) => setF({ ...f, w: e.target.value })} /></Field></div>
+      <div className="grid grid-cols-2 gap-3"><Field label="Quiet from" hint="Interrupts wait until quiet ends."><input type="time" className={inputCls} value={f.qs} onChange={(e) => setF({ ...f, qs: e.target.value })} /></Field><Field label="Quiet until"><input type="time" className={inputCls} value={f.qe} onChange={(e) => setF({ ...f, qe: e.target.value })} /></Field>
+        <Field label="Work day starts"><input type="time" className={inputCls} value={f.ds} onChange={(e) => setF({ ...f, ds: e.target.value })} /></Field><Field label="Work day ends"><input type="time" className={inputCls} value={f.de} onChange={(e) => setF({ ...f, de: e.target.value })} /></Field></div>
+      <p className="text-[12px] text-muted">Protected intervals such as Shabbat are times you enter. Jarvis does not compute religious times. {q.data.protectedIntervals.length} interval{q.data.protectedIntervals.length === 1 ? "" : "s"} entered.</p>
+      <div className="flex gap-2 flex-wrap"><Button variant="primary" busy={save.busy} onClick={() => save.run()}>Save</Button>{s && <Button busy={pause.busy} onClick={() => pause.run(!s.paused)}>{s.paused ? "Resume schedule" : "Pause schedule"}</Button>}</div>
+      {demo && <div className="pt-3 border-t border-line space-y-2"><div className="text-[13px] font-medium">Simulate time (demo clock)</div><div className="flex gap-2 items-end"><Field label="Jump to"><input type="datetime-local" className={inputCls} value={adv} onChange={(e) => setAdv(e.target.value)} /></Field><Button busy={tick.busy} onClick={() => tick.run()}>Jump and run due checks</Button></div></div>}</Card></section>
+    <section><SectionTitle>Claude model provider</SectionTitle><Card className="p-4 space-y-3">
+      {router.data && <p className="text-sm">Provider: {router.data.provider}. Premium: {router.data.premium}. Spent today ${router.data.spentTodayUsd.toFixed(4)} (estimate).</p>}
+      <Field label="Daily budget (USD)" hint="0 keeps paid AI off. Deterministic features always work."><input type="number" min={0} step={0.5} className={cx(inputCls, "w-32")} value={f.budget} onChange={(e) => setF({ ...f, budget: e.target.value })} /></Field>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-[#5fe3c7]" checked={f.premium} onChange={(e) => setF({ ...f, premium: e.target.checked })} />Allow premium deep review (also needs JARVIS_ALLOW_PREMIUM=1 and a confirmation each time)</label>
+      <div className="flex gap-2 items-center"><Button busy={claude.busy} onClick={() => claude.run()}>Test Claude</Button><span className="text-[12px] text-muted">One tiny paid call, only when you click, only if a key and budget exist.</span></div></Card></section>
+    <section><SectionTitle>Delivery</SectionTitle><Card className="p-4 space-y-2 text-sm"><p>In-app inbox: always on, works offline.</p><label className="flex items-center gap-2"><input type="checkbox" className="accent-[#5fe3c7]" checked={f.capture} onChange={(e) => setF({ ...f, capture: e.target.checked })} />Local capture sink (for testing, sends nothing)</label><p className="text-muted">Push and SMS are off. They need a configured provider and a recipient you confirm, plus a test send you start. Native Claude mobile notifications are a different path.</p></Card></section>
+    <section><SectionTitle>Your data</SectionTitle><Card className="p-4 space-y-3"><a href="/api/export" download="jarvis-export.json" className="inline-flex items-center gap-2 text-sm rounded-lg px-3.5 py-2 border border-line bg-surface2 hover:bg-[#222831]"><Download className="size-4" />Export everything (JSON)</a>
+      <div className="space-y-2"><Field label={demo ? "Reset the example workspace. Type RESET DEMO." : "Erase this private workspace. Type ERASE PERSONAL."} hint={demo ? "Touches example data only. Your private workspace is not affected." : "Notes in the vault folder are removed too. Files you dropped in the watched folder are kept."}><input className={inputCls} value={confirm} onChange={(e) => setConfirm(e.target.value)} /></Field><Button variant="danger" busy={wipe.busy} disabled={confirm !== (demo ? "RESET DEMO" : "ERASE PERSONAL")} onClick={() => wipe.run()}>{demo ? "Reset example" : "Erase"}</Button></div></Card></section>
+  </div>;
+}

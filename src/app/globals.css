@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0d0f12;
+  --color-surface: #14171b;
+  --color-surface2: #1a1e23;
+  --color-line: #262b32;
+  --color-fg: #eceef0;
+  --color-muted: #9ba3ad;
+  --color-accent: #5fe3c7;
+  --color-accent-dim: #1d4a42;
+  --color-amber: #f3b24b;
+  --color-amber-dim: #4a3512;
+  --color-danger: #f0766b;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+html { color-scheme: dark; }
+body { background: var(--color-bg); color: var(--color-fg); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 6px; }
+::selection { background: var(--color-accent-dim); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.scroll-thin { scrollbar-width: thin; scrollbar-color: #2a3038 transparent; }
+
+/* Faint orbital motif on the active Jarvis control. */
+.orbit { position: relative; }
+.orbit::before, .orbit::after { content: ""; position: absolute; inset: -5px; border-radius: 9999px; border: 1px dashed color-mix(in srgb, var(--color-accent) 45%, transparent); animation: spin 18s linear infinite; }
+.orbit::after { inset: -9px; border-style: dotted; animation-duration: 28s; animation-direction: reverse; opacity: .6; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes slidein { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+.drawer { animation: slidein .18s ease-out; }
+.overlay { animation: fadein .15s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .orbit::before, .orbit::after, .drawer, .overlay { animation: none; }
+  * { scroll-behavior: auto !important; transition: none !important; }
+}
