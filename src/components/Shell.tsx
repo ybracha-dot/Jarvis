@@ -233,7 +233,7 @@ function Palette({ onClose }: { onClose: () => void }) {
             if (e.key === "ArrowUp") { e.preventDefault(); setTouched(true); setSel((s) => Math.max(s - 1, 0)); }
             if (e.key === "Enter") { e.preventDefault(); if ((touched || !q.trim()) && filtered[sel]) { filtered[sel].run(); onClose(); } else if (q.trim()) ask.run(); }
           }}
-          className="w-full bg-transparent px-4 py-3.5 text-[15px] outline-none border-b border-line placeholder:text-[#5f6770]" />
+          className="w-full bg-transparent px-4 py-3.5 text-[15px] outline-none border-b border-line placeholder:text-[#7d8691]" />
         <div className="max-h-[50dvh] overflow-y-auto p-1.5 scroll-thin">
           {reply && <div className="m-1.5 rounded-lg bg-bg border border-line p-3 text-sm whitespace-pre-wrap" data-testid="command-reply">
             <div className="text-[11px] text-muted mb-1 uppercase tracking-wider">{reply.mode ? `${reply.intent} · ${reply.mode}` : "Done"}</div>{reply.reply}

@@ -6,6 +6,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 
 const SHOTS = path.resolve("docs/screenshots");
 const PORT = Number(process.env.E2E_PORT ?? 3101);
@@ -490,10 +491,35 @@ async function journeySettings(page: Page) {
   await page.getByRole("button", { name: "Back to example" }).click();
   await page.waitForFunction(() => /EXAMPLE WORKSPACE/.test(document.body.innerText));
 }
+
+async function journeyA11y(browser: Browser) {
+  step("Accessibility audit with axe-core (WCAG 2 A and AA), desktop and phone");
+  const axePath = createRequire(import.meta.url).resolve("axe-core");
+  const scan = async (page: Page, label: string) => {
+    await page.addScriptTag({ path: axePath });
+    const res: any = await page.evaluate(async () => (window as any).axe.run(document, { runOnly: ["wcag2a", "wcag2aa", "wcag21aa"] }));
+    const bad = res.violations.filter((v: any) => ["serious", "critical"].includes(v.impact));
+    for (const v of bad) console.log(`    axe ${v.impact} ${v.id} on ${label}: ${v.nodes.slice(0, 2).map((n: any) => n.target.join(" ")).join(" | ")}`);
+    ok(bad.length === 0, `no serious or critical axe violations on ${label} (${res.violations.length} minor/moderate)`);
+  };
+  for (const vp of [{ w: 1440, h: 900, n: "desktop" }, { w: 390, h: 844, n: "phone" }]) {
+    const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h } });
+    const page = await ctx.newPage(); watch(page, `a11y-${vp.n}`);
+    await post("/demo/reset", { confirm: "RESET DEMO" }); await post("/demo/replay", { name: "bulletin" });
+    for (const p of ["/", "/tasks", "/goals", "/completed", "/memory", "/skills", "/council", "/sources", "/voice", "/settings", "/activity"]) {
+      await page.goto(base + p); await page.waitForLoadState("networkidle"); await scan(page, `${p} (${vp.n})`);
+    }
+    await page.goto(base + "/"); await page.getByTestId("decision-card").first().waitFor();
+    await page.getByTestId("decision-card").first().click(); await page.getByRole("dialog").getByTestId("plan-chunks").waitFor(); await page.waitForTimeout(300);
+    await scan(page, `decision drawer (${vp.n})`);
+    await ctx.close();
+  }
+}
 async function main() {
   fs.mkdirSync(SHOTS, { recursive: true });
   await startServer();
-  const browser: Browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM ?? "/opt/pw-browsers/chromium" });
+  const exe = process.env.PW_CHROMIUM ?? (fs.existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined);
+  const browser: Browser = await chromium.launch(exe ? { executablePath: exe } : {});
   try {
     const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
     const page = await journeyDesktop(desktop);
@@ -502,6 +528,7 @@ async function main() {
     await journeyBreak(page); await journeySettings(page);
     await desktop.close();
     await journeyMobile(browser);
+    await journeyA11y(browser);
   } finally { await browser.close(); killServer(); }
   // Failures the journeys cause on purpose (malformed file, PDF, resolve without evidence) are expected. Everything else is a problem.
   const expected = [/http (422|415)\(desktop\): POST .*\/api\/import\/preview/, /http 422\(desktop\): POST .*\/commitments\/.*\/resolve/, /console\(desktop\): Failed to load resource: .*\b(422|415)\b/];

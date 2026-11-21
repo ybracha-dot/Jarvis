@@ -88,7 +88,7 @@ export function Drawer({ title, subtitle, onClose, children, wide, footer }: { t
 export function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return <label className="block text-[13px]"><span className="block text-muted mb-1">{label}</span>{children}{hint && <span className="block text-[12px] text-muted mt-1">{hint}</span>}</label>;
 }
-export const inputCls = "w-full rounded-lg bg-bg border border-line px-3 py-2 text-sm text-fg placeholder:text-[#5f6770] focus:border-accent outline-none";
+export const inputCls = "w-full rounded-lg bg-bg border border-line px-3 py-2 text-sm text-fg placeholder:text-[#7d8691] focus:border-accent outline-none";
 
 export function Quote({ children, source }: { children: React.ReactNode; source?: React.ReactNode }) {
   return <blockquote className="border-l-2 border-amber pl-3 text-sm leading-relaxed text-fg break-words">{children}{source && <footer className="mt-1 text-[12px] text-muted mono">{source}</footer>}</blockquote>;

@@ -27,7 +27,7 @@ export function ConnectionChecklist() {
   return <ol className="space-y-2" data-testid="connection-checklist">{CHECKLIST.map((c, i) => (
     <li key={c.id} className="rounded-lg border border-line p-3 flex gap-3">
       <button onClick={() => toggle(c.id)} aria-label={`${done[c.id] ? "Unmark" : "Mark"} step ${i + 1}`} aria-pressed={!!done[c.id]} className="mt-0.5 shrink-0">{done[c.id] ? <CheckCircle2 className="size-5 text-accent" /> : <Circle className="size-5 text-muted" />}</button>
-      <div className="min-w-0"><div className={cx("text-sm font-medium", done[c.id] && "text-muted line-through")}>{i + 1}. {c.text}</div><p className="text-[13px] text-muted mt-0.5">{c.detail} <Link href={c.href} className="text-accent">Open</Link></p></div>
+      <div className="min-w-0"><div className={cx("text-sm font-medium", done[c.id] && "text-muted line-through")}>{i + 1}. {c.text}</div><p className="text-[13px] text-muted mt-0.5">{c.detail} <Link href={c.href} className="text-accent underline underline-offset-2">Open</Link></p></div>
     </li>))}</ol>;
 }
 

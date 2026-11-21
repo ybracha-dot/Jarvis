@@ -48,7 +48,7 @@ function Importer() {
   const [prevErr, setPrevErr] = useState<string | null>(null);
   const needsCourse = prev?.needs?.includes("courseExternalId") && !course;
   return <section><SectionTitle>Import</SectionTitle><Card className="p-4 space-y-3">
-    <div className="flex gap-2 flex-wrap items-end"><div><input ref={file} type="file" accept=".md,.txt,.html,.htm,.ics,.eml,.json,.pdf" className="sr-only" id="file" onChange={(e) => onFile(e.target.files?.[0])} /><Button onClick={() => file.current?.click()}><Upload className="size-4" />Choose a file</Button></div>
+    <div className="flex gap-2 flex-wrap items-end"><div><input ref={file} type="file" accept=".md,.txt,.html,.htm,.ics,.eml,.json,.pdf" className="sr-only" id="file" aria-label="Choose a file to import" onChange={(e) => onFile(e.target.files?.[0])} /><Button onClick={() => file.current?.click()}><Upload className="size-4" />Choose a file</Button></div>
       <span className="text-[12px] text-muted pb-2">.md .txt .html .ics .eml or a JSON bundle. PDF is not supported yet.</span></div>
     <div className="grid sm:grid-cols-3 gap-3"><Field label="File name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <Field label="Course"><select className={inputCls} value={course} onChange={(e) => setCourse(e.target.value)}><option value="">Detect from text</option>{courses.data?.courses.map((c: any) => <option key={c.external_id} value={c.external_id}>{c.code}</option>)}</select></Field>
