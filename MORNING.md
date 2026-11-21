@@ -1,6 +1,48 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. This file has four parts: **Next build: a general assistant** (this round), then **Redesign build**, **Addendum build** and **Overnight build** (unchanged, further down).
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **From finding evidence to finishing the job** (this round), **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+
+# From finding evidence to finishing the job
+
+## Try it on your Mac
+
+**Update your ZIP-installed copy without losing data** (the old folder is only read, never modified):
+```bash
+# unzip the new download NEXT TO the old folder, then:
+cd ~/Downloads/Jarvis-new
+npm install
+npm run backup -- adopt ~/Downloads/Jarvis-old/data     # copies your data, upgrades the copy's database, checks it, prints what it kept
+```
+Two terminals, from the new folder:
+```bash
+npm run dev        # terminal 1: the app at http://127.0.0.1:3000
+npm run worker     # terminal 2: background jobs, Blackboard checks every 15 minutes, the morning brief
+```
+Worker offline? Today says so and names the command. Requests made while it is off wait and run when it comes back; nothing is lost. **Nothing runs while the Mac sleeps or the worker is stopped**: no Blackboard checks, no brief, no jobs. The connector only answers while the app is running.
+
+**Your first three clicks (about three minutes; stays on this Mac; no key, no login, no model):**
+1. Open **http://127.0.0.1:3000/try** (Today also shows a *Try Jarvis with one real note* card). If it offers *Open the private workspace*, press it.
+2. Paste **one real note you choose** (a project name, a title, the text) and press **Save the note**. Type a **later correction** (a new date or amount) and press **Save the correction**.
+3. Press **Ask** (the question is prefilled, or say it), then **Open the cited answer**.
+
+**One sentence to repeat privately:** *“What is the current plan for my project, and what changed since my first note?”*
+
+**Where the answer is saved:** `/results/<id>` (a stable link), listed under your project at `/projects/<id>` and on Today. Data lives in `data/personal/`. Click any source on the answer to see your original wording with the quote highlighted; **What Jarvis read** is on the same page.
+
+**Success looks like:** the answer names the corrected date or amount, says the first was *replaced by your later correction*, and the sources panel says *original wording, replaced* beside a link to your first note. Connections shows *Notes I imported · imported by you · local-only · last read <time>*.
+
+An **owner trial stays “pending” until you run it.** I have only run these steps with invented, non-personal notes. No real owner material, token or transcript is in any commit, example or screenshot.
+
+**Status: checkpoint, handoff not complete.**
+
+- Independent QA of an unfamiliar time/capacity request (kiln firings, safety-training room) was started, but the QA agent was stopped by a platform safeguards error before finishing. It is NOT passed.
+- First observed results (kept as recorded failures, not repaired yet): the kiln request with a draft went down the pitch-draft path and produced a garbled draft; the kiln and safety-training answers were rules-only digests with no capacity or time calculation; raku vs big kiln was mis-paired; no clarifying question about the Tuesday 09:00 vs 15:00 slot.
+- Still to do: time/capacity reasoning in the decision engine, a fresh unseen QA request, full rebuild and e2e re-run, and the status table and owner-only steps in this section.
+- Intermittent voice-quiz failure: cause found (stale question clickable while the next one reloads), reproduced with injected latency, fixed, regression test added.
+
+---
+
+# Next build: a general assistant (previous round)
 
 # Next build: a general assistant, not a school app
 
