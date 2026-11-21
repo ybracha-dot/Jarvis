@@ -22,6 +22,9 @@ import { runCommand } from "./commands";
 import { ingestRevision } from "./ingest";
 import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJarvis } from "./capture";
 import { outcomes } from "./outcomes";
+import { submitGoal, GoalInput as AssistantGoalInput, receipt as goalReceipt, reviseRequest, cancelRequest, resumeRequest, resultView, listResults, listRequests, readsFor } from "./assistant";
+import { listSources, getItem, importText, revokeSource, reauthorizeSource, forgetItem, searchEvidence, listItems, tokens, SOURCE_KINDS } from "./evidence";
+import { loadWorkspaceFixtures } from "./workspace-fixtures";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
 import { createToken, listTokens, revokeToken, rotateToken, NewToken, startProbe, probeState, editProbe } from "./mcp-auth";
 import { officeState, cancelJob, getJob, TERMINAL } from "./jobs";
@@ -101,7 +104,7 @@ on("POST", "/quiz/start", (c, r) => startQuiz(c, r.json(z.object({ docId: z.stri
 on("GET", "/quiz/missed", (c, r) => ({ missed: missedQuestions(c, r.query.get("course") ?? "") }));
 on("GET", "/quiz/:id", (c, r) => quizState(c, r.params.id));
 on("POST", "/quiz/:id/answer", (c, r) => { const b = r.json(z.object({ questionId: z.string(), chosen: z.string().regex(/^[A-F]$/) })); return answerQuestion(c, r.params.id, b.questionId, b.chosen); });
-on("POST", "/office/jobs/:id/answer", (c, r) => { const out = answerJob(c, r.params.id, r.json(z.object({ guideId: z.string().optional(), importText: z.string().max(60000).optional(), importTitle: z.string().max(120).optional() }))); kick(c.mode); return out; });
+on("POST", "/office/jobs/:id/answer", (c, r) => { const out = answerJob(c, r.params.id, r.json(z.object({ guideId: z.string().optional(), choice: z.string().max(80).optional(), importText: z.string().max(60000).optional(), importTitle: z.string().max(120).optional() }))); kick(c.mode); return out; });
 on("POST", "/office/jobs/:id/retry", (c, r) => { const out = retryJob(c, r.params.id); kick(c.mode); return out; });
 
 // ---- Capture and the Live Office ----
@@ -110,6 +113,23 @@ on("GET", "/captures", (c) => ({ captures: all(c.db, "SELECT id FROM captures WH
 on("GET", "/captures/:id", (c, r) => { const x = captureReceipt(c, r.params.id); if (!x) throw new HttpError(404, "Capture not found"); return x; });
 on("POST", "/captures/:id/undo", (c, r) => undoCapture(c, r.params.id));
 on("GET", "/recall", (c, r) => recallFromJarvis(c, r.query.get("q") ?? ""));
+on("POST", "/asks", (c, r) => { const out = submitGoal(c, { ...r.json(AssistantGoalInput), origin: "api" }); kick(c.mode); return out; });
+on("GET", "/asks", (c) => ({ goals: listRequests(c) }));
+on("GET", "/asks/:id", (c, r) => goalReceipt(c, r.params.id));
+on("POST", "/asks/:id/revise", (c, r) => { const out = reviseRequest(c, { requestId: r.params.id, text: r.json(z.object({ text: z.string().min(2).max(600) })).text, origin: "api" }); kick(c.mode); return out; });
+on("POST", "/asks/:id/cancel", (c, r) => cancelRequest(c, r.params.id));
+on("POST", "/asks/:id/resume", (c, r) => { const out = resumeRequest(c, r.params.id); kick(c.mode); return out; });
+on("GET", "/results", (c, r) => ({ results: listResults(c, { projectId: r.query.get("project") ?? undefined, limit: Number(r.query.get("limit") ?? 30) || 30 }) }));
+on("GET", "/results/:id", (c, r) => resultView(c, r.params.id, r.query.get("version") ? Number(r.query.get("version")) : undefined));
+on("GET", "/evidence/sources", (c) => ({ sources: listSources(c) }));
+on("GET", "/evidence/items", (c, r) => ({ items: listItems(c, { projectId: r.query.get("project") ?? undefined, kind: r.query.get("kind") ?? undefined }) }));
+on("GET", "/evidence/items/:id", (c, r) => { const it = getItem(c, r.params.id); if (!it) throw new HttpError(404, "Not found"); return it; });
+on("GET", "/evidence/search", (c, r) => ({ hits: searchEvidence(c, tokens(r.query.get("q") ?? ""), { limit: 8 }) }));
+on("POST", "/evidence/import", (c, r) => importText(c, r.json(z.object({ kind: z.enum(SOURCE_KINDS), title: z.string().trim().min(1).max(160), text: z.string().min(1).max(200000), at: z.string().optional(), author: z.string().max(80).optional(), projectId: z.string().nullish(), label: z.string().max(80).optional() }))));
+on("POST", "/evidence/sources/:id/revoke", (c, r) => revokeSource(c, r.params.id));
+on("POST", "/evidence/sources/:id/authorize", (c, r) => reauthorizeSource(c, r.params.id));
+on("POST", "/evidence/items/:id/forget", (c, r) => { r.json(z.object({ confirm: z.literal(true) })); return forgetItem(c, r.params.id); });
+on("POST", "/evidence/fixtures", (c) => { demoOnly(c); return loadWorkspaceFixtures(c); });
 on("GET", "/outcomes", (c, r) => ({ outcomes: outcomes(c, Math.min(Number(r.query.get("limit") ?? 20) || 20, 60)) }));
 on("GET", "/projects", (c) => ({ projects: listProjects(c) }));
 on("POST", "/projects", (c, r) => createProject(c, r.json(z.object({ name: z.string().trim().min(1).max(120), kind: z.enum(["trip", "course", "club", "project", "other"]).default("project"), aliases: z.array(z.string().max(80)).max(8).optional() }).strict())));

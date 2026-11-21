@@ -212,6 +212,36 @@ CREATE TABLE connection_probes(
   id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, code TEXT NOT NULL UNIQUE, edit_marker TEXT NOT NULL, created_at TEXT NOT NULL, written_at TEXT, written_client TEXT, note_id TEXT, capture_id TEXT,
   edited_at TEXT, read_at TEXT, read_client TEXT, read_stamp TEXT);
 `,
+  /* 5 evidence, requests, results */ `
+CREATE TABLE evidence_sources(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, kind TEXT NOT NULL, label TEXT NOT NULL, mode TEXT NOT NULL, project_id TEXT, state TEXT NOT NULL DEFAULT 'ok',
+  local_only INTEGER NOT NULL DEFAULT 0, cursor TEXT, last_attempt_at TEXT, last_success_at TEXT, message TEXT, created_at TEXT NOT NULL, revoked_at TEXT);
+CREATE TABLE evidence_items(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, source_id TEXT NOT NULL REFERENCES evidence_sources(id), external_id TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL, title TEXT NOT NULL, author TEXT, participants TEXT NOT NULL DEFAULT '[]', at TEXT NOT NULL, body TEXT NOT NULL, body_sha TEXT NOT NULL, project_id TEXT,
+  summary TEXT, tombstone INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(owner_id, source_id, external_id));
+CREATE TABLE evidence_revisions(item_id TEXT NOT NULL REFERENCES evidence_items(id), revision INTEGER NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY(item_id, revision));
+CREATE TABLE evidence_facts(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, item_id TEXT NOT NULL REFERENCES evidence_items(id), item_revision INTEGER NOT NULL, kind TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '',
+  text TEXT NOT NULL, value TEXT, who TEXT, quote TEXT NOT NULL, start INTEGER NOT NULL, "end" INTEGER NOT NULL, stamp TEXT, effective_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'confirmed', superseded_by TEXT, why TEXT, created_at TEXT NOT NULL);
+CREATE INDEX evidence_facts_item ON evidence_facts(item_id, item_revision);
+CREATE VIRTUAL TABLE evidence_fts USING fts5(ref UNINDEXED, owner UNINDEXED, title, body, tokenize='porter unicode61');
+CREATE TABLE requests(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dedup_key TEXT NOT NULL, title TEXT NOT NULL, origin TEXT NOT NULL, text TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'queued', job_id TEXT, project_id TEXT, conversation_id TEXT, result_id TEXT, synthetic INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(owner_id, dedup_key));
+CREATE TABLE request_revisions(request_id TEXT NOT NULL REFERENCES requests(id), revision INTEGER NOT NULL, text TEXT NOT NULL, origin TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY(request_id, revision));
+CREATE TABLE request_reads(
+  id TEXT PRIMARY KEY, request_id TEXT NOT NULL REFERENCES requests(id), revision INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT, source_label TEXT, item_revision INTEGER, label TEXT NOT NULL,
+  excerpt TEXT, used INTEGER NOT NULL DEFAULT 1, note TEXT, at TEXT NOT NULL);
+CREATE TABLE results(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, request_id TEXT NOT NULL REFERENCES requests(id), kind TEXT NOT NULL, title TEXT NOT NULL, project_id TEXT, version INTEGER NOT NULL DEFAULT 1,
+  state TEXT NOT NULL DEFAULT 'current', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE result_versions(
+  result_id TEXT NOT NULL REFERENCES results(id), version INTEGER NOT NULL, request_revision INTEGER NOT NULL, body TEXT NOT NULL, summary TEXT NOT NULL, sources TEXT NOT NULL, flags TEXT NOT NULL DEFAULT '[]',
+  unavailable TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, stale TEXT, PRIMARY KEY(result_id, version));
+`,
 ];
 
 const cache = new Map<string, DB>();

@@ -5,6 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import { Ctx, all, get, run, tx, uid, sha, modeDir } from "./db";
 import { HttpError } from "./decisions";
+import { submitGoal, looksLikeGoal } from "./assistant";
 import { Handler, JobApi, enqueueJob, getJob, jobEvent } from "./jobs";
 import { Router, RouterError } from "./router";
 import { enqueue } from "./notify";
@@ -67,7 +68,7 @@ export function requestStudyGuide(ctx: Ctx, raw: z.input<typeof StudyRequest>) {
 }
 
 /** Answer a question a blocked helper asked (which guide to use, or an imported earlier guide). Re-queues that helper. */
-export function answerJob(ctx: Ctx, jobId: string, answer: { guideId?: string; importText?: string; importTitle?: string }) {
+export function answerJob(ctx: Ctx, jobId: string, answer: { guideId?: string; choice?: string; importText?: string; importTitle?: string }) {
   const j = getJob(ctx, jobId); if (!j) throw new HttpError(404, "Job not found");
   if (j.status !== "blocked") throw new HttpError(409, `That job is ${j.status}, not waiting for an answer.`);
   tx(ctx.db, () => { run(ctx.db, "UPDATE messages SET data=json_set(data,'$.answered',1) WHERE job_id=? AND kind='question'", jobId); run(ctx.db, "UPDATE jobs SET input=?, status='queued', error=NULL WHERE id=?", JSON.stringify({ ...j.input, answers: { ...(j.input.answers ?? {}), ...answer } }), jobId); jobEvent(ctx, jobId, "answered", "You answered. Resuming."); });
@@ -226,6 +227,11 @@ export function handleUtterance(ctx: Ctx, o: { text: string; conversationId?: st
     const photos = r.photos ? `${r.photos} photo${r.photos > 1 ? "s" : ""}` : null;
     const msg = r.duplicate ? "I'm already on that. Nothing was started twice." : `Got it. I'm building your ${course} study guide to match your last one${photos ? ` and your ${photos}` : ""}. I'll tell you when it's ready.`;
     return reply(msg, { jobId: r.jobId, duplicate: r.duplicate, office: "/office" }, r.jobId, "ack");
+  }
+  if (looksLikeGoal(text)) {
+    const g = submitGoal(ctx, { text, origin: o.via === "voice" ? "ask-voice" : "ask-text", conversationId: convId, projectHint: null });
+    const msg = g.duplicate ? "I'm already on that. Nothing was started twice." : g.refreshed ? "Got it. I'll refresh it from what is saved now, and keep the earlier version." : "Got it. I'll find what applies, write it up, check it against the sources, and tell you when it's ready.";
+    return reply(msg, { requestId: g.requestId, resultId: g.resultId, jobId: g.jobId, path: g.links.result, office: g.links.status }, g.jobId ?? undefined, "goal");
   }
   const cmd = runCommand(ctx, text);
   return reply(cmd.reply, { intent: cmd.intent, mode: cmd.mode, navigate: cmd.navigate ?? null });

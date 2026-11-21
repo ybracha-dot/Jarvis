@@ -1,4 +1,5 @@
 // Job handlers for the Live Office. Every handler is re-entrant: steps are memoized and side effects are idempotent.
+import { assistantHandlers } from "./assistant";
 import { Ctx, get, run, getSetting } from "./db";
 import { Handler, JobApi } from "./jobs";
 import { createCommitment } from "./commitments";
@@ -103,4 +104,4 @@ const capture_reviewer: Handler = async (api: JobApi) => {
   return { verdict: problems.length ? "needs_decision" : "verified", problems, checks, decisionId };
 };
 
-export const HANDLERS: Record<string, Handler> = { supervise_capture, capture_planner, capture_reviewer, ...studyHandlers };
+export const HANDLERS: Record<string, Handler> = { supervise_capture, capture_planner, capture_reviewer, ...studyHandlers, ...assistantHandlers };
