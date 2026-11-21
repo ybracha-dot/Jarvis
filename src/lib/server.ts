@@ -21,6 +21,7 @@ import { applyPractice } from "./study";
 import { runCommand } from "./commands";
 import { ingestRevision } from "./ingest";
 import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJarvis } from "./capture";
+import { outcomes } from "./outcomes";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
 import { createToken, listTokens, revokeToken, rotateToken, NewToken, startProbe, probeState, editProbe } from "./mcp-auth";
 import { officeState, cancelJob, getJob, TERMINAL } from "./jobs";
@@ -109,6 +110,7 @@ on("GET", "/captures", (c) => ({ captures: all(c.db, "SELECT id FROM captures WH
 on("GET", "/captures/:id", (c, r) => { const x = captureReceipt(c, r.params.id); if (!x) throw new HttpError(404, "Capture not found"); return x; });
 on("POST", "/captures/:id/undo", (c, r) => undoCapture(c, r.params.id));
 on("GET", "/recall", (c, r) => recallFromJarvis(c, r.query.get("q") ?? ""));
+on("GET", "/outcomes", (c, r) => ({ outcomes: outcomes(c, Math.min(Number(r.query.get("limit") ?? 20) || 20, 60)) }));
 on("GET", "/projects", (c) => ({ projects: listProjects(c) }));
 on("POST", "/projects", (c, r) => createProject(c, r.json(z.object({ name: z.string().trim().min(1).max(120), kind: z.enum(["trip", "course", "club", "project", "other"]).default("project"), aliases: z.array(z.string().max(80)).max(8).optional() }).strict())));
 on("GET", "/projects/:id", (c, r) => ({ ...projectContext(c, r.params.id), events: projectEvents(c, r.params.id) }));
@@ -203,6 +205,12 @@ on("POST", "/commitments/:id/reopen", (c, r) => { reopenCommitment(c, r.params.i
 on("GET", "/resume", (c, r) => ({ suggestion: forMinutes(c, Math.min(240, Math.max(5, Number(r.query.get("minutes") ?? 20)))), latest: latestCheckpoint(c) }));
 on("POST", "/checkpoints", (c, r) => saveCheckpoint(c, r.json(CheckpointInput)));
 
+on("GET", "/memory/overview", (c) => mem.memoryOverview(c));
+on("GET", "/memory/answer", (c, r) => mem.memoryAnswer(c, (r.query.get("q") ?? "").slice(0, 200)));
+on("POST", "/memory/notes/:id/pin", (c, r) => mem.pinNote(c, r.params.id, r.json(z.object({ pinned: z.boolean() })).pinned));
+on("POST", "/memory/notes/:id/move", (c, r) => mem.moveNote(c, r.params.id, r.json(z.object({ projectId: z.string().nullable().optional(), scope: z.string().max(120).optional() }))));
+on("POST", "/memory/notes/:id/merge", (c, r) => mem.mergeNotes(c, r.params.id, r.json(z.object({ intoId: z.string() })).intoId));
+on("POST", "/memory/notes/:id/undo", (c, r) => mem.undoNote(c, r.params.id));
 on("GET", "/memory/notes", (c, r) => ({ notes: mem.listNotes(c, { includeSuperseded: r.query.get("all") === "1" }) }));
 on("GET", "/memory/notes/:id", (c, r) => { const n = mem.getNote(c, r.params.id); if (!n) throw new HttpError(404, "Note not found"); return n; });
 on("GET", "/memory/search", (c, r) => ({ results: mem.searchNotes(c, r.query.get("q") ?? "") }));

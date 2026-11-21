@@ -56,11 +56,65 @@ export function updateNote(ctx: Ctx, id: string, raw: z.input<typeof NotePatch>)
       confidence: p.confidence ?? n.confidence, auto_learn: p.autoLearn === undefined ? n.auto_learn : p.autoLearn ? 1 : 0,
       provisional: p.provisional === undefined ? (p.confidence != null && p.confidence >= 0.8 ? 0 : n.provisional) : p.provisional ? 1 : 0,
     };
+    run(ctx.db, "UPDATE notes SET prev=? WHERE id=?", JSON.stringify({ title: n.title, body: n.body, scope: n.scope, project_id: n.project_id ?? null }), id);   // one step of undo
     run(ctx.db, "UPDATE notes SET title=?,body=?,scope=?,effective_to=?,effective_from=?,confidence=?,auto_learn=?,provisional=?,user_edited=1,updated_at=? WHERE id=?",
       next.title, next.body, next.scope, next.effective_to, next.effective_from, next.confidence, next.auto_learn, next.provisional, ctx.now().toISOString(), id);
     ftsPut(ctx, id, next.title as string, next.body as string);
     return { ok: true };
   });
+}
+
+export function pinNote(ctx: Ctx, id: string, pinned: boolean) {
+  const r = run(ctx.db, "UPDATE notes SET pinned=? WHERE id=? AND owner_id=? AND tombstone=0", pinned ? 1 : 0, id, ctx.owner);
+  if (!Number(r.changes)) throw new HttpError(404, "Note not found"); return { ok: true };
+}
+/** Move a note to a project, a course or back to everywhere. The previous place is kept so Undo can restore it. */
+export function moveNote(ctx: Ctx, id: string, to: { projectId?: string | null; scope?: string }) {
+  return tx(ctx.db, () => {
+    const n = get(ctx.db, "SELECT * FROM notes WHERE id=? AND owner_id=? AND tombstone=0", id, ctx.owner); if (!n) throw new HttpError(404, "Note not found");
+    let scope = to.scope ?? "global"; let pid: string | null = null;
+    if (to.projectId) { const p = get(ctx.db, "SELECT id, slug FROM projects WHERE id=? AND owner_id=?", to.projectId, ctx.owner); if (!p) throw new HttpError(404, "Project not found"); scope = `project:${p.slug}`; pid = p.id as string; }
+    run(ctx.db, "UPDATE notes SET prev=?, scope=?, project_id=?, user_edited=1, updated_at=? WHERE id=?", JSON.stringify({ title: n.title, body: n.body, scope: n.scope, project_id: n.project_id ?? null }), scope, pid, ctx.now().toISOString(), id);
+    return { ok: true, scope };
+  });
+}
+/** Merge one note into another: the text is appended with its source, and the merged note moves to history. Undo on the target reverses it. */
+export function mergeNotes(ctx: Ctx, fromId: string, intoId: string) {
+  if (fromId === intoId) throw new HttpError(422, "Pick a different note to merge into");
+  return tx(ctx.db, () => {
+    const a = get(ctx.db, "SELECT * FROM notes WHERE id=? AND owner_id=? AND tombstone=0", fromId, ctx.owner), b = get(ctx.db, "SELECT * FROM notes WHERE id=? AND owner_id=? AND tombstone=0", intoId, ctx.owner);
+    if (!a || !b) throw new HttpError(404, "Note not found");
+    const body = `${b.body}\n\n---\nMerged from "${a.title}" (${String(a.created_at).slice(0, 10)}):\n${a.body}`;
+    run(ctx.db, "UPDATE notes SET prev=?, body=?, user_edited=1, updated_at=? WHERE id=?", JSON.stringify({ title: b.title, body: b.body, scope: b.scope, project_id: b.project_id ?? null, mergedFrom: fromId }), body, ctx.now().toISOString(), intoId);
+    ftsPut(ctx, intoId, b.title as string, body);
+    run(ctx.db, "UPDATE notes SET superseded_by=?, effective_to=COALESCE(effective_to,?) WHERE id=?", intoId, ctx.now().toISOString(), fromId);
+    return { ok: true };
+  });
+}
+export function undoNote(ctx: Ctx, id: string) {
+  return tx(ctx.db, () => {
+    const n = get(ctx.db, "SELECT * FROM notes WHERE id=? AND owner_id=? AND tombstone=0", id, ctx.owner); if (!n || !n.prev) throw new HttpError(404, "Nothing to undo");
+    const p = JSON.parse(n.prev as string);
+    run(ctx.db, "UPDATE notes SET title=?, body=?, scope=?, project_id=?, prev=NULL, updated_at=? WHERE id=?", p.title, p.body, p.scope, p.project_id ?? null, ctx.now().toISOString(), id);
+    ftsPut(ctx, id, p.title, p.body);
+    if (p.mergedFrom) run(ctx.db, "UPDATE notes SET superseded_by=NULL, effective_to=NULL WHERE id=? AND owner_id=?", p.mergedFrom, ctx.owner);
+    return { ok: true };
+  });
+}
+/** What Jarvis believes about a topic right now, and why. Project decisions come first because they are the most deliberate. */
+export function memoryAnswer(ctx: Ctx, q: string) {
+  const like = `%${q.trim().replace(/[%_]/g, "")}%`;
+  const facts = all(ctx.db, `SELECT f.text, f.key, f.origin, f.asserted_at, f.id, f.event_id, p.name, p.id pid FROM project_facts f JOIN projects p ON p.id=f.project_id WHERE p.owner_id=? AND f.forgotten=0 AND f.status='current' AND (f.text LIKE ? OR f.key LIKE ? OR p.name LIKE ?) ORDER BY f.asserted_at DESC LIMIT 3`, ctx.owner, like, like, like);
+  const notes = searchNotes(ctx, q, { limit: 5 });
+  const top = facts[0] ? { kind: "project", title: `${facts[0].name}: ${String(facts[0].key).replace(/-/g, " ")}`, text: facts[0].text as string, why: `Decided in ${facts[0].origin === "claude" ? "a Claude conversation" : "Jarvis"} on ${String(facts[0].asserted_at).slice(0, 10)} (project ${facts[0].name}).`, href: `/projects/${facts[0].pid}` }
+    : notes[0] ? { kind: "note", title: notes[0].title, text: String(notes[0].body ?? "").slice(0, 400), why: `${notes[0].kind === "preference" ? "A preference you stated" : notes[0].kind === "habit" ? "A habit Jarvis observed" : "A saved note"}. Source: ${notes[0].source}.`, href: `/memory?note=${notes[0].id}`, id: notes[0].id } : null;
+  const others = [...facts.slice(1).map((f) => ({ title: `${f.name}: ${f.key}`, text: f.text as string })), ...notes.slice(top?.kind === "note" ? 1 : 0).map((n) => ({ title: n.title, text: String(n.body ?? "").slice(0, 160) }))].slice(0, 4);
+  return { query: q, answer: top, alternatives: others, none: top ? null : `Jarvis has nothing saved about "${q}".` };
+}
+export function memoryOverview(ctx: Ctx) {
+  const notes = all(ctx.db, "SELECT n.*, p.name project_name FROM notes n LEFT JOIN projects p ON p.id=n.project_id WHERE n.owner_id=? AND n.tombstone=0 AND n.superseded_by IS NULL AND n.kind!='inbox' ORDER BY n.pinned DESC, n.updated_at DESC", ctx.owner).map((n) => ({ ...parseNote(n), project_name: (n.project_name as string) ?? null, pinned: !!n.pinned, canUndo: !!n.prev }));
+  const inbox = all(ctx.db, "SELECT n.*, p.name project_name FROM notes n LEFT JOIN projects p ON p.id=n.project_id WHERE n.owner_id=? AND n.tombstone=0 AND n.superseded_by IS NULL AND n.kind='inbox' ORDER BY n.created_at DESC LIMIT 30", ctx.owner).map((n) => ({ ...parseNote(n), project_name: (n.project_name as string) ?? null, pinned: !!n.pinned, canUndo: !!n.prev }));
+  return { pinned: notes.filter((n) => n.pinned), review: notes.filter((n) => !n.pinned && n.provisional), known: notes.filter((n) => !n.pinned && !n.provisional), inbox, projects: all(ctx.db, "SELECT id,name,kind,(SELECT COUNT(*) FROM project_facts f WHERE f.project_id=projects.id AND f.status='current' AND f.forgotten=0) n FROM projects WHERE owner_id=? AND status!='archived'", ctx.owner) };
 }
 
 /** A changed preference supersedes the old note. The old one stays for history. */

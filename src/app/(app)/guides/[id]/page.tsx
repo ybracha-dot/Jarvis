@@ -22,7 +22,7 @@ function Guide({ id }: { id: string }) {
   if (q.error && !q.data) return <ErrorBox error={q.error} onRetry={q.reload} />;
   const d = q.data; const c = d.content; const latest = d.doc.current_version;
   return <div className="space-y-5">
-    <div><div className="text-[12px] text-muted mono">{d.doc.course} / {d.doc.folder}</div>
+    <div><div className="text-[13px] text-muted mono">{d.doc.course} / {d.doc.folder}</div>
       <div className="flex items-center gap-2 flex-wrap"><h1 className="text-xl font-semibold tracking-tight" data-testid="guide-title">{c.title}</h1><Badge data-testid="guide-version">v{d.version}</Badge>{d.version !== latest && <Badge tone="amber">older version. Latest is v{latest}</Badge>}{d.doc.synthetic ? <Badge tone="amber">synthetic</Badge> : null}</div></div>
     <div className="flex gap-2 flex-wrap items-center">
       <Button variant="primary" busy={start.busy} onClick={() => start.run("all")} data-testid="start-quiz"><ListChecks className="size-4" />Quiz me</Button>
@@ -42,9 +42,9 @@ function Guide({ id }: { id: string }) {
 function Provenance({ c }: { c: any }) {
   return <Card className="p-4 space-y-2 text-sm" data-testid="provenance">
     {c.coverage.provisional && <Notice><span data-testid="provisional">Coverage is provisional. {c.coverage.basis}</span></Notice>}
-    {c.generator && <p className="text-[13px] text-muted" data-testid="generator-note">{c.generator.note}</p>}
-    {c.keyCheck && <p className="text-[13px]" data-testid="key-check">Answer key check: {c.keyCheck.supported} of {c.keyCheck.checked} questions supported by your course materials.{c.keyCheck.removed.length ? ` ${c.keyCheck.removed.length} dropped for failing the check.` : ""}{c.keyCheck.unverified.length ? ` ${c.keyCheck.unverified.length} could not be verified and are flagged.` : ""}</p>}
-    <div className="text-[13px] space-y-1"><div><span className="text-muted">Format from:</span> {c.sources.format ?? "none"}</div>
+    {c.generator && <p className="text-[14px] text-muted" data-testid="generator-note">{c.generator.note}</p>}
+    {c.keyCheck && <p className="text-[14px]" data-testid="key-check">Answer key check: {c.keyCheck.supported} of {c.keyCheck.checked} questions supported by your course materials.{c.keyCheck.removed.length ? ` ${c.keyCheck.removed.length} dropped for failing the check.` : ""}{c.keyCheck.unverified.length ? ` ${c.keyCheck.unverified.length} could not be verified and are flagged.` : ""}</p>}
+    <div className="text-[14px] space-y-1"><div><span className="text-muted">Format from:</span> {c.sources.format ?? "none"}</div>
       <div><span className="text-muted">Question style from photos:</span> {c.sources.photos.length ? <ul className="list-disc pl-5">{c.sources.photos.map((p: any, i: number) => <li key={i}>{p.name}: {p.status}</li>)}</ul> : "no photos attached"}</div>
       <div><span className="text-muted">Topics:</span> {c.coverage.topics.join(", ") || "none"}</div></div></Card>;
 }
@@ -52,7 +52,7 @@ function Provenance({ c }: { c: any }) {
 function Practice({ d }: { d: any }) {
   const c = d.content;
   return <div className="space-y-4"><Provenance c={c} />
-    <p className="text-[13px] text-muted">Practice view. Answers and explanations are hidden. Use Quiz me, or open the Answer key tab.</p>
+    <p className="text-[14px] text-muted">Practice view. Answers and explanations are hidden. Use Quiz me, or open the Answer key tab.</p>
     <ol className="space-y-3" data-testid="practice-list">{c.questions.map((q: any, i: number) => <li key={q.id}><Card className="p-4 space-y-2"><div className="text-sm font-medium break-words"><Mono className="text-muted mr-2">{i + 1}.</Mono>{q.stem}</div>{q.flag && <Badge tone="amber">{q.flag}</Badge>}<ul className="space-y-1 text-sm">{q.choices.map((ch: any) => <li key={ch.key} className="flex gap-2"><Mono className="text-muted w-5">{ch.key}.</Mono><span className="break-words">{ch.text}</span></li>)}</ul></Card></li>)}</ol></div>;
 }
 
@@ -66,7 +66,7 @@ function Quiz({ attemptId, docId, onDone, onAgain }: { attemptId: string; docId:
   const cur = res ? s.question ?? null : s.question;
   const showing = res ? { ...(q.data.question ?? {}), id: res.questionId } : null; void showing;
   return <Card className="p-5 space-y-4" data-testid="quiz">
-    <div className="flex items-center gap-2 text-[13px] text-muted"><Badge>{s.mode === "missed" ? "Missed questions" : "Full quiz"}</Badge><span>Guide v{s.version}</span><span className="ml-auto mono" data-testid="quiz-progress">{Math.min(s.answered + (res ? 0 : 1), s.total)} of {s.total}</span></div>
+    <div className="flex items-center gap-2 text-[14px] text-muted"><Badge>{s.mode === "missed" ? "Missed questions" : "Full quiz"}</Badge><span>Guide v{s.version}</span><span className="ml-auto mono" data-testid="quiz-progress">{Math.min(s.answered + (res ? 0 : 1), s.total)} of {s.total}</span></div>
     {!res && cur && <>
       <p className="text-[15px] font-medium break-words" data-testid="quiz-stem">{cur.stem}</p>
       <ul className="space-y-2" role="radiogroup" aria-label="Choices">{cur.choices.map((ch: any) => <li key={ch.key}><button role="radio" aria-checked={false} disabled={ans.busy} onClick={() => ans.run(cur.id, ch.key)} data-testid={`choice-${ch.key}`} className="w-full text-left rounded-lg border border-line bg-bg hover:border-accent px-3 py-2.5 text-sm flex gap-3"><Mono className="text-muted">{ch.key}</Mono><span className="break-words">{ch.text}</span></button></li>)}</ul></>}
@@ -84,7 +84,7 @@ function Done({ s, onDone, onAgain }: { s: any; onDone: () => void; onAgain: (m:
 function Key({ d }: { d: any }) {
   const [show, setShow] = useState(false);
   return <div className="space-y-3"><Button onClick={() => setShow(!show)} data-testid="toggle-key">{show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}{show ? "Hide the answer key" : "Show the answer key"}</Button>
-    {show && <ol className="space-y-2" data-testid="answer-key">{d.content.questions.map((q: any, i: number) => <li key={q.id} className="rounded-lg border border-line bg-surface p-3 text-sm"><div className="flex gap-2"><Mono className="text-muted">{i + 1}.</Mono><b className="font-medium">{q.answer}</b><span className="break-words">{q.rationale}</span></div>{q.flag && <div className="text-[12px] text-amber mt-1">{q.flag}</div>}</li>)}</ol>}</div>;
+    {show && <ol className="space-y-2" data-testid="answer-key">{d.content.questions.map((q: any, i: number) => <li key={q.id} className="rounded-lg border border-line bg-surface p-3 text-sm"><div className="flex gap-2"><Mono className="text-muted">{i + 1}.</Mono><b className="font-medium">{q.answer}</b><span className="break-words">{q.rationale}</span></div>{q.flag && <div className="text-[13px] text-amber mt-1">{q.flag}</div>}</li>)}</ol>}</div>;
 }
 
 function Edit({ d, onSaved }: { d: any; onSaved: (v: number) => void }) {
@@ -97,17 +97,17 @@ function Edit({ d, onSaved }: { d: any; onSaved: (v: number) => void }) {
     {!latest && <Notice>You are looking at an older version. Open the latest to edit.</Notice>}
     <Field label="Title"><input className={inputCls} value={c.title} onChange={(e) => setC({ ...c, title: e.target.value })} /></Field>
     <ol className="space-y-3">{c.questions.map((q: any, i: number) => <li key={q.id}><Card className="p-4 space-y-2" data-testid="edit-question">
-      <div className="flex items-center gap-2"><Mono className="text-muted">{i + 1}.</Mono><span className="text-[12px] text-muted">{q.topic}</span><button aria-label={`Delete question ${i + 1}`} className="ml-auto text-muted hover:text-danger" onClick={() => setC({ ...c, questions: c.questions.filter((_: any, j: number) => j !== i) })}><Trash2 className="size-4" /></button></div>
+      <div className="flex items-center gap-2"><Mono className="text-muted">{i + 1}.</Mono><span className="text-[13px] text-muted">{q.topic}</span><button aria-label={`Delete question ${i + 1}`} className="ml-auto text-muted hover:text-danger" onClick={() => setC({ ...c, questions: c.questions.filter((_: any, j: number) => j !== i) })}><Trash2 className="size-4" /></button></div>
       <Field label="Question"><textarea className={cx(inputCls, "min-h-14")} value={q.stem} onChange={(e) => set(i, { stem: e.target.value })} data-testid={`stem-${i}`} /></Field>
-      {q.choices.map((ch: any, k: number) => <div key={ch.key} className="flex items-center gap-2"><label className="flex items-center gap-1.5 text-[13px] w-24 shrink-0"><input type="radio" className="accent-[#5fe3c7]" name={`ans-${q.id}`} checked={q.answer === ch.key} onChange={() => set(i, { answer: ch.key })} aria-label={`${ch.key} is the answer`} />{ch.key}</label><input aria-label={`Choice ${ch.key} of question ${i + 1}`} className={inputCls} value={ch.text} onChange={(e) => set(i, { choices: q.choices.map((x: any, m: number) => (m === k ? { ...x, text: e.target.value } : x)) })} /></div>)}
+      {q.choices.map((ch: any, k: number) => <div key={ch.key} className="flex items-center gap-2"><label className="flex items-center gap-1.5 text-[14px] w-24 shrink-0"><input type="radio" className="accent-[#67d4ff]" name={`ans-${q.id}`} checked={q.answer === ch.key} onChange={() => set(i, { answer: ch.key })} aria-label={`${ch.key} is the answer`} />{ch.key}</label><input aria-label={`Choice ${ch.key} of question ${i + 1}`} className={inputCls} value={ch.text} onChange={(e) => set(i, { choices: q.choices.map((x: any, m: number) => (m === k ? { ...x, text: e.target.value } : x)) })} /></div>)}
       <Field label="Why that answer"><input className={inputCls} value={q.rationale} onChange={(e) => set(i, { rationale: e.target.value })} /></Field></Card></li>)}</ol>
     {save.error && <ErrorBox error={save.error} />}{msg && <Notice tone="accent"><span data-testid="saved-msg">{msg}</span></Notice>}
     <Button variant="primary" busy={save.busy} disabled={!latest} onClick={() => save.run()} data-testid="save-guide">Save as a new version</Button>
-    <p className="text-[12px] text-muted">Saving checks every answer against your course materials again. Quiz attempts stay tied to the version they used.</p></div>;
+    <p className="text-[13px] text-muted">Saving checks every answer against your course materials again. Quiz attempts stay tied to the version they used.</p></div>;
 }
 
 function Versions({ d, id }: { d: any; id: string }) {
-  return <ul className="space-y-2" data-testid="versions">{d.versions.map((v: any) => <li key={v.version} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm flex items-center gap-2 flex-wrap"><Badge>v{v.version}</Badge><span className="break-words">{v.note}</span><Mono className="text-[11px] text-muted">{fmtDateTime(v.created_at)}</Mono><Link className="ml-auto text-accent underline underline-offset-2" href={`/guides/${id}?version=${v.version}`}>{v.version === d.version ? "Viewing" : "View"}</Link></li>)}
-    {d.history.length > 0 && <li className="text-[13px] text-muted pt-2">Quiz attempts: {d.history.map((h: any) => `v${h.version} ${h.mode}`).join(", ")}</li>}</ul>;
+  return <ul className="space-y-2" data-testid="versions">{d.versions.map((v: any) => <li key={v.version} className="rounded-lg border border-line bg-surface px-3 py-2 text-sm flex items-center gap-2 flex-wrap"><Badge>v{v.version}</Badge><span className="break-words">{v.note}</span><Mono className="text-[12px] text-muted">{fmtDateTime(v.created_at)}</Mono><Link className="ml-auto text-accent underline underline-offset-2" href={`/guides/${id}?version=${v.version}`}>{v.version === d.version ? "Viewing" : "View"}</Link></li>)}
+    {d.history.length > 0 && <li className="text-[14px] text-muted pt-2">Quiz attempts: {d.history.map((h: any) => `v${h.version} ${h.mode}`).join(", ")}</li>}</ul>;
 }
 export { Link };

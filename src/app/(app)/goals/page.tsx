@@ -24,17 +24,17 @@ function Goal({ g }: { g: any }) {
   return <Card className="p-5 space-y-4" data-testid="goal">
     <div className="flex items-center gap-2 flex-wrap"><h2 className="text-base font-medium">{g.name}</h2><Badge tone={g.status === "behind" ? "amber" : "accent"}>{g.status.replace("_", " ")}</Badge><Badge>{g.kind}</Badge></div>
     <div className="grid grid-cols-3 gap-3 text-center">
-      <div className="rounded-lg bg-bg border border-line p-3"><div className="text-[11px] uppercase tracking-wider text-muted">Actual</div><Mono className="text-2xl font-semibold block">{g.completed}</Mono><div className="text-[12px] text-muted">of {g.targetTotal} {g.unit}</div></div>
-      <div className="rounded-lg bg-bg border border-line p-3"><div className="text-[11px] uppercase tracking-wider text-muted">Planned by today</div><Mono className="text-2xl font-semibold block text-amber">{g.plannedByToday}</Mono><div className="text-[12px] text-muted">target to date</div></div>
-      <div className="rounded-lg bg-bg border border-line p-3"><div className="text-[11px] uppercase tracking-wider text-muted">Deadline</div><Mono className="text-2xl font-semibold block">{g.weeksLeft}w</Mono><div className="text-[12px] text-muted">{g.deadline}</div></div>
+      <div className="rounded-lg bg-bg border border-line p-3"><div className="text-[12px] uppercase tracking-wider text-muted">Actual</div><Mono className="text-2xl font-semibold block">{g.completed}</Mono><div className="text-[13px] text-muted">of {g.targetTotal} {g.unit}</div></div>
+      <div className="rounded-lg bg-bg border border-line p-3"><div className="text-[12px] uppercase tracking-wider text-muted">Planned by today</div><Mono className="text-2xl font-semibold block text-amber">{g.plannedByToday}</Mono><div className="text-[13px] text-muted">target to date</div></div>
+      <div className="rounded-lg bg-bg border border-line p-3"><div className="text-[12px] uppercase tracking-wider text-muted">Deadline</div><Mono className="text-2xl font-semibold block">{g.weeksLeft}w</Mono><div className="text-[13px] text-muted">{g.deadline}</div></div>
     </div>
     <div aria-label={`${g.completed} of ${g.targetTotal}, planned ${g.plannedByToday}`} role="img" className="relative h-2.5 rounded-full bg-surface2 overflow-hidden"><div className="absolute inset-y-0 left-0 bg-accent rounded-full" style={{ width: `${pct}%` }} /><div className="absolute inset-y-0 w-0.5 bg-amber" style={{ left: `${plan}%` }} /></div>
     <p className="text-sm"><Mono data-testid="goal-line">{g.line}</Mono></p>
-    <p className="text-[12px] text-muted">{g.paceLabel}.</p>
+    <p className="text-[13px] text-muted">{g.paceLabel}.</p>
     <div className="flex items-end gap-2 flex-wrap"><Field label="Set actual"><input type="number" min={0} className={cx(inputCls, "w-28")} value={v} onChange={(e) => setV(e.target.value)} /></Field>
       <Button size="sm" variant="primary" busy={obs.busy} onClick={() => obs.run(Number(v))}>Save</Button><Button size="sm" onClick={() => { setV(String(g.completed + 1)); obs.run(g.completed + 1); }}>+1</Button></div>
     {obs.error && <ErrorBox error={obs.error} />}
-    {g.observations.length > 0 && <ul className="text-[12px] text-muted mono space-y-0.5">{g.observations.slice(-4).map((o: any, i: number) => <li key={i}>{o.at.slice(0, 16).replace("T", " ")} · {o.value}</li>)}</ul>}
+    {g.observations.length > 0 && <ul className="text-[13px] text-muted mono space-y-0.5">{g.observations.slice(-4).map((o: any, i: number) => <li key={i}>{o.at.slice(0, 16).replace("T", " ")} · {o.value}</li>)}</ul>}
   </Card>;
 }
 
@@ -45,6 +45,6 @@ function NewGoal({ onDone }: { onDone: () => void }) {
     <Field label="Name"><input className={inputCls} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field><Field label="Unit"><input className={inputCls} value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} /></Field>
     <Field label="Target"><input type="number" className={inputCls} value={f.targetTotal} onChange={(e) => setF({ ...f, targetTotal: e.target.value })} /></Field><Field label="Start"><input type="date" className={inputCls} value={f.startDate} onChange={(e) => setF({ ...f, startDate: e.target.value })} /></Field>
     <Field label="Deadline"><input type="date" className={inputCls} value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field></div>
-    <p className="text-[12px] text-muted">With no milestones, pace is a labeled linear estimate.</p>{save.error && <ErrorBox error={save.error} />}
+    <p className="text-[13px] text-muted">With no milestones, pace is a labeled linear estimate.</p>{save.error && <ErrorBox error={save.error} />}
     <Button variant="primary" busy={save.busy} disabled={!f.name || !f.deadline} onClick={() => save.run()}>Create</Button></Card>;
 }

@@ -27,7 +27,7 @@ export function ConnectionChecklist() {
   return <ol className="space-y-2" data-testid="connection-checklist">{CHECKLIST.map((c, i) => (
     <li key={c.id} className="rounded-lg border border-line p-3 flex gap-3">
       <button onClick={() => toggle(c.id)} aria-label={`${done[c.id] ? "Unmark" : "Mark"} step ${i + 1}`} aria-pressed={!!done[c.id]} className="mt-0.5 shrink-0">{done[c.id] ? <CheckCircle2 className="size-5 text-accent" /> : <Circle className="size-5 text-muted" />}</button>
-      <div className="min-w-0"><div className={cx("text-sm font-medium", done[c.id] && "text-muted line-through")}>{i + 1}. {c.text}</div><p className="text-[13px] text-muted mt-0.5">{c.detail} <Link href={c.href} className="text-accent underline underline-offset-2">Open</Link></p></div>
+      <div className="min-w-0"><div className={cx("text-sm font-medium", done[c.id] && "text-muted line-through")}>{i + 1}. {c.text}</div><p className="text-[14px] text-muted mt-0.5">{c.detail} <Link href={c.href} className="text-accent underline underline-offset-2">Open</Link></p></div>
     </li>))}</ol>;
 }
 
@@ -41,7 +41,7 @@ export function ConnectionsDrawer({ onClose }: { onClose: () => void }) {
   const list = (checked ?? q.data)?.connections;
   return (
     <Drawer title="Connections" subtitle="What is connected, and how recently it was verified" onClose={onClose} wide
-      footer={<div className="flex items-center gap-3"><Button variant="primary" busy={check.busy} onClick={() => check.run()}><RefreshCw className="size-4" />Run health check</Button><span className="text-[12px] text-muted">Local checks only. A check never proves a live account.</span></div>}>
+      footer={<div className="flex items-center gap-3"><Button variant="primary" busy={check.busy} onClick={() => check.run()}><RefreshCw className="size-4" />Run health check</Button><span className="text-[13px] text-muted">Local checks only. A check never proves a live account.</span></div>}>
       {q.loading && !q.data && <Spinner />}{q.error && !q.data && <ErrorBox error={q.error} onRetry={q.reload} />}{check.error && <ErrorBox error={check.error} />}
       {checked && <Notice tone="accent">Checked {fmtDateTime(checked.checkedAt)}. {checked.note}</Notice>}
       <ul className="space-y-2" data-testid="connections-list">{list?.map((c: any) => (
@@ -50,13 +50,13 @@ export function ConnectionsDrawer({ onClose }: { onClose: () => void }) {
             {open === c.id ? <ChevronDown className="size-4 text-muted" /> : <ChevronRight className="size-4 text-muted" />}<span className="text-sm font-medium flex-1">{c.label}</span>
             <Badge tone={STATE[c.state]?.tone}>{STATE[c.state]?.label}</Badge>{c.liveVerified ? <Badge tone="accent">live verified</Badge> : <Badge>not live verified</Badge>}
           </button>
-          <p className="text-[13px] text-muted mt-1.5 break-words pl-6">{c.message}</p>
-          {open === c.id && <div className="pl-6 mt-2 space-y-2 text-[13px]"><p><span className="text-muted">Does:</span> {c.capability}</p><p><span className="text-muted">Runs on:</span> {c.surface}</p>{c.steps.length > 0 && <ol className="list-decimal pl-5 space-y-0.5">{c.steps.map((s: string, i: number) => <li key={i}>{s}</li>)}</ol>}</div>}
+          <p className="text-[14px] text-muted mt-1.5 break-words pl-6">{c.message}</p>
+          {open === c.id && <div className="pl-6 mt-2 space-y-2 text-[14px]"><p><span className="text-muted">Does:</span> {c.capability}</p><p><span className="text-muted">Runs on:</span> {c.surface}</p>{c.steps.length > 0 && <ol className="list-decimal pl-5 space-y-0.5">{c.steps.map((s: string, i: number) => <li key={i}>{s}</li>)}</ol>}</div>}
         </li>))}</ul>
       {sched.data && <section><SectionTitle>Scheduler</SectionTitle><p className="text-sm">{sched.data.message}</p></section>}
       {router.data && <section><SectionTitle>Claude routing</SectionTitle>
-        <p className="text-[13px] text-muted mb-2">Provider: {router.data.provider}. Budget today: ${router.data.spentTodayUsd.toFixed(4)} of ${router.data.dailyBudgetUsd.toFixed(2)} (estimates). Deterministic work never calls a model.</p>
-        <ul className="space-y-1">{router.data.roles.map((r: any) => <li key={r.role} className="flex items-center gap-2 text-[13px]"><Mono className="w-32 text-muted">{r.role}</Mono><Mono className="flex-1 truncate">{r.model} · {r.effort}</Mono><Badge tone={r.status === "ready" ? "accent" : "neutral"}>{r.status.replace("_", " ")}</Badge></li>)}</ul></section>}
+        <p className="text-[14px] text-muted mb-2">Provider: {router.data.provider}. Budget today: ${router.data.spentTodayUsd.toFixed(4)} of ${router.data.dailyBudgetUsd.toFixed(2)} (estimates). Deterministic work never calls a model.</p>
+        <ul className="space-y-1">{router.data.roles.map((r: any) => <li key={r.role} className="flex items-center gap-2 text-[14px]"><Mono className="w-32 text-muted">{r.role}</Mono><Mono className="flex-1 truncate">{r.model} · {r.effort}</Mono><Badge tone={r.status === "ready" ? "accent" : "neutral"}>{r.status.replace("_", " ")}</Badge></li>)}</ul></section>}
       <section><SectionTitle>Set up for real use</SectionTitle><ConnectionChecklist /></section>
     </Drawer>
   );

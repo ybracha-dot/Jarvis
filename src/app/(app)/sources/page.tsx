@@ -18,12 +18,12 @@ export default function SourcesPage() {
     <Health />
     <section><SectionTitle>Watched folder</SectionTitle><Card className="p-4 space-y-2 text-sm">
       <p>Drop <Mono>.json</Mono>, <Mono>.ics</Mono> or <Mono>.eml</Mono> files here. The worker or Run now reads them. Unchanged files change nothing.</p>
-      <p className="text-[13px]"><Mono className="break-all">{settings.data?.inboxDir}</Mono></p>
+      <p className="text-[14px]"><Mono className="break-all">{settings.data?.inboxDir}</Mono></p>
       <Button size="sm" busy={scan.busy} onClick={async () => { const r = await scan.run(); if (r) setScanMsg(`${r.scan.files} file(s) checked. ${r.message}`); }}>Run now</Button>{scanMsg && <Notice tone="accent">{scanMsg}</Notice>}{scan.error && <ErrorBox error={scan.error} />}</Card></section>
     <section><SectionTitle>Sources</SectionTitle>
       {q.loading && !q.data && <Spinner />}{q.error && !q.data && <ErrorBox error={q.error} onRetry={q.reload} />}
       {q.data?.sources.length === 0 && <Card><Empty title="No sources yet" hint="Import a file above." /></Card>}
-      <ul className="space-y-2">{q.data?.sources.map((s: any) => <li key={s.id}><Card className="p-3"><button className="w-full flex items-center gap-2 text-left" onClick={() => setOpenId(openId === s.id ? null : s.id)} aria-expanded={openId === s.id}>{openId === s.id ? <ChevronDown className="size-4 text-muted" /> : <ChevronRight className="size-4 text-muted" />}<span className="text-sm font-medium break-words min-w-0 flex-1">{s.title}</span><Badge>{s.course}</Badge><Badge>{s.kind}</Badge><Mono className="text-[11px] text-muted">{s.revisions} rev</Mono></button>{openId === s.id && <Revisions id={s.id} />}</Card></li>)}</ul></section>
+      <ul className="space-y-2">{q.data?.sources.map((s: any) => <li key={s.id}><Card className="p-3"><button className="w-full flex items-center gap-2 text-left" onClick={() => setOpenId(openId === s.id ? null : s.id)} aria-expanded={openId === s.id}>{openId === s.id ? <ChevronDown className="size-4 text-muted" /> : <ChevronRight className="size-4 text-muted" />}<span className="text-sm font-medium break-words min-w-0 flex-1">{s.title}</span><Badge>{s.course}</Badge><Badge>{s.kind}</Badge><Mono className="text-[12px] text-muted">{s.revisions} rev</Mono></button>{openId === s.id && <Revisions id={s.id} />}</Card></li>)}</ul></section>
     <section><SectionTitle>Connect for real use</SectionTitle><ConnectionChecklist /></section>
   </div>;
 }
@@ -31,7 +31,7 @@ export default function SourcesPage() {
 function Revisions({ id }: { id: string }) {
   const q = useQuery<any>(`/sources/${id}`);
   if (q.loading && !q.data) return <Spinner />;
-  return <ul className="mt-3 space-y-2 pl-6">{q.data?.revisions.map((r: any) => <li key={r.id} className="rounded-lg border border-line p-2.5 text-[13px]"><div className="flex items-center gap-2 flex-wrap"><Mono className="text-[11px] text-muted">posted {fmtDateTime(r.published_at)}</Mono>{r.duplicate_of && <Badge>duplicate copy</Badge>}{r.stale ? <Badge tone="amber">older, ignored</Badge> : null}</div><p className="mt-1 break-words text-muted">{r.text}</p></li>)}</ul>;
+  return <ul className="mt-3 space-y-2 pl-6">{q.data?.revisions.map((r: any) => <li key={r.id} className="rounded-lg border border-line p-2.5 text-[14px]"><div className="flex items-center gap-2 flex-wrap"><Mono className="text-[12px] text-muted">posted {fmtDateTime(r.published_at)}</Mono>{r.duplicate_of && <Badge>duplicate copy</Badge>}{r.stale ? <Badge tone="amber">older, ignored</Badge> : null}</div><p className="mt-1 break-words text-muted">{r.text}</p></li>)}</ul>;
 }
 
 function Importer() {
@@ -49,16 +49,16 @@ function Importer() {
   const needsCourse = prev?.needs?.includes("courseExternalId") && !course;
   return <section><SectionTitle>Import</SectionTitle><Card className="p-4 space-y-3">
     <div className="flex gap-2 flex-wrap items-end"><div><input ref={file} type="file" accept=".md,.txt,.html,.htm,.ics,.eml,.json,.pdf" className="sr-only" id="file" aria-label="Choose a file to import" onChange={(e) => onFile(e.target.files?.[0])} /><Button onClick={() => file.current?.click()}><Upload className="size-4" />Choose a file</Button></div>
-      <span className="text-[12px] text-muted pb-2">.md .txt .html .ics .eml or a JSON bundle. PDF is not supported yet.</span></div>
+      <span className="text-[13px] text-muted pb-2">.md .txt .html .ics .eml or a JSON bundle. PDF is not supported yet.</span></div>
     <div className="grid sm:grid-cols-3 gap-3"><Field label="File name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} /></Field>
       <Field label="Course"><select className={inputCls} value={course} onChange={(e) => setCourse(e.target.value)}><option value="">Detect from text</option>{courses.data?.courses.map((c: any) => <option key={c.external_id} value={c.external_id}>{c.code}</option>)}</select></Field>
       <Field label="Kind"><select className={inputCls} value={kind} onChange={(e) => setKind(e.target.value)}>{["announcement", "syllabus", "email", "assignment", "reference", "receipt"].map((k) => <option key={k}>{k}</option>)}</select></Field></div>
-    <Field label="Or paste the content"><textarea className={cx(inputCls, "min-h-28 font-mono text-[13px]")} value={text} onChange={(e) => { setText(e.target.value); setPrev(null); setPrevErr(null); preview.clear(); }} placeholder="Paste an announcement, an email, an .ics file or a JSON bundle" data-testid="import-text" /></Field>
+    <Field label="Or paste the content"><textarea className={cx(inputCls, "min-h-28 font-mono text-[14px]")} value={text} onChange={(e) => { setText(e.target.value); setPrev(null); setPrevErr(null); preview.clear(); }} placeholder="Paste an announcement, an email, an .ics file or a JSON bundle" data-testid="import-text" /></Field>
     <Button variant="primary" busy={preview.busy} disabled={!text.trim()} onClick={() => preview.run()} data-testid="import-preview">Preview</Button>
     {(prevErr || preview.error) && <ErrorBox error={(prevErr || preview.error)!} />}
     {prev && <div className="rounded-xl border border-line bg-bg p-3 space-y-2" data-testid="import-preview-result"><div className="text-sm font-medium">{prev.format}: {prev.summary}. Nothing is saved until you import.</div>
-      <ul className="space-y-1">{prev.items.slice(0, 8).map((i: any, k: number) => <li key={k} className="text-[13px]"><Badge>{i.kind}</Badge> <b className="font-medium">{i.label}</b> <span className="text-muted break-words">{i.detail}</span></li>)}</ul>
-      {prev.items.length > 8 && <p className="text-[12px] text-muted">and {prev.items.length - 8} more</p>}
+      <ul className="space-y-1">{prev.items.slice(0, 8).map((i: any, k: number) => <li key={k} className="text-[14px]"><Badge>{i.kind}</Badge> <b className="font-medium">{i.label}</b> <span className="text-muted break-words">{i.detail}</span></li>)}</ul>
+      {prev.items.length > 8 && <p className="text-[13px] text-muted">and {prev.items.length - 8} more</p>}
       {prev.warnings.map((w: string, i: number) => <Notice key={i}>{w}</Notice>)}{prev.unsupported.length > 0 && <Notice tone="neutral"><b>Not imported:</b> {prev.unsupported.join(" · ")}</Notice>}
       {needsCourse && <Notice>Choose a course above first. Jarvis could not tell which course this belongs to.</Notice>}
       <Button variant="primary" busy={commit.busy} disabled={needsCourse} onClick={() => commit.run()} data-testid="import-commit">Import</Button>{commit.error && <ErrorBox error={commit.error} />}</div>}
@@ -71,12 +71,12 @@ function Health() {
   const toggle = useAction(async (provider: string, disconnected: boolean) => { await api("/sources-health/disconnect", { body: { provider, disconnected } }); });
   return <section><SectionTitle>Source status</SectionTitle><Card className="p-3">
     {q.data?.sources.length === 0 && <p className="text-sm text-muted">No sources have reported yet.</p>}
-    <ul className="divide-y divide-line" data-testid="source-status-list">{q.data?.sources.map((s: any) => <li key={s.provider} className="py-2 flex items-center gap-3 flex-wrap text-[13px]" data-provider={s.provider}>
+    <ul className="divide-y divide-line" data-testid="source-status-list">{q.data?.sources.map((s: any) => <li key={s.provider} className="py-2 flex items-center gap-3 flex-wrap text-[14px]" data-provider={s.provider}>
       <span className={cx("size-2 rounded-full shrink-0", s.state === "ok" ? "bg-accent" : s.state === "partial" || s.state === "unverified" ? "bg-amber" : s.state === "failed" ? "bg-danger" : "bg-muted")} aria-hidden />
       <span className="font-medium">{s.label}</span><Badge tone={s.state === "ok" ? "accent" : s.state === "partial" || s.state === "unverified" ? "amber" : s.state === "failed" ? "danger" : "neutral"}>{s.state}</Badge>
       <span className="text-muted">{s.lastSuccessAt ? `last verified ${fmtDateTime(s.lastSuccessAt)}` : "never verified"}</span>
-      <span className="text-muted basis-full text-[12px] break-words">Last event: {s.lastEventAt ? fmtDateTime(s.lastEventAt) : "none"} · Next check: {s.nextCheckAt ? fmtDateTime(s.nextCheckAt) : "none scheduled"}{s.gapReason ? ` · Gap: ${s.gapReason}` : ""}</span>
-      {s.message && <span className="text-muted break-words basis-full sm:basis-auto sm:flex-1 text-[12px]">{s.message}</span>}
+      <span className="text-muted basis-full text-[13px] break-words">Last event: {s.lastEventAt ? fmtDateTime(s.lastEventAt) : "none"} · Next check: {s.nextCheckAt ? fmtDateTime(s.nextCheckAt) : "none scheduled"}{s.gapReason ? ` · Gap: ${s.gapReason}` : ""}</span>
+      {s.message && <span className="text-muted break-words basis-full sm:basis-auto sm:flex-1 text-[13px]">{s.message}</span>}
       <Button size="sm" variant="ghost" className="ml-auto" busy={toggle.busy} onClick={() => toggle.run(s.provider, s.state !== "disconnected")}>{s.state === "disconnected" ? "Reconnect" : "Disconnect"}</Button></li>)}</ul>
     {toggle.error && <ErrorBox error={toggle.error} />}</Card></section>;
 }

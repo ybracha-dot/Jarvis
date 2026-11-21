@@ -15,14 +15,14 @@ describe("contrast (WCAG AA, 4.5:1 for text, 3:1 for UI)", () => {
     });
   }
   it("button text on the accent and amber fills", () => {
-    expect(ratio("#06201b", tok("accent"))).toBeGreaterThanOrEqual(4.5);
+    expect(ratio("#04141e", tok("accent"))).toBeGreaterThanOrEqual(4.5);
     expect(ratio("#2a1c04", tok("amber"))).toBeGreaterThanOrEqual(4.5);
   });
   it("amber and accent badges on their tinted backgrounds", () => {
     expect(ratio(tok("amber"), "#1f180a")).toBeGreaterThanOrEqual(4.5);
-    expect(ratio(tok("accent"), "#0f2420")).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(tok("accent"), "#0b1c29")).toBeGreaterThanOrEqual(4.5);
     expect(ratio("#f6d7a1", "#1a1508")).toBeGreaterThanOrEqual(4.5);
-    expect(ratio("#bff3e8", "#0e1f1c")).toBeGreaterThanOrEqual(4.5);
+    expect(ratio("#cdeeff", "#0b1c29")).toBeGreaterThanOrEqual(4.5);
   });
   it("borders and focus ring are visible against the background (3:1 for the focus ring)", () => {
     expect(ratio(tok("accent"), tok("bg"))).toBeGreaterThanOrEqual(3);

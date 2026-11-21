@@ -1,0 +1,12 @@
+# Automatic HTTPS for your domain. Only the connector is reachable. Everything except /mcp and /healthz is refused here too (and again inside the app).
+{$JARVIS_DOMAIN} {
+	@allowed path /mcp /healthz
+	handle @allowed {
+		request_body { max_size 256KB }
+		reverse_proxy connector:3000
+	}
+	handle {
+		respond "Not found" 404
+	}
+	log { output stdout }
+}

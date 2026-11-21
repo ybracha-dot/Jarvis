@@ -96,3 +96,24 @@ describe("golden Iceland scenario", () => {
     expect((get_.run(ctx, {}) as any).projects.length).toBe(1);
   });
 });
+
+import { createNote, updateNote, pinNote, moveNote, mergeNotes, undoNote, memoryAnswer, memoryOverview, getNote } from "@/lib/memory";
+describe("memory: current answer and reversible edits", () => {
+  const base = (ctx: any) => ({ a: createNote(ctx, { kind: "preference", title: "Study spot", body: "Library, quiet floor", source: "user" }), b: createNote(ctx, { kind: "preference", title: "Study time", body: "Mornings", source: "user" }) });
+  it("answers with the project decision first and says why", () => {
+    const ctx = fresh(); up(ctx, { eventId: "evt-m000-a", changes: [{ op: "decide", key: "dates", text: "June 14 to 21" }] }); createNote(ctx, { kind: "preference", title: "Dates I like", body: "June is best for travel", source: "user" });
+    const a = memoryAnswer(ctx, "dates"); expect(a.answer).toMatchObject({ kind: "project", text: "June 14 to 21" }); expect(a.answer!.why).toMatch(/Claude conversation/);
+    expect(memoryAnswer(ctx, "zzzz nothing").none).toMatch(/nothing saved/);
+  });
+  it("pin, edit then undo, move to a project and back, merge then undo", () => {
+    const ctx = fresh(); const { a, b } = base(ctx); const p = createProject(ctx, { name: "Spring term" });
+    pinNote(ctx, a, true); expect(memoryOverview(ctx).pinned.map((n: any) => n.id)).toEqual([a]);
+    updateNote(ctx, a, { body: "Cafe downtown" }); expect(getNote(ctx, a)!.note.body).toBe("Cafe downtown");
+    undoNote(ctx, a); expect(getNote(ctx, a)!.note.body).toBe("Library, quiet floor"); expect(() => undoNote(ctx, a)).toThrow(/Nothing to undo/);
+    moveNote(ctx, a, { projectId: p.id }); expect(get(ctx.db, "SELECT scope, project_id FROM notes WHERE id=?", a)).toMatchObject({ scope: "project:spring-term", project_id: p.id });
+    undoNote(ctx, a); expect(get(ctx.db, "SELECT scope, project_id FROM notes WHERE id=?", a)).toMatchObject({ scope: "global", project_id: null });
+    mergeNotes(ctx, b, a); expect(getNote(ctx, a)!.note.body).toMatch(/Mornings/); expect(getNote(ctx, b)!.note.superseded_by).toBe(a);
+    expect(memoryOverview(ctx).known.map((n: any) => n.id)).not.toContain(b);
+    undoNote(ctx, a); expect(getNote(ctx, a)!.note.body).not.toMatch(/Mornings/); expect(getNote(ctx, b)!.note.superseded_by).toBeNull();
+  });
+});

@@ -25,7 +25,7 @@ export default function CompletedPage() {
       <li key={t.id} className="rounded-xl border border-line bg-surface p-3.5" data-testid="completed-row">
         <div className="flex items-center gap-2 flex-wrap"><button onClick={() => open("task", t.id)} className="text-sm font-medium text-left underline-offset-2 hover:underline break-words">{t.title}</button><Badge>{t.course_code}</Badge><Button size="sm" variant="ghost" className="ml-auto" onClick={() => reopen.run(t.id)}><RotateCcw className="size-3.5" />Reopen</Button></div>
         <ul className="mt-2 flex flex-wrap gap-2">{t.evidence.map((e: any, i: number) => <li key={i}><Badge tone={e.kind === "submission_receipt" ? "accent" : "neutral"}>{EV[e.kind] ?? e.kind} · {fmtDateTime(e.at)}</Badge></li>)}</ul>
-        {!t.evidence.some((e: any) => e.kind === "submission_receipt") && <p className="text-[12px] text-muted mt-1.5">No submission receipt on file.</p>}
+        {!t.evidence.some((e: any) => e.kind === "submission_receipt") && <p className="text-[13px] text-muted mt-1.5">No submission receipt on file.</p>}
       </li>))}</ul></section>)}
   </div>;
 }

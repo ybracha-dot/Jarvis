@@ -1,0 +1,35 @@
+# One Jarvis, one database, three doors.
+#   ui         your private app. Published on this computer only (127.0.0.1:3000). Reach it over SSH or your tailnet.
+#   connector  the same app, answering ONLY /mcp and /healthz. This is the only thing the internet can reach.
+#   worker     runs background jobs from the same database.
+# All three share the volume "jarvis-data", so what Claude saves is what you see, and what you decide is what Claude reads.
+services:
+  ui:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    environment: { JARVIS_INAPP_RUNNER: "0", JARVIS_PUBLIC_URL: "https://${JARVIS_DOMAIN}" }
+    volumes: [jarvis-data:/data]
+    ports: ["127.0.0.1:3000:3000"]
+    restart: unless-stopped
+  connector:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    environment:
+      JARVIS_PUBLIC_MODE: mcp-only
+      JARVIS_MCP_MODE: personal
+      JARVIS_MCP_ALLOWED_HOSTS: "${JARVIS_DOMAIN}"
+      JARVIS_INAPP_RUNNER: "0"
+    volumes: [jarvis-data:/data]
+    expose: ["3000"]
+    restart: unless-stopped
+  worker:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    command: ["npx", "tsx", "scripts/worker.ts"]
+    volumes: [jarvis-data:/data]
+    restart: unless-stopped
+  caddy:
+    image: caddy:2
+    environment: { JARVIS_DOMAIN: "${JARVIS_DOMAIN}" }
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", caddy-data:/data]
+    ports: ["80:80", "443:443"]
+    depends_on: [connector]
+    restart: unless-stopped
+volumes: { jarvis-data: {}, caddy-data: {} }
