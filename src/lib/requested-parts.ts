@@ -5,7 +5,7 @@ import { wordsOf } from "./plan";
 import { columnMentions, coversMention } from "./ledger";
 
 export type OutcomeKind = "answer" | "report" | "draft" | "table";
-export interface TableWish { columns: string[]; rowUnit: string | null; excludeDone: boolean; form?: "table" | "checklist"; groupByOwner?: boolean; mentions?: string[] }
+export interface TableWish { columns: string[]; rowUnit: string | null; excludeDone: boolean; form?: "table" | "checklist"; groupByOwner?: boolean; perPerson?: boolean; mentions?: string[] }
 export interface Outcome { id: string; kind: OutcomeKind; text: string; recipient: string | null; table?: TableWish }
 export interface OutcomeStatus extends Outcome { status: "done" | "partial" | "missing"; detail: string }
 export type Completion = "complete" | "partial" | "incomplete";
@@ -23,22 +23,26 @@ const TABLE_MOD = /\b(?:rows?|columns?)\b|\bleave\b[^.?!]*\bout\b|\bexclude\b|\b
 const splitList = (t: string) => t.split(/\s*[,|]\s*(?:and\s+)?|\s+and\s+/i).map((x) => x.replace(/^(?:the|a|an)\s+/i, "").replace(/[.]+$/, "").trim()).filter(Boolean);
 
 /** The parts of a request. A single-part request returns one outcome; the caller decides whether that is worth showing. */
-export function parseOutcomes(request: string): Outcome[] {
+const WORKSTATE = /\b(?:who(?:'s|\s+is|\s+are)?\s+(?:doing|owns|has|responsible|handling)|who owns what|status board|status of (?:the )?(?:tasks?|work)|action items?|what(?:'s|\s+is|\s+are)?\s+(?:left|remaining|outstanding|still (?:to do|open|needed|need))|what still needs|open (?:items|tasks)|to-?do list|task list)\b/i;
+const COLNOUNS = /\b(task|owner|person|assignee|status|blocker|blocked by|next action|next step|due date|deadline|budget|cost|priority|phone number|email)\b/gi;
+/** Column nouns in the order the request names them, when it names at least two. */
+const columnNouns = (t: string) => { const out: string[] = []; for (const m of t.matchAll(COLNOUNS)) { const n = m[1].toLowerCase(); if (!out.includes(n)) out.push(n); } return out; };
+export function parseOutcomes(request: string, o: { project?: boolean } = {}): Outcome[] {
   const out: Outcome[] = [];
   const sentences = request.split(/(?<=[.?!])\s+(?=[A-Za-z])/).map((x) => x.trim()).filter(Boolean);
   const clauses = sentences.flatMap((s) => s.split(/,?\s+and\s+(?=(?:show|draft|write|tell|list|give|prepare|also|then|reply|email|work out|figure out|calculate|what|how|when|which|where|can|could)\b)/i));
-  const tableAt = clauses.findIndex((c) => TABLE_ASK.test(c) || CHECK_ASK.test(c));
+  let tableAt = clauses.findIndex((c) => TABLE_ASK.test(c) || CHECK_ASK.test(c)); const workState = tableAt < 0 && !!o.project && clauses.findIndex((c) => WORKSTATE.test(c)) >= 0; if (workState) tableAt = clauses.findIndex((c) => WORKSTATE.test(c));
   // A table is one outcome. The sentences that describe its rows, columns and exclusions belong to it and are not separate requests.
   let wish: TableWish | null = null; const consumed = new Set<number>();
   if (tableAt >= 0) {
-    wish = { columns: [], rowUnit: null, excludeDone: false, form: CHECK_ASK.test(clauses[tableAt]) && !/\btable\b/i.test(clauses[tableAt]) ? "checklist" : "table", mentions: columnMentions(request) }; wish.groupByOwner = wish.form === "checklist" && /\b(?:per|for each|by|each)\s+(?:person|owner|people|assignee)\b/i.test(request); consumed.add(tableAt);
+    wish = { columns: [], rowUnit: null, excludeDone: false, form: (CHECK_ASK.test(clauses[tableAt]) || (workState && /\b(?:bullets?|bulleted|check-?list)\b/i.test(request))) && !/\btable\b/i.test(clauses[tableAt]) ? "checklist" : "table", mentions: columnMentions(request) }; wish.perPerson = /\bone row per (?:person|owner)\b|\b(?:per|by|for each|each) (?:person|owner)\b/i.test(request) && wish.form === "table"; if (workState || !/\b(?:row|column)s?\b/i.test(request)) { const cl = clauses[tableAt]; const tailText = cl.includes(":") ? cl.slice(cl.lastIndexOf(":") + 1) : /\bwith\b/i.test(cl) ? cl.slice(cl.search(/\bwith\b/i)) : cl; const nouns = [...new Set(columnNouns(tailText.replace(/\b(?:one row )?(?:per|by|for each|each)\s+(?:person|owner|people|assignee)\b/gi, "")).map((x) => (x === "person" ? "owner" : x)))]; if (nouns.length >= 2 && nouns.some((x) => ["task","owner","person","assignee","status","blocker","blocked by","next action","next step"].includes(x))) wish.columns = nouns; } wish.groupByOwner = wish.form === "checklist" && /\b(?:per|for each|by|each)\s+(?:person|owner|people|assignee)\b/i.test(request); consumed.add(tableAt);
     clauses.forEach((c, i) => {
       if (i !== tableAt && !TABLE_MOD.test(c)) return; if (i !== tableAt) consumed.add(i);
-      const cols = /\b(?:with|columns?(?:\s+for)?:?|showing|listing|including)\s+(.+?)[.?!]*$/i.exec(c); if (cols && /\b(?:row|column)s?\b/i.test(c)) wish!.columns = splitList(cols[1].replace(/^columns?:?\s+/i, "").replace(/\s+for\s+(?:this|the|each|every)\s+[a-z ]+$/i, ""));
+      const cols = /\b(?:with|columns?(?:\s+for)?:?|showing|listing|including)\s+(.+?)[.?!]*$/i.exec(c); if (cols && (/\b(?:row|column)s?\b/i.test(c) || (i === tableAt && /\btable\b/i.test(c) && /\bwith\b/i.test(c) && !wish!.columns.length))) wish!.columns = splitList(cols[1].replace(/^columns?:?\s+/i, "").replace(/\s+for\s+(?:this|the|each|every)\s+[a-z ]+$/i, ""));
       const unit = /\b(?:each|every|per)\s+(.+?)\s+(?:one row|a row|its own row|gets|get)\b|\bone row (?:per|for each)\s+(.+?)(?:\s+with|[.,]|$)/i.exec(c); if (unit) wish!.rowUnit = (unit[1] ?? unit[2]).trim();
       if (/\bleave\s+(?:the\s+)?(?:completed|finished|done|closed)\b|\bexclude\s+(?:the\s+)?(?:completed|finished|done)\b|\bonly (?:include|show|list)\s+(?:the\s+)?(?:open|unfinished|incomplete)\b/i.test(c)) wish!.excludeDone = true;
     });
-    if (/\bopen\b|\bstill (?:need|to do|have to)|\bremaining\b|\boutstanding\b/i.test(clauses.filter((_, i) => consumed.has(i)).join(" ")) || wish.form === "checklist") wish.excludeDone = true;
+    if (workState || /\bopen\b|\bstill (?:need|to do|have to)|\bremaining\b|\boutstanding\b/i.test(clauses.filter((_, i) => consumed.has(i)).join(" ")) || wish.form === "checklist") wish.excludeDone = true;
   }
   clauses.forEach((raw, i) => {
     if (consumed.has(i) && i !== tableAt) return;

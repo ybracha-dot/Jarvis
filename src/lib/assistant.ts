@@ -134,8 +134,9 @@ export function receipt(ctx: Ctx, requestId: string) {
   const blockers: string[] = []; if (job?.status === "blocked") blockers.push(job.result?.ask?.question ?? job.error ?? "Needs your answer");
   const kids = job ? all(ctx.db, "SELECT status, result, error FROM jobs WHERE root_id=? AND status='blocked'", job.root_id ?? job.id) : []; for (const k of kids) { const q = k.result ? JSON.parse(k.result as string)?.ask?.question : null; if (q) blockers.push(q); }
   const status = (job?.status ?? "queued") as string; const done = status === "done" && (res?.version as number) > 0;
+  const quotesOnly = done && !!get(ctx.db, "SELECT 1 x FROM result_versions WHERE result_id=? AND version=? AND flags LIKE '%\"kind\":\"extractive\"%'", r.result_id, res!.version);
   const parts: OutcomeStatus[] = done ? JSON.parse(String(get(ctx.db, "SELECT outcomes FROM result_versions WHERE result_id=? AND version=?", r.result_id, res!.version)?.outcomes ?? "[]")) : []; const completion = completionOf(parts);
-  return { requestId, revision: r.revision as number, title: r.title as string, origin: r.origin as string, jobId: (r.job_id as string) ?? null, resultId: r.result_id as string, status: kids.length && status !== "blocked" ? "blocked" : status, plain: kids.length ? PLAIN.blocked : done && completion !== "complete" ? completion === "incomplete" ? `Finished, but none of the requested parts could be done (${completionLine(parts)})` : `Finished, but only partly done: ${completionLine(parts)}` : (PLAIN[status] ?? status), completion, parts, step: job?.stage ?? null, blockers, ready: done, version: (res?.version as number) ?? 0, resultState: (res?.state as string) ?? "pending", links: links(r.result_id as string, requestId) };
+  return { requestId, revision: r.revision as number, title: r.title as string, origin: r.origin as string, jobId: (r.job_id as string) ?? null, resultId: r.result_id as string, status: kids.length && status !== "blocked" ? "blocked" : status, plain: kids.length ? PLAIN.blocked : done && completion === "complete" && quotesOnly && !parts.length ? "Finished, but only as quoted passages: nothing was computed, listed or organised for you" : done && completion !== "complete" ? completion === "incomplete" ? `Finished, but none of the requested parts could be done (${completionLine(parts)})` : `Finished, but only partly done: ${completionLine(parts)}` : (PLAIN[status] ?? status), completion, parts, step: job?.stage ?? null, blockers, ready: done, version: (res?.version as number) ?? 0, resultState: (res?.state as string) ?? "pending", links: links(r.result_id as string, requestId) };
 }
 
 // ---------- instruction revisions ----------
@@ -258,7 +259,7 @@ function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string
   const items: ReturnType<typeof shapeItem>[] = use.map(({ h, m }) => shapeItem(authorizedItem(ctx, h.itemId)!, m, h.excerpt));
   // A correction you linked to a selected note belongs with it even when it shares no search words with the question, and so does the note it corrects.
   // For "turn these notes into a table", the notes of the selected project are the material.
-  const wantTable = parseOutcomes(question).some((o) => o.kind === "table");
+  const asked = parseOutcomes(question, { project: !!intent.projectId }); const wantTable = asked.some((o) => o.kind === "table");
   const have = new Set(items.map((i) => i.id));
   const extra: { id: string; why: string }[] = linkedCorrections(ctx, [...have]).map((x) => ({ id: x.id, why: `, added: ${x.why}` }));
   if ((wantTable || !items.length) && intent.projectId) for (const row of all(ctx.db, "SELECT i.id FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.project_id=? AND i.tombstone=0 AND s.revoked_at IS NULL ORDER BY i.at DESC LIMIT 30", ctx.owner, intent.projectId)) extra.push({ id: row.id as string, why: wantTable ? ", added: a note of the selected project" : ", added: a note of the selected project because no note shares words with your question" });
@@ -272,7 +273,7 @@ function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string
     const have = new Set(items.map((i) => i.id));
     for (const row of listItems(ctx)) { const it = authorizedItem(ctx, row.id as string); if (!it || have.has(it.id) || !["email", "transcript", "claude", "note", "slack", "export"].includes(it.kind)) continue; if (!/\b\d{1,2}:\d{2}\b|\b\d+\s*(?:minutes?|hours?|people|persons|attendees|pieces|seats|per)\b|\b(?:holds|max|limit|booked|free|available)\b/i.test(it.body)) continue; planIds.push(it.id); recordRead(ctx, requestId, revision, { kind: "thread", ref: it.id, source: it.sourceLabel, itemRevision: it.revision, label: `${it.title} (${it.kind}, ${fmtDay(localDate(it.at))}, read for limits, windows and dates)`, excerpt: it.body.slice(0, 160) }); }
   }
-  return { mode: "digest", decide: DECISION_Q.test(question), table: wantTable, plan: PLAN_Q.test(question) && !DECISION_Q.test(question), planIds, localOnly, question, items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
+  return { mode: "digest", asked, decide: DECISION_Q.test(question), table: wantTable, plan: PLAN_Q.test(question) && !DECISION_Q.test(question), planIds, localOnly, question, items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
 }
 
 function researchBrief(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
@@ -395,7 +396,7 @@ function composeBrief(ctx: Ctx, b: any, intent: Intent) {
 function composeAnswer(ctx: Ctx, b: any, instr?: ReturnType<typeof parseInstructions>) {
   if (b.mode !== "digest") return composeMeeting(ctx, b);
   if (b.table) {
-    const wish = parseOutcomes(String(b.question ?? "")).find((o) => o.kind === "table")?.table;
+    const wish = ((b.asked ?? parseOutcomes(String(b.question ?? ""))) as ReturnType<typeof parseOutcomes>).find((o) => o.kind === "table")?.table;
     const tb = wish ? composeTable(ctx, b, String(b.question ?? ""), wish, { applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] }) : null;
     if (tb && "body" in tb) return tb;
     const dg: any = composeDigest(ctx, b); dg.tableReason = tb && "reason" in tb ? `${tb.reason} Here is what the sources say.` : "No table could be built from the notes. Here is what the sources say."; dg.flags.unshift({ kind: "no_table", text: dg.tableReason }); return dg;
@@ -427,7 +428,9 @@ function composeDigest(ctx: Ctx, b: any) {
   const byId = new Map<string, any>(items.map((i: any) => [i.id, i]));
   for (const it of items) if (it.corrects && byId.has(it.corrects)) {
     const o = byId.get(it.corrects); const od = o.facts.filter((f: any) => f.kind === "date"), nd = it.facts.filter((f: any) => f.kind === "date");
-    if (od.length && nd.length && od[0].value !== nd[0].value) { changed.push(`- ${fmtDay(od[0].value)} (${fmtDay(localDate(o.at))}, “${o.title}”) was replaced by ${fmtDay(nd[0].value)} (${fmtDay(localDate(it.at))}, your correction “${it.title}”).`); src(it, "changed date", nd[0].quote); src(o, "original wording, replaced", od[0].quote); }
+    // A date only replaces another when their sentences are about the same thing: sharing at least two content words, never just being the first date of each note.
+    const kw = (q: string) => new Set(tokens(q).map(stem)); const pair = od.flatMap((a: any) => nd.map((b: any) => ({ a, b }))).find(({ a, b }: any) => a.value !== b.value && [...kw(a.quote)].filter((w) => kw(b.quote).has(w)).length >= 2);
+    if (pair) { const a0 = pair.a, b0 = pair.b; changed.push(`- ${fmtDay(a0.value)} (${fmtDay(localDate(o.at))}, “${o.title}”) was replaced by ${fmtDay(b0.value)} (${fmtDay(localDate(it.at))}, your correction “${it.title}”).`); src(it, "changed date", b0.quote); src(o, "original wording, replaced", a0.quote); }
     for (const f of o.facts.filter((x: any) => x.kind === "figure")) { const g = it.facts.find((x: any) => x.kind === "figure" && unitOf(x.value) === unitOf(f.value) && x.value.replace(/\s+/g, "").toLowerCase() !== f.value.replace(/\s+/g, "").toLowerCase()); if (g) { changed.push(`- ${f.value} (${fmtDay(localDate(o.at))}, “${o.title}”) was replaced by ${g.value} (${fmtDay(localDate(it.at))}, your correction “${it.title}”).`); src(it, "changed value", g.quote); src(o, "original wording, replaced", f.quote); } }
   }
   if (changed.length) lines.push("", "**What changed**", "", ...[...new Set(changed)]);
@@ -601,7 +604,7 @@ const goal_writer: Handler = async (api) => {
     return { kind: intent.deliverable, projectId: bundle.projectId ?? intent.projectId ?? null, unavailable: bundle.unavailable ?? [], mode: "rules", ...c };
   });
   // Every requested part gets a status, checked against what was actually produced. A part with no matching result is reported, not papered over.
-  { const asked = parseOutcomes(String(bundle.question ?? "")); out.needsCalc = !!bundle.plan; if (bundle.gap) out.gapOutcome = true; if (bundle.gap) out.outcomes = [{ id: "o1", kind: "answer", text: String(bundle.question ?? bundle.gap).slice(0, 160), recipient: null, status: "missing", detail: String(bundle.gap) }]; else out.outcomes = asked.length >= 2 || asked.some((a) => a.kind === "table" || a.kind === "draft") ? scoreOutcomes(asked, out) : []; }
+  { const asked: ReturnType<typeof parseOutcomes> = bundle.asked ?? parseOutcomes(String(bundle.question ?? "")); out.asked = asked; out.needsCalc = !!bundle.plan; if (bundle.gap) out.gapOutcome = true; if (bundle.gap) out.outcomes = [{ id: "o1", kind: "answer", text: String(bundle.question ?? bundle.gap).slice(0, 160), recipient: null, status: "missing", detail: String(bundle.gap) }]; else out.outcomes = asked.length >= 2 || asked.some((a) => a.kind === "table" || a.kind === "draft") ? scoreOutcomes(asked, out) : []; }
   // Only what the rules could not settle may go to a model, and only if it is on, authorized and allowed for these sources.
   if (out.analysis && out.needsJudgment) {
     const j = await api.step("judgment", "Asking for an evidence-bounded judgment, if allowed", async () => {
@@ -621,13 +624,13 @@ const goal_reviewer: Handler = async (api) => {
   const v = await api.step("verify", "Checking every cited source", () => {
     const base = (content.sources?.length || !content.flags?.some((f: any) => f.kind === "gap")) ? verifyResult(api.ctx, content) : { ok: true, problems: [] as string[], checks: [{ name: "Nothing to cite", ok: true, detail: "The request found no sources, and says so." }] };
     if (content.outcomes?.length && !content.gapOutcome) {
-      const again = scoreOutcomes(parseOutcomes(request), content); const drift = again.filter((x, i) => x.status !== content.outcomes[i]?.status);
+      const again = scoreOutcomes(content.asked ?? parseOutcomes(request), content); const drift = again.filter((x, i) => x.status !== content.outcomes[i]?.status);
       const left = content.outcomes.filter((x: OutcomeStatus) => x.status !== "done");
       base.checks.push({ name: "Every requested part has a status that matches the result", ok: drift.length === 0, detail: drift.length ? `Re-checking disagrees on: ${drift.map((x) => x.text).join("; ")}.` : `${completionLine(content.outcomes)}${left.length ? `; open: ${left.map((x: OutcomeStatus) => x.text).join("; ")}` : ""}.` });
       if (drift.length) { base.problems.push(`The status of a requested part does not match the saved result: ${drift.map((x) => x.text).join("; ")}.`); base.ok = false; }
     }
     if (content.analysis) {
-      const pr = recheckAnalysis(api.ctx, content.analysis as AnalysisJson | PlanJson | TableJson, request, parseOutcomes(request).find((o) => o.kind === "table")?.table);
+      const pr = recheckAnalysis(api.ctx, content.analysis as AnalysisJson | PlanJson | TableJson, request, ((content.asked ?? parseOutcomes(request)) as ReturnType<typeof parseOutcomes>).find((o) => o.kind === "table")?.table);
       base.checks.push({ name: "Totals recomputed from the sources as they are now", ok: pr.length === 0, detail: pr.length ? pr.join(" ") : "Every total and the recommendation reproduce." });
       if (pr.length) { base.problems.push(...pr); base.ok = false; }
     }

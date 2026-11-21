@@ -6,12 +6,12 @@ import type { ItemIn, Src } from "./decision";
 import { wordsOf } from "./plan";
 
 export interface Cite { src: Src; quote: string; role: string }
-export interface TaskRow { id: string; task: string; obj: string; owner: string | null; next: string | null; blocker: string | null; blockerKey: Set<string>; due: string | null; progress: boolean; done: boolean; cites: Cite[]; history: string[] }
-export interface TableSpec { columns: string[]; rowUnit: string | null; excludeDone: boolean; form?: "table" | "checklist"; groupByOwner?: boolean }
+export interface TaskRow { id: string; task: string; obj: string; key: Set<string>; owner: string | null; next: string | null; blocker: string | null; blockerKey: Set<string>; due: string | null; progress: boolean; done: boolean; cites: Cite[]; history: string[] }
+export interface TableSpec { columns: string[]; rowUnit: string | null; excludeDone: boolean; form?: "table" | "checklist"; groupByOwner?: boolean; perPerson?: boolean }
 export interface TableAnalysis { type: "table"; form: "table" | "checklist"; columns: string[]; keys: string[]; rows: { cells: string[]; task: string; owner: string | null; cites: Cite[] }[]; leftOut: { text: string; reason: string; cites: Cite[] }[]; notes: string[]; unparsed: { text: string; src: Src }[]; missingColumns: string[]; openCount: number; taskCount: number; addedTaskColumn: boolean }
 
 const NOT_NAMES = new Set("Update Correction Note Notes Handoff The This That These Those It He She They We I You Everything Nothing Someone Anyone Also Then Now Still Side Planning Plan Task Tasks Owner Status Next Action Blocker Done Open If In On At As So No Or To Of By My Our His Her Its An Is Are Was Be We Do Go Up Us".split(" "));
-const NOT_TASK_VERBS = new Set("says said thinks think wants want asked asks mentioned mentions wrote writes noted notes confirmed confirms feels feel knows know likes like hopes hope believes believe seems seem is was has had does did gets got looks look".split(" "));
+const NOT_TASK_VERBS = new Set("says said thinks think wants want asked asks mentioned mentions noted confirmed confirms feels feel knows know likes like hopes hope believes believe seems seem is was has had does did gets got looks look".split(" "));
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const stripThe = (s: string) => s.replace(/^(?:the|a|an|our|their)\s+/i, "");
 const clean = (s: string) => s.replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim();
@@ -19,19 +19,39 @@ const clean = (s: string) => s.replace(/\s+/g, " ").replace(/[.\s]+$/, "").trim(
 export function baseVerb(v: string): string {
   const w0 = v.toLowerCase().split(" "); const w = w0[0]; const tail = w0.slice(1).join(" "); const out = (x: string) => (tail ? `${x} ${tail}` : x); if (/ies$/.test(w) && w.length > 4) return out(w.replace(/ies$/, "y")); if (/(?:ches|shes|sses|xes|zes|oes)$/.test(w)) return out(w.replace(/es$/, "")); if (/[^s]s$/.test(w)) return out(w.slice(0, -1)); return out(w);
 }
+const E_STEMS = new Set("mak tak writ creat arrang organiz coordinat prepar schedul manag produc serv chang includ provid receiv plac sav giv mov driv updat remov delet releas hir clos compar decid handl settl bak rais finaliz ".split(" "));
+/** "ordering" -> "order", "making" -> "make", "running" -> "run", "picking up" keeps its particle. */
+export function ingBase(w: string): string { let b = w.toLowerCase().replace(/ing$/, ""); if (/([bdgmnprt])\1$/.test(b) && b.length > 3) b = b.slice(0, -1); return E_STEMS.has(b) || /[cvz]$/.test(b) ? `${b}e` : b; }
+/** Peel a blocker off the end of a task phrase: "…, which is waiting on finance's spreadsheet", "…but only after the soil arrives", "… once the edit is finished". */
+function splitBlocker(rest: string): { rest: string; blocker: string | null; next: string | null } {
+  let r: RegExpExecArray | null;
+  if ((r = /^(.+?)\s+and\s+(?:needs|requires)\s+(.+?)\s+before\s+\w+\s+can\s+(.+)$/i.exec(rest))) return { rest: r[1], blocker: `Waiting for ${clean(r[2])}`, next: r[3] };
+  if ((r = /^(.+?)\s+and\s+(?:needs|requires)\s+(.+?)\s+first$/i.exec(rest))) return { rest: r[1], blocker: `Waiting for ${clean(r[2])}`, next: null };
+  if ((r = /^(.+?),\s*(?:but\s+)?(?:needs|requires)\s+(.+)$/i.exec(rest))) return { rest: r[1], blocker: `Waiting for ${clean(r[2])}`, next: null };
+  if ((r = /^(.+?),?\s*but\s+(?:the\s+)?(.+?)\s+(?:has|have)\s+not\s+(?:answered|replied|responded|confirmed|arrived|sent)(?:\s+yet)?$/i.exec(rest))) return { rest: r[1], blocker: `Waiting for ${clean(r[2])}`, next: null };
+  if ((r = /^(.+?),?\s*(?:and\s+|which\s+|that\s+|who\s+)?(?:is\s+|are\s+)?(?:still\s+)?(?:stuck waiting|waiting|held up|stalled|blocked|pending)\s+(on|for|until|by)\s+(.+)$/i.exec(rest))) return { rest: r[1], blocker: `${/^until$/i.test(r[2]) ? "Waiting until" : "Waiting for"} ${clean(r[3])}`, next: null };
+  if ((r = /^(.+?),?\s*(?:and\s+)?(?:can(?:'|’)?t|cannot|can not)\s+(?:start|begin|go)\s+until\s+(.+)$/i.exec(rest))) return { rest: r[1], blocker: `Waiting until ${clean(r[2])}`, next: null };
+  if ((r = /^(.+?),?\s*(?:but\s+)?(?:only\s+)?(after|once|until|when|as soon as)\s+(.+)$/i.exec(rest))) return { rest: r[1], blocker: `Waiting until ${clean(r[3])}`, next: null };
+  return { rest, blocker: null, next: null };
+}
 const PARTICLES = new Set(["up", "out", "off", "over", "down", "in", "on", "back"]);
 
 export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[]; unparsed: { text: string; src: Src }[] } {
   const tasks: TaskRow[] = []; const notes: string[] = []; const unparsed: { text: string; src: Src }[] = []; let n = 0;
   const corpus = items.flatMap((it) => it.sentences.map((s) => s.text)).join(" ");
   const lower = new Set((corpus.match(/\b[a-z]{3,}\b/g) ?? []));
-  const isName = (w: string) => /^[A-Z][a-z]{1,15}$/.test(w) && !NOT_NAMES.has(w) && !lower.has(w.toLowerCase());
-  const nameWords = new Set<string>(); for (const w of corpus.match(/\b[A-Z][a-z]{1,15}\b/g) ?? []) if (isName(w)) nameWords.add(w.toLowerCase());
-  const keyOf = (t: string) => new Set(wordsOf(t.replace(/-/g, " ").replace(/'s\b/g, "")).filter((w) => !["task", "work", "thing", "item", "job"].includes(w) && !nameWords.has(w)));
-  const same = (a: Set<string>, b: Set<string>) => { if (!a.size || !b.size) return false; const o = [...a].filter((x) => b.has(x)).length; return o >= 1 && o >= Math.min(a.size, b.size) / 2; };
+  const isName = (w: string) => /^[A-Z][a-zà-ÿ]{1,15}$/.test(w) && !NOT_NAMES.has(w) && !lower.has(w.toLowerCase());
+  const nameWords = new Set<string>(); for (const w of corpus.match(/\b[A-Z][a-zà-ÿ]{1,15}\b/g) ?? []) if (isName(w)) nameWords.add(w.toLowerCase());
+  // Task identity: the content words of the phrase, verb included ("book the label printer" and "the printer booking" share {book, printer}).
+  // Two phrases are the same task when one's words all appear in the other's. A single shared word ("water" in "water pump" and "water sensor") is not enough.
+  const KSTOP = new Set("the a an and or of to for from with on in at by is are was were be been it its their our his her this that these those my your as up out off over into onto than then so not no just now still also only very all each every some any other more most such own same new".split(" "));
+  const kstem = (w: string) => w.replace(/(?:es|s)$/, "").replace(/(?:ing|ed|e)$/, "");
+  const keyOf = (t: string) => new Set((t.toLowerCase().replace(/['’]s\b/g, "").match(/[a-zà-ÿ]{2,}/g) ?? []).filter((w) => !KSTOP.has(w) && !nameWords.has(w) && !["task", "work", "thing", "item", "job"].includes(w)).map(kstem).filter((w) => w.length > 1));
+  const hasW = (set: Set<string>, w: string) => set.has(w) || [...set].some((x) => (x.length >= 4 && w.startsWith(x)) || (w.length >= 4 && x.startsWith(w)));
+  const same = (a: Set<string>, b: Set<string>) => { if (!a.size || !b.size) return false; const [sm, lg] = a.size <= b.size ? [a, b] : [b, a]; return [...sm].every((x) => hasW(lg, x)); };
   const cite = (it: ItemIn, text: string, role: string): Cite => ({ src: it, quote: text.trim(), role });
   const open = () => tasks.filter((t) => !t.done);
-  const find = (phrase: string, owner?: string | null, includeDone = false) => { const k = keyOf(phrase); const pool = includeDone ? tasks : open(); return pool.find((t) => owner && t.owner === owner && same(keyOf(t.obj), k)) ?? pool.find((t) => same(keyOf(t.obj), k)); };
+  const find = (phrase: string, owner?: string | null, includeDone = false) => { const k = keyOf(phrase); const pool = includeDone ? tasks : open(); return pool.find((t) => owner && t.owner === owner && same(t.key, k)) ?? pool.find((t) => same(t.key, k)); };
   const dueOf = (s: string) => { const m = /\bdue\s+(?:on\s+|by\s+)?((?:Mon|Tues?|Wednes|Thurs?|Fri|Satur|Sun)(?:day)?|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\b/i.exec(s) ?? /\bby\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2})\b/i.exec(s); return m ? m[1] : null; };
   const reassign = (t: TaskRow, to: string, it: ItemIn, raw: string) => { if (t.owner !== to) { t.history.push(`Reassigned from ${t.owner ?? "no one"} to ${to}`); t.owner = to; } t.cites.push(cite(it, raw, "reassigned")); };
   /** A person takes a piece of work: a task already on the list changes hands, a new one is added. */
@@ -41,78 +61,114 @@ export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[
     const display = o.verb ? `${baseVerb(o.verb)}${PARTICLES.has(p.split(" ")[0]) ? "" : ""} ${p}`.replace(/\s+/g, " ").trim() : stripThe(p);
     let t = found;
     if (t) { if (t.owner !== name) reassign(t, name, it, raw); else t.cites.push(cite(it, raw, "task and owner")); }
-    else { t = { id: `t${++n}`, task: cap(display), obj: p, owner: name, next: null, blocker: null, blockerKey: new Set(), due: null, progress: false, done: false, cites: [cite(it, raw, "task and owner")], history: [] }; tasks.push(t); }
+    else { t = { id: `t${++n}`, task: cap(display), obj: p, key: new Set([...keyOf(p), ...(o.verb ? keyOf(baseVerb(o.verb)) : [])]), owner: name, next: null, blocker: null, blockerKey: new Set(), due: null, progress: false, done: false, cites: [cite(it, raw, "task and owner")], history: [] }; tasks.push(t); }
     if (o.verb && !t.next) t.next = cap(display);
     if (o.next) { const objp = /^(?:the|a|an|our|their)\s/i.test(p) ? p : `the ${p}`; t.next = cap(clean(o.next).replace(/\b(it|them|this|that)\b/i, objp)); }
     if (due) t.due = due;
-    if (o.blocker) { t.blocker = o.blocker; t.blockerKey = keyOf(o.blocker); t.cites.push(cite(it, raw, "blocker")); }
+    if (o.blocker) { t.blocker = o.blocker; t.blockerKey = keyOf(o.blocker.replace(/^(?:Waiting (?:for|until)|Blocked by)\s+/i, "")); t.cites.push(cite(it, raw, "blocker")); }
     return t;
   };
   const block = (t: TaskRow, x: string, lead: string, it: ItemIn, raw: string) => { t.blocker = `${lead} ${clean(x)}`; t.blockerKey = keyOf(x); t.cites.push(cite(it, raw, "blocker")); };
   const unblock = (t: TaskRow, it: ItemIn, raw: string) => { if (t.blocker) { t.blocker = null; t.blockerKey = new Set(); t.cites.push(cite(it, raw, "unblocked")); } };
 
+  /** "orders the banners and the first-aid supplies" is two tasks; "will record it" means the task named just before. */
+  let lastTask: TaskRow | null = null;
+  const assignMany = (name: string, rest: string, it: ItemIn, raw: string, o: { verb?: string; blocker?: string | null; next?: string | null }) => {
+    const r0 = clean(rest); const pron = /^(?:it|that|this|them)$/i.test(r0) && lastTask ? [lastTask.obj] : r0.split(/\s+and\s+(?=(?:the|a|an|their|our)\s)/); let first: TaskRow | null = null;
+    for (const part of pron) { const t = assign(name, part, it, raw, o); first = first ?? t; } return first;
+  };
   const sorted = [...items].sort((a, b) => String(a.at).localeCompare(String(b.at)));
   for (const it of sorted) for (const sent of it.sentences) {
     const raw = sent.text.trim(); let S = clean(raw).replace(/^[A-Z][^:.]{0,60}:\s*(?=[A-Za-z])/, "");   // "Update for the fair: ..." / "Side chat: ..."
-    const clauses = S.split(/\s*(?:;|,\s+so\s+|,\s+and\s+(?=[A-Za-z'’]+\s+(?:is|are|was|were|has|have)\b)|\s+and\s+(?=(?:the\s+)?[\w' -]{2,40}?\s+(?:is|are|was|were|has been|have been)\s+(?:now\s+)?(?:no longer|done|finished|complete|completed)\b))\s*/i).filter(Boolean);
+    const clauses = S.split(/\s*(?:;|,\s+so\s+|,\s+and\s+(?=[A-Za-z'’]+\s+(?:is|are|was|were|has|have)\b)|\s+and\s+(?=(?:the\s+)?[\w' -]{2,30}?\s+(?:is|are)\s+[A-Z][a-zà-ÿ]+['’]s\b)|\s+and\s+(?=(?:the\s+)?[\w' -]{2,40}?\s+(?:is|are|was|were|has been|have been)\s+(?:now\s+)?(?:no longer|done|finished|complete|completed|fixed|ordered|booked)\b))\s*/i).filter(Boolean);
     let last: TaskRow | null = null; let consumed = false;
     for (const C of clauses) {
       let m: RegExpExecArray | null; let hit: TaskRow | null = null; let ok = true;
-      const subjPoss = /^([A-Z][a-z]+)['’]s\s+(.+)$/.exec(C); const Cn = subjPoss && isName(subjPoss[1]) ? subjPoss[2] : C;
+      const subjPoss = /^([A-Z][a-zà-ÿ]+)['’]s\s+(.+)$/.exec(C); const Cn = subjPoss && isName(subjPoss[1]) ? subjPoss[2] : C;
       // Finished.
-      if ((m = /^(?:the\s+)?(.+?)\s+(?:is|are|was|were|has been|have been|got)\s+(?:now\s+)?(?:finished|complete|completed|done|signed off|approved|delivered|shipped|sorted)\b/i.exec(Cn)) || (m = /^(?:the\s+)?(.+?)\s+(?:was|were|is|are)\s+[^,]*,\s*(?:done|finished|complete|completed)$/i.exec(Cn)) || (m = /^[A-Z][a-z]+\s+(?:has\s+)?(?:finished|completed|wrapped up|done with)\s+(?:the\s+)?(.+)$/.exec(Cn))) {
-        const t = find(m[1], null, true); if (t) { if (!t.done) t.done = true; t.cites.push(cite(it, raw, "completed")); hit = t; } else { const nt: TaskRow = { id: `t${++n}`, task: cap(stripThe(clean(m[1]))), obj: clean(m[1]), owner: null, next: null, blocker: null, blockerKey: new Set(), due: null, progress: false, done: true, cites: [cite(it, raw, "completed")], history: [] }; tasks.push(nt); hit = nt; }
+      const nounSubject = (t: string) => t.split(/\s+/).length <= 8 && !/\b(?:will|would|can|could|should|must|once|when|after|until|because|if|unless|then|going to|plans? to|is|are|was|were|which|that|who)\b/i.test(t) && !/^[A-Z][a-zà-ÿ]+\s+[a-z]+s\b/.test(t) && !isName(t.split(/\s+/)[0]);
+      const doneMatch = ((): RegExpExecArray | null => { let r: RegExpExecArray | null;
+        if ((r = /^(?:the\s+)?(.+?)\s+(?:is|are|was|were|has been|have been|got)\s+(?:now\s+)?(?:finished|complete|completed|done|signed off|approved|delivered|shipped|sorted|fixed|repaired|resolved|installed|ordered|booked|placed|submitted)\b/i.exec(Cn)) && nounSubject(r[1])) return r;
+        if ((r = /^(?:the\s+)?(.+?)\s+(?:was|were|is|are)\s+[^,]*,\s*(?:done|finished|complete|completed)$/i.exec(Cn)) && nounSubject(r[1])) return r;
+        if ((r = /^[A-Z][a-zà-ÿ]+\s+(?:has\s+)?(?:finished|completed|wrapped up|done with)\s+(?:the\s+)?(.+)$/.exec(Cn))) return r;
+        return null; })();
+      if (doneMatch) {
+        m = doneMatch;
+        const t = find(m[1], null, true); if (t) { if (!t.done) t.done = true; t.cites.push(cite(it, raw, "completed")); hit = t; } else { const nt: TaskRow = { id: `t${++n}`, task: cap(stripThe(clean(m[1]))), obj: clean(m[1]), key: keyOf(m[1]), owner: null, next: null, blocker: null, blockerKey: new Set(), due: null, progress: false, done: true, cites: [cite(it, raw, "completed")], history: [] }; tasks.push(nt); hit = nt; }
       }
       // Unblocked: "filling the raised beds is no longer blocked", "Lena can submit the report now", "the soil arrived".
       else if ((m = /^(?:the\s+)?(.+?)\s+(?:is|are)\s+(?:now\s+)?(?:no longer (?:blocked|waiting)|unblocked|ready to (?:go|start))\b/i.exec(Cn))) { const t = find(m[1], null); if (t) { unblock(t, it, raw); hit = t; } else ok = false; }
-      else if ((m = /^([A-Z][a-z]+)\s+(?:can|could)\s+(?:now\s+)?([a-z]+(?:\s+up)?)\s+(.+?)\s+now$/.exec(Cn)) && isName(m[1])) { const t = find(m[3], m[1]) ?? open().filter((x) => x.owner === m![1]).pop(); if (t) { unblock(t, it, raw); hit = t; } else ok = false; }
-      else if ((m = /^(?:the\s+)?(.+?)\s+(?:has\s+|have\s+)?(?:arrived|been delivered|come in|came in|landed|is here|are here|was delivered|were delivered|got here|turned up|is confirmed|are confirmed|has been confirmed|have been confirmed|came through)\b/i.exec(Cn)) && !/^[A-Z][a-z]+\s+(?:has|have)\b/.test(Cn)) {
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:can|could)\s+(?:now\s+)?([a-z]+(?:\s+up)?)\s+(.+?)\s+now$/.exec(Cn)) && isName(m[1])) { const t = find(m[3], m[1]) ?? open().filter((x) => x.owner === m![1]).pop(); if (t) { unblock(t, it, raw); hit = t; } else ok = false; }
+      else if ((m = /^(?:the\s+)?(.+?)\s+can\s+(?:now\s+)?(?:go ahead|proceed|start|begin|move forward|continue)\b/i.exec(Cn)) && nounSubject(m[1]) && find(m[1], null)) { const t = find(m[1], null)!; unblock(t, it, raw); hit = t; }
+      else if ((m = /^(.+?)\s+(?:sent|delivered|provided|supplied|gave|approved|signed off(?: on)?)\s+(?:us\s+|them\s+)?(?:the\s+)?(.+)$/i.exec(Cn)) && !isName(m[1].split(/\s+/)[0]) && !/\b(?:already|has|have|will)\b/i.test(m[1]) && open().some((t) => t.blocker && same(t.blockerKey, keyOf(m![2])))) { const k = keyOf(m[2]); const hs = open().filter((t) => t.blocker && same(t.blockerKey, k)); for (const t of hs) unblock(t, it, raw); hit = hs[0]; }
+      else if ((m = /^(?:the\s+)?(.+?)\s+(?:has\s+|have\s+)?(?:arrived|been delivered|come in|came in|landed|is here|are here|was delivered|were delivered|got here|turned up|is confirmed|are confirmed|has been confirmed|have been confirmed|came through|(?:has |have )?(?:replied|responded|answered|confirmed|come back|got back)(?: and confirmed)?)\b/i.exec(Cn)) && !/^[A-Z][a-zà-ÿ]+\s+(?:has|have)\b/.test(Cn)) {
         const k = keyOf(m[1]); const hits = open().filter((t) => t.blocker && same(t.blockerKey, k)); if (hits.length) { for (const t of hits) unblock(t, it, raw); hit = hits[0]; } else ok = false;
       }
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+already\s+(?:sent|finished|completed|booked|ordered|paid|submitted|done|wrapped up)\s+(?:the\s+)?(.+?)(?:\s+(?:yesterday|today|last \w+|this \w+))?$/.exec(Cn)) && isName(m[1])) { const t = find(m[2], m[1]); if (t) { t.done = true; t.cites.push(cite(it, raw, "completed")); hit = t; } else ok = false; }
       // In progress: "they are in progress", "Felix has started the badges".
       else if ((m = /^(?:they|it|this|that)\s+(?:is|are)\s+(?:now\s+)?(?:in progress|underway|under way|started)\b/i.exec(Cn)) && last) { last.progress = true; last.cites.push(cite(it, raw, "in progress")); hit = last; }
       else if ((m = /^(?:the\s+)?(.+?)\s+(?:is|are)\s+(?:now\s+)?(?:in progress|underway|under way|started)\b/i.exec(Cn))) { const t = find(m[1], null); if (t) { t.progress = true; t.cites.push(cite(it, raw, "in progress")); hit = t; } else ok = false; }
-      else if ((m = /^([A-Z][a-z]+)\s+(?:has\s+)?(?:sent|started|begun|begins|sent off)\s+(?:the\s+)?(.+?)(?:\s+to\s+.+)?$/.exec(Cn)) && isName(m[1])) { const t = find(m[2], m[1]); if (t) { t.progress = true; t.cites.push(cite(it, raw, "in progress")); hit = t; } else ok = false; }
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:has\s+)?(?:sent|started|begun|begins|sent off)\s+(?:the\s+)?(.+?)(?:\s+to\s+.+)?$/.exec(Cn)) && isName(m[1])) { const t = find(m[2], m[1]); if (t) { t.progress = true; t.cites.push(cite(it, raw, "in progress")); hit = t; } else ok = false; }
+      // Noun subjects with a state: "The pump test is blocked until the hose comes in", "The runbook is stalled until ...", "Samuel's rota is on hold until ...", "Episode three's edit is waiting on the raw audio", "The booklets cannot go to print until the logos turn up".
+      else if ((m = /^(?:the\s+)?(.+?)\s+(?:is|are)\s+(?:now\s+|still\s+)?(?:blocked|stalled|on hold|held up|stuck|waiting)\s*(until|by|on|for)?\s*(.*)$/i.exec(Cn.replace(/^([A-Z][a-zà-ÿ]+)['’]s\s+/, ""))) && m[3] && nounSubject(m[1].replace(/\b(?:blocked|stalled)\b/, ""))) {
+        const t = find(m[1], null); if (t) { block(t, m[3], /^until$/i.test(m[2] ?? "") ? "Waiting until" : /^(?:by)$/i.test(m[2] ?? "") ? "Blocked by" : "Waiting for", it, raw); hit = t; } else ok = false;
+      }
+      else if ((m = /^(?:the\s+)?(.+?)\s+(?:cannot|can(?:'|’)?t|can not)\s+[^,]*?\buntil\s+(.+)$/i.exec(Cn)) && nounSubject(m[1])) { const t = find(m[1], null); if (t) { block(t, m[2], "Waiting until", it, raw); hit = t; } else ok = false; }
+      // "Dev cannot do the jingle after all": the task has no owner until the next sentence says who takes it.
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:cannot|can(?:'|’)?t|can not|is unable to|won(?:'|’)?t be able to)\s+(?:do|handle|take|make|run|cover|manage|finish)\s+(?:the\s+)?(.+?)(?:\s+after all|\s+any more|\s+anymore)?$/.exec(Cn)) && isName(m[1])) { const t = find(m[2], m[1]); if (t) { t.history.push(`${t.owner ?? m[1]} can no longer do it`); t.owner = null; t.cites.push(cite(it, raw, "reassigned")); hit = t; } else ok = false; }
+      // "Pavel got the part": what a person received clears the blocker that was waiting for it.
+      else if ((m = /^[A-Z][a-zà-ÿ]+\s+(?:has\s+)?(?:got|gotten|received|collected|picked up)\s+(?:the\s+)?(.+)$/.exec(Cn)) && open().some((t) => t.blocker && same(t.blockerKey, keyOf(m![1])))) { const k = keyOf(m[1]); const hs = open().filter((t) => t.blocker && same(t.blockerKey, k)); for (const t of hs) unblock(t, it, raw); hit = hs[0]; }
+      // "Hana's menu is now Lucía's job as Hana is travelling", "the pump test is Ines's".
+      else if ((m = /^(?:the\s+)?(.+?)\s+(?:is|are)\s+(?:now\s+)?([A-Z][a-zà-ÿ]+)['’]s(?:\s+(?:job|task|responsibility))?(?:\s+(?:as|because|since)\b.*)?$/.exec(Cn.replace(/^([A-Z][a-zà-ÿ]+)['’]s\s+/, ""))) && isName(m[2])) { const t = find(m[1], null); if (t) { reassign(t, m[2], it, raw); hit = t; } else ok = false; }
       // Reassigned: "the sound system is now with Lucia", "The posters have been handed to Tomas", "Route signs passed to Bao", "Carmen's helmet collection moved to Elena".
-      else if ((m = /^(?:the\s+)?(.+?)\s+(?:(?:is|are|has been|have been|was|were)\s+)?(?:now\s+)?(?:with|(?:handed|passed|moved|reassigned|assigned|given|going|gone|transferred|handed over|passed on|passed over)(?:\s+(?:over|on))?\s+to|owned by)\s+([A-Z][a-z]+)\b/.exec(Cn.replace(/^([A-Z][a-z]+)['’]s\s+/, ""))) && isName(m[2])) {
+      else if ((m = /^(?:the\s+)?(.+?)\s+(?:(?:is|are|has been|have been|was|were)\s+)?(?:now\s+)?(?:with|(?:handed|passed|moved|reassigned|assigned|given|going|gone|transferred|handed over|passed on|passed over)(?:\s+(?:over|on))?\s+to|owned by)\s+([A-Z][a-zà-ÿ]+)\b/.exec(Cn.replace(/^([A-Z][a-zà-ÿ]+)['’]s\s+/, ""))) && isName(m[2])) {
         const t = find(m[1], null); if (t) { reassign(t, m[2], it, raw); hit = t; } else { notes.push(`“${raw}” hands something to ${m[2]}, but no earlier note described that task, so it was not applied.`); unparsed.push({ text: raw, src: it }); hit = null; ok = true; consumed = true; }
       }
       // "Inez has taken over the printer booking from Theo and can book it now", "Sven also takes the marshal vests".
-      else if ((m = /^([A-Z][a-z]+)\s+(?:has\s+|will\s+)?(?:now\s+|also\s+)?(?:taken|takes|taking|took|take|picks up|picked up|is taking)\s+(?:over\s+)?(?:the\s+)?(.+?)(?:\s+from\s+([A-Z][a-z]+))?(?:\s+and\s+(.*))?$/.exec(Cn)) && isName(m[1])) {
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:is\s+|are\s+|has\s+|will\s+)?(?:now\s+|also\s+)?(?:taken|takes|taking|took|take|picks up|picked up)\s+(?:over\s+)?(?:the\s+)?(.+?)(?:\s+from\s+([A-Z][a-zà-ÿ]+))?(?:\s+and\s+(.*))?$/.exec(Cn)) && isName(m[1])) {
         const unb = m[4] && /\bcan\s+\w+\s+it\s+now\b|no longer blocked|unblocked/i.test(m[4]); const t = assign(m[1], m[2], it, raw); if (t) { if (unb) unblock(t, it, raw); hit = t; }
       }
-      else if ((m = /^([A-Z][a-z]+)\s+(?:has\s+)?(?:handed|passed|gave)\s+(?:off\s+)?(?:the\s+)?(.+?)\s+(?:over\s+)?to\s+([A-Z][a-z]+)\b/.exec(Cn)) && isName(m[1]) && isName(m[3])) { const t = find(m[2], m[1]) ?? find(m[2], null); if (t) { reassign(t, m[3], it, raw); hit = t; } else { assign(m[3], m[2], it, raw); } }
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:has\s+)?(?:handed|passed|gave)\s+(?:off\s+)?(?:the\s+)?(.+?)\s+(?:over\s+)?to\s+([A-Z][a-zà-ÿ]+)\b/.exec(Cn)) && isName(m[1]) && isName(m[3])) { const t = find(m[2], m[1]) ?? find(m[2], null); if (t) { reassign(t, m[3], it, raw); hit = t; } else { assign(m[3], m[2], it, raw); } }
       // Waiting: "Mara is still waiting for the final photo credits."
-      else if ((m = /^([A-Z][a-z]+)\s+(?:is\s+)?(?:still\s+)?(?:waiting\s+(?:for|on)|blocked\s+(?:on|by))\s+(.+)$/i.exec(Cn)) && isName(m[1])) {
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:is\s+)?(?:still\s+)?(?:waiting\s+(?:for|on)|blocked\s+(?:on|by))\s+(.+)$/i.exec(Cn)) && isName(m[1])) {
         const t = open().filter((x) => x.owner === m![1]).pop(); if (t) { block(t, m[2], "Waiting for", it, raw); hit = t; } else { const nt = assign(m[1], `work waiting on ${m[2]}`, it, raw); if (nt) { block(nt, m[2], "Waiting for", it, raw); hit = nt; } }
       }
       // Ownership and assignment: "Mara owns caption proofing and needs the final photo credits before she can send the proof", "Devon sets up the sound system", "Ana will call the caterer".
-      else if ((m = /^([A-Z][a-z]+)\s+(?:now\s+|also\s+|still\s+)?(?:owns|is responsible for|handles|is handling|leads|is leading|is working on|is covering|will own|will handle|is in charge of|looks after)\s+(.+)$/.exec(Cn)) && isName(m[1])) {
-        let rest = m[2]; let blocker: string | null = null; let next: string | null = null; let r: RegExpExecArray | null;
-        if ((r = /^(.+?)\s+and\s+(?:needs|requires)\s+(.+?)\s+before\s+\w+\s+can\s+(.+)$/i.exec(rest))) { rest = r[1]; blocker = `Waiting for ${clean(r[2])}`; next = r[3]; }
-        else if ((r = /^(.+?)\s+and\s+(?:is\s+)?(?:still\s+)?waiting\s+(?:for|on)\s+(.+)$/i.exec(rest))) { rest = r[1]; blocker = `Waiting for ${clean(r[2])}`; }
-        else if ((r = /^(.+?),?\s*(?:but\s+)?(?:only\s+)?(after|once|until|when|as soon as)\s+(.+)$/i.exec(rest))) { rest = r[1]; blocker = `Waiting until ${clean(r[3])}`; }
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:now\s+|also\s+|still\s+)?(?:owns|is responsible for|handles|is handling|leads|is leading|is working on|will own|will handle|is in charge of|looks after)\s+(.+)$/.exec(Cn)) && isName(m[1])) {
+        const sb = splitBlocker(m[2]); const rest = sb.rest; const blocker = sb.blocker; const next = sb.next;
         const t = assign(m[1], rest, it, raw, { blocker, next }); if (t) hit = t;
       }
-      else if ((m = /^([A-Z][a-z]+)\s+(?:was|is|has been|were)\s+(?:assigned|asked|tasked)\s+(?:to|with)\s+(.+)$/.exec(Cn)) && isName(m[1])) { const v = /^([a-z]+)\s+(.*)$/.exec(m[2]); const t = v && !["the", "a", "an"].includes(v[1]) ? assign(m[1], v[2], it, raw, { verb: v[1] }) : assign(m[1], m[2], it, raw); if (t) hit = t; }
-      else if ((m = /^([A-Z][a-z]+)\s+(?:will|is going to|plans to|should|must|needs to)\s+([a-z]+(?:\s+up)?)\s+(.+)$/.exec(Cn)) && isName(m[1])) {
-        let rest = m[3]; let blocker: string | null = null; const r = /^(.+?),?\s*(?:but\s+)?(?:only\s+)?(after|once|until|when|as soon as)\s+(.+)$/i.exec(rest); if (r) { rest = r[1]; blocker = `Waiting until ${clean(r[3])}`; }
-        const t = assign(m[1], rest, it, raw, { verb: m[2], blocker }); if (t) hit = t;
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:was|is|has been|were)\s+(?:assigned|asked|tasked)\s+(?:to|with)\s+(.+)$/.exec(Cn)) && isName(m[1])) { const v = /^([a-z]+)\s+(.*)$/.exec(m[2]); const t = v && !["the", "a", "an"].includes(v[1]) ? assign(m[1], v[2], it, raw, { verb: v[1] }) : assign(m[1], m[2], it, raw); if (t) hit = t; }
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:will|is going to|plans to|should|must|needs to)\s+([a-z]+(?:\s+up)?)\s+(.+)$/.exec(Cn)) && isName(m[1])) {
+        const sb = splitBlocker(m[3]); const rest = sb.rest; const blocker = sb.blocker;
+        const t = assignMany(m[1], rest, it, raw, { verb: m[2], blocker }); if (t) hit = t;
       }
+      // "Priya is covering for Omar on the invoice export": Omar's work (or that one task) goes to Priya.
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:is|are|will be)\s+(?:now\s+)?(?:covering|standing in|filling in|stepping in|substituting|subbing)\s+for\s+([A-Z][a-zà-ÿ]+)(?:\s+(?:on|with|for)\s+(?:the\s+)?(.+))?$/.exec(Cn)) && isName(m[1]) && isName(m[2])) {
+        const what = m[3] ? m[3].replace(/\s+(?:while|because|since|as|until|when)\b.*$/i, "") : null; const pool = what ? open().filter((t) => same(t.key, keyOf(what))) : open().filter((t) => t.owner === m![2]); const mine = pool.filter((t) => t.owner === m![2]); const hitsT = mine.length ? mine : pool;
+        if (hitsT.length) { for (const t of hitsT) reassign(t, m[1], it, raw); hit = hitsT[0]; } else ok = false;
+      }
+      // "Faye is ordering the banners", "Noor is picking up the banners": a person doing a task now.
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:is|are)\s+(?:now\s+|also\s+|still\s+)?([a-z]{3,}ing)(\s+(?:up|out|off|over|down))?\s+(?:(?:the|a|an|our|their|all|some|new|his|her)\s+)?(.+)$/.exec(Cn)) && isName(m[1]) && !/^(?:waiting|being|going|having|looking|hoping|thinking|feeling|trying|wondering|doing)$/.test(m[2])) {
+        const verb = `${ingBase(m[2])}${m[3] ? m[3] : ""}`; const whole = Cn.slice(Cn.indexOf(m[2]) + m[2].length + (m[3] ? m[3].length : 0)).trim(); const sb = splitBlocker(whole);
+        const t = assignMany(m[1], sb.rest, it, raw, { verb, blocker: sb.blocker, next: sb.next }); if (t) hit = t;
+      }
+      // "Book the health inspection with the council, I will do that.": a task with no named owner.
+      else if ((m = /^((?:book|call|email|send|order|confirm|pay|buy|fix|finish|submit|check|arrange|find|collect|schedule|renew|cancel|prepare|draft|write|remind|follow up|chase)\b.+?)(?:,?\s+(?:I|we) (?:will|'ll|need to) (?:do|handle) (?:that|it|this))?$/.exec(Cn))) { const v = /^([a-z]+(?: up)?)\s+(.*)$/.exec(m[1]); if (v) { const t = assign("", v[2], it, raw, { verb: v[1] }); if (t) { t.owner = null; hit = t; } } }
       // Any other "<Name> <verb>s <rest>" is a task for that person: "Maria runs the bake sale table", "Tomas books the raffle prizes", "Greta buys the candles and paints the route signs".
-      else if ((m = /^([A-Z][a-z]+)\s+(?:now\s+|also\s+|still\s+)?([a-z]+s)\s+((?:up|out|off|over|down)\s+)?(?:(?:the|a|an|our|their|all|some|new)\s+)?(.+)$/.exec(Cn)) && isName(m[1]) && !NOT_TASK_VERBS.has(m[2]) && !/^(?:to|from|by|that|with|for)\b/i.test(m[4])) {
+      else if ((m = /^([A-Z][a-zà-ÿ]+)\s+(?:now\s+|also\s+|still\s+)?([a-z]+s)\s+((?:up|out|off|over|down)\s+)?(?:(?:the|a|an|our|their|all|some|new)\s+)?(.+)$/.exec(Cn)) && isName(m[1]) && !NOT_TASK_VERBS.has(m[2]) && !/^(?:to|from|by|that|with|for)\b/i.test(m[4])) {
         const verb = `${m[2]}${m[3] ? ` ${m[3].trim()}` : ""}`; const whole = Cn.slice(Cn.indexOf(m[2]) + m[2].length).trim();
         const parts = whole.split(/\s+and\s+(?=[a-z]+s\s+(?:the|a|an|their|our)\b)/); let first: TaskRow | null = null;
-        parts.forEach((part, i) => { const v = i === 0 ? verb : (/^([a-z]+s)\b/.exec(part)?.[1] ?? verb); const rest = i === 0 ? part.replace(/^(?:up|out|off|over|down)\s+/, "") : part.replace(/^[a-z]+s\s+/, ""); const objPart = rest; let blocker: string | null = null; let rr = /^(.+?),?\s*(?:but\s+)?(?:only\s+)?(after|once|until|when|as soon as)\s+(.+)$/i.exec(objPart); const obj = rr ? rr[1] : objPart; if (rr) blocker = `Waiting until ${clean(rr[3])}`; const vv = i === 0 && m![3] ? `${v}` : v; const full = i === 0 && m![3] ? `${m![2]} ${m![3].trim()}` : vv; const t = assign(m![1], obj, it, raw, { verb: full, blocker }); first = first ?? t; });
+        parts.forEach((part, i) => { const v = i === 0 ? verb : (/^([a-z]+s)\b/.exec(part)?.[1] ?? verb); const rest = i === 0 ? part.replace(/^(?:up|out|off|over|down)\s+/, "") : part.replace(/^[a-z]+s\s+/, ""); const sbp = splitBlocker(rest); const obj = sbp.rest; const blocker = sbp.blocker; const vv = i === 0 && m![3] ? `${v}` : v; const full = i === 0 && m![3] ? `${m![2]} ${m![3].trim()}` : vv; const t = assign(m![1], obj, it, raw, { verb: full, blocker }); first = first ?? t; });
         if (first) hit = first;
       }
       else if (/^(?:nothing|no\s+\w+|none)\b[^.]*\b(?:changed|different|new)\b|\b(?:is|are|was|were|remains?|stays?)\s+(?:all\s+)?(?:unchanged|the same|as before|as planned)\b|^(?:everything|all)\s+else\b/i.test(Cn)) { consumed = true; }   // a statement that nothing changed carries no task
       else ok = false;
-      if (hit) { last = hit; consumed = true; }
+      if (hit) { last = hit; lastTask = hit; consumed = true; }
       void ok;
     }
     // A sentence that names a person or a task on the list but was not understood is reported, not dropped.
-    if (!consumed) { const mentionsOwner = (S.match(/\b[A-Z][a-z]{1,15}\b/g) ?? []).some((w) => tasks.some((t) => t.owner === w)); const mentionsTask = tasks.some((t) => same(keyOf(t.obj), keyOf(S))); if ((mentionsOwner || mentionsTask) && !/^[A-Z][a-z]+(?:\s+[a-z]+){0,3}\.?$/.test(S)) unparsed.push({ text: raw, src: it }); }
+    if (!consumed) { const taskish = /\b(?:will|needs? to|has to|must|should|owns|handles?|stalled|blocked|waiting|stuck|covering|taking over|picking up|assigned|responsible|in charge)\b|\bis\s+[a-z]+ing\b/i.test(S); const mentionsOwner = (S.match(/\b[A-Z][a-zà-ÿ]{1,15}\b/g) ?? []).some((w) => taskish && (tasks.some((t) => t.owner === w) || nameWords.has(w.toLowerCase()))); const mentionsTask = tasks.some((t) => same(t.key, keyOf(S))); if (((mentionsOwner) || mentionsTask) && !/^[A-Z][a-zà-ÿ]+(?:\s+[a-z]+){0,3}\.?$/.test(S)) unparsed.push({ text: raw, src: it }); }
   }
   return { tasks, notes, unparsed };
 }
@@ -120,10 +176,10 @@ export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[
 const ADJ = /^(?:the\s+)?(?:current|latest|new|present|assigned|responsible|main|primary|updated)\s+/i;
 const COLS: [RegExp, string][] = [[/^(?:owner|assignee|who|person|responsible|in charge)\b/i, "owner"], [/^(?:task|item|work|what|job)\b/i, "task"], [/^(?:next action|next step|next|action)\b/i, "next"], [/^(?:blocker|blocked by|blocking|waiting on|dependency|blocked)\b/i, "blocker"], [/^(?:status|state|progress)\b/i, "status"], [/^(?:due(?: date)?|deadline|due by|when)\b/i, "due"]];
 export const columnKey = (c: string) => { const t = c.trim().replace(/^(?:the\s+)?/i, "").replace(ADJ, ""); return COLS.find(([r]) => r.test(t))?.[1] ?? null; };
-const COLWORDS: [RegExp, string][] = [[/\bstatus\b/i, "status"], [/\bdue(?: date)?\b|\bdeadline\b/i, "due"], [/\bpriority\b/i, "priority"], [/\bphone(?: number)?\b/i, "phone number"], [/\be-?mail(?: address)?\b/i, "email"], [/\bcost\b|\bbudget\b/i, "cost"], [/\blocation\b/i, "location"]];
-/** Column nouns a request mentions (status, due date, phone number...), so the saved table can be checked for covering them. */
-export const columnMentions = (request: string) => COLWORDS.filter(([r]) => r.test(request)).map(([, n]) => n);
-export const coversMention = (name: string, keys: string[], columns: string[]) => (name === "status" && keys.includes("status")) || (name === "due" && keys.includes("due")) || columns.some((c) => c.toLowerCase().includes(name.split(" ")[0]));
+const COLWORDS = /\b(status|due date|due|deadline|priority|phone number|phone|e-?mail address|e-?mail|cost|budget|location)\b/gi;
+/** Column nouns a request mentions (status, due date, budget, phone number...), so the saved table can be checked for covering them. */
+export const columnMentions = (request: string) => [...new Set([...request.matchAll(COLWORDS)].map((m) => m[1].toLowerCase()))];
+export const coversMention = (name: string, keys: string[], columns: string[]) => (name === "status" && keys.includes("status")) || (/^(?:due|due date|deadline)$/.test(name) && keys.includes("due")) || columns.some((c) => c.toLowerCase().includes(name.split(" ")[0]));
 
 /** Build the table or checklist. Columns the sources cannot fill are reported, not made up. */
 export function buildTaskTable(items: ItemIn[], spec: TableSpec): TableAnalysis {
@@ -136,7 +192,11 @@ export function buildTaskTable(items: ItemIn[], spec: TableSpec): TableAnalysis 
   const open = tasks.filter((t) => !t.done); const shown = spec.excludeDone ? open : tasks;
   const status = (t: TaskRow) => t.done ? "Done" : t.blocker ? `Blocked. ${t.blocker}` : t.progress ? "In progress" : "Open";
   const cell = (t: TaskRow, k: string) => k === "owner" ? t.owner ?? "Unassigned" : k === "task" ? t.task : k === "next" ? (t.done ? "None (complete)" : t.next ?? "Not stated") : k === "blocker" ? (t.done ? "None (complete)" : t.blocker ?? "None reported") : k === "status" ? status(t) : k === "due" ? t.due ?? "Not stated" : "Not stated";
-  const rows = shown.map((t) => ({ task: t.task, owner: t.owner, cites: t.cites, cells: keys.map((k) => cell(t, k)) }));
+  let rows = shown.map((t) => ({ task: t.task, owner: t.owner, cites: t.cites, cells: keys.map((k) => cell(t, k)) }));
+  if (spec.perPerson) {   // one row per person: that person's tasks, blockers and statuses joined, each cell still cited through the tasks behind it
+    const by = new Map<string, TaskRow[]>(); for (const t of shown) by.set(t.owner ?? "Unassigned", [...(by.get(t.owner ?? "Unassigned") ?? []), t]);
+    rows = [...by].map(([who, ts]) => ({ task: ts.map((t) => t.task).join("; "), owner: who, cites: ts.flatMap((t) => t.cites), cells: keys.map((k) => k === "owner" ? who : [...new Set(ts.map((t) => cell(t, k)))].filter((x) => !/^(None reported|Not stated)$/.test(x) || ts.length === 1).join("; ") || cell(ts[0], k)) }));
+  }
   // A column every cell of which says "Not stated" is a column the notes cannot fill, whatever its name.
   keys.forEach((k, i) => { if ((k === "due" || k === "next") && rows.length && rows.every((r) => r.cells[i] === "Not stated") && !missingColumns.includes(cap(wanted[i]))) missingColumns.push(cap(wanted[i])); });
   const leftOut: TableAnalysis["leftOut"] = [];
