@@ -9,10 +9,11 @@ import { enqueueJob, cancelJob, getJob, Handler, JobApi, jobEvent } from "./jobs
 import { addMessage, answerJob } from "./study-guide";
 import { importText } from "./evidence";
 import { enqueue as notify } from "./notify";
-import { searchEvidence, getItem, listSources, tokens, ownerName, factOut, Hit, SourceMode } from "./evidence";
+import { searchEvidence, getItem, listItems, listSources, tokens, ownerName, factOut, Hit, SourceMode } from "./evidence";
 import { addDays, localDate, fmtDateTime, DEFAULT_TZ, localHM, parseLocal } from "./time";
 import { deepLinkBase } from "./capture";
-import { composeDecision, synthesizeJudgment, recheckAnalysis, shortTitle, DECISION_Q, DRAFT_CUE, AnalysisJson } from "./decision-run";
+import { composeDecision, composePlan, synthesizeJudgment, recheckAnalysis, shortTitle, DECISION_Q, DRAFT_CUE, AnalysisJson, PlanJson } from "./decision-run";
+import { PLAN_Q } from "./plan";
 
 // ---------- understanding ----------
 export type Deliverable = "draft" | "brief" | "answer";
@@ -35,7 +36,7 @@ export function resolveWhen(text: string, now: Date, tz = DEFAULT_TZ): Intent["w
 }
 
 export function understand(ctx: Ctx, text: string, o: { projectHint?: string | null } = {}): Intent {
-  const deliverable: Deliverable = DECISION_Q.test(text) ? "answer" : DRAFT_STRONG.test(text) ? "draft" : BRIEF.test(text) ? "brief" : "answer";   // a decision request that also asks for a draft is a decision with a next-step draft
+  const deliverable: Deliverable = DECISION_Q.test(text) || PLAN_Q.test(text) ? "answer" : DRAFT_STRONG.test(text) ? "draft" : BRIEF.test(text) ? "brief" : "answer";   // a decision request that also asks for a draft is a decision with a next-step draft
   const when = resolveWhen(text, ctx.now()); const tk = tokens(text);
   const projects = all(ctx.db, "SELECT id,name,aliases FROM projects WHERE owner_id=? AND status!='archived'", ctx.owner);
   const low = text.toLowerCase();
@@ -246,7 +247,13 @@ function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string
       facts: it.facts.map((f) => ({ ...f, itemTitle: it.title, itemKind: it.kind, itemAt: it.at, itemRevision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode })) }; });
   const question = String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? "");
   const localOnly = items.some((it) => !!get(ctx.db, "SELECT 1 x FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.id=? AND s.local_only=1", it.id));
-  return { mode: "digest", decide: DECISION_Q.test(question), localOnly, question, items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
+  // A time, capacity or duration question needs the limits and windows, which rarely share words with the question. Read the owner's authorized notes that state numbers, windows or dates, and say which were read.
+  let planIds: string[] = [];
+  if (PLAN_Q.test(question) && !DECISION_Q.test(question)) {
+    const have = new Set(items.map((i) => i.id));
+    for (const row of listItems(ctx)) { const it = authorizedItem(ctx, row.id as string); if (!it || have.has(it.id) || !["email", "transcript", "claude", "note", "slack", "export"].includes(it.kind)) continue; if (!/\b\d{1,2}:\d{2}\b|\b\d+\s*(?:minutes?|hours?|people|persons|attendees|pieces|seats|per)\b|\b(?:holds|max|limit|booked|free|available)\b/i.test(it.body)) continue; planIds.push(it.id); recordRead(ctx, requestId, revision, { kind: "thread", ref: it.id, source: it.sourceLabel, itemRevision: it.revision, label: `${it.title} (${it.kind}, ${fmtDay(localDate(it.at))}, read for limits, windows and dates)`, excerpt: it.body.slice(0, 160) }); }
+  }
+  return { mode: "digest", decide: DECISION_Q.test(question), plan: PLAN_Q.test(question) && !DECISION_Q.test(question), planIds, localOnly, question, items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
 }
 
 function researchBrief(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
@@ -368,6 +375,11 @@ function composeBrief(ctx: Ctx, b: any, intent: Intent) {
 
 function composeAnswer(ctx: Ctx, b: any, instr?: ReturnType<typeof parseInstructions>) {
   if (b.mode !== "digest") return composeMeeting(ctx, b);
+  if (b.plan) {
+    const pl = composePlan(ctx, b, String(b.question ?? ""), { wantDraft: !!instr?.wantDraft || DRAFT_CUE.test(String(b.question ?? "")), applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] });
+    if (pl) return pl;
+    const dg = composeDigest(ctx, b); dg.flags.unshift({ kind: "not_plannable", text: "You asked for a schedule or a placement, but I could not find the quantities, windows and limits it needs in the sources. Here is what the sources say." }); return dg;
+  }
   if (b.decide) {
     const d = composeDecision(ctx, b, String(b.question ?? ""), { wantDraft: !!instr?.wantDraft || DRAFT_CUE.test(String(b.question ?? "")), applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] });
     if (d) return d;
@@ -580,7 +592,7 @@ const goal_reviewer: Handler = async (api) => {
   const v = await api.step("verify", "Checking every cited source", () => {
     const base = (content.sources?.length || !content.flags?.some((f: any) => f.kind === "gap")) ? verifyResult(api.ctx, content) : { ok: true, problems: [] as string[], checks: [{ name: "Nothing to cite", ok: true, detail: "The request found no sources, and says so." }] };
     if (content.analysis) {
-      const pr = recheckAnalysis(api.ctx, content.analysis as AnalysisJson, request);
+      const pr = recheckAnalysis(api.ctx, content.analysis as AnalysisJson | PlanJson, request);
       base.checks.push({ name: "Totals recomputed from the sources as they are now", ok: pr.length === 0, detail: pr.length ? pr.join(" ") : "Every total and the recommendation reproduce." });
       if (pr.length) { base.problems.push(...pr); base.ok = false; }
     }

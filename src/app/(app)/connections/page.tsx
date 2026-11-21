@@ -23,9 +23,10 @@ export default function ConnectionsPage() {
   const rotate = useAction(async (id: string) => { setFresh(await api(`/connector/tokens/${id}/rotate`, { body: {} })); });
   const start = useAction(async () => { await api("/connector/probe", { body: {} }); });
   const edit = useAction(async (id: string) => { await api(`/connector/probe/${id}/edit`, { body: {} }); });
+  const rtq = useQuery<any>("/roundtrip", { poll: 4000 });   // hooks stay above every early return
   if (q.loading && !q.data) return <Spinner label="Checking connections" />;
   if (q.error && !q.data) return <ErrorBox error={q.error} onRetry={q.reload} offline={q.error.status === 0} />;
-  const d = q.data; const p = d.probe; const rtq = useQuery<any>("/roundtrip", { poll: 4000 }); const rt = rtq.data?.trip; const claudeVerified = !!((rt?.complete && rt.written?.kind === "claude" && rt.read?.kind === "claude") || (p?.complete && p.written?.kind === "claude" && p.read?.kind === "claude")); const testOnly = !claudeVerified && !!(rt?.complete || p?.complete); const active = d.tokens.filter((t: any) => t.status === "active");
+  const d = q.data; const p = d.probe; const rt = rtq.data?.trip; const claudeVerified = !!((rt?.complete && rt.written?.kind === "claude" && rt.read?.kind === "claude") || (p?.complete && p.written?.kind === "claude" && p.read?.kind === "claude")); const testOnly = !claudeVerified && !!(rt?.complete || p?.complete); const active = d.tokens.filter((t: any) => t.status === "active");
   const url = `${d.publicUrl ?? "https://YOUR-HOST"}/mcp`;
   const err = [create.error, revoke.error, rotate.error, start.error, edit.error].find(Boolean);
   return (

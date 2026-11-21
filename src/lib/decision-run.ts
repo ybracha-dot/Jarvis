@@ -6,6 +6,7 @@ import { Ctx, getSetting } from "./db";
 import { Router, RouterError, Transport, defaultTransport } from "./router";
 import { analyze, itemInFrom, ItemIn, Analysis, fmtMoney, fmtDate, Term, OptionResult } from "./decision";
 import { getItem, ownerName } from "./evidence";
+import { analyzePlan, PlanAnalysis, PlanRow } from "./plan";
 
 export interface SrcRef { itemId: string; revision: number; title: string; kind: string; at: string; sourceLabel: string; mode: string; role: string; quote: string }
 export const DECISION_Q = /\b(which|who)\b[^.?!]*\b(should|go with|choose|pick|hire|book|take|best)\b|\bshould i (go with|choose|pick|take|hire|book|buy|use)\b|\b(compare|recommend|recommendation|decide|decision|cheapest|best option|better option|trade-?offs?|worth it|which one|which of)\b/i;
@@ -76,7 +77,7 @@ export function toItems(ctx: Ctx, ids: string[]): ItemIn[] {
 }
 export const fxRates = (ctx: Ctx) => getSetting<Record<string, number>>(ctx.db, "fx_rates", {});
 
-export interface DecisionOut { title: string; body: string; summary: string; sources: SrcRef[]; flags: any[]; applied: string[]; unapplied: string[]; analysis: AnalysisJson; draft: { to: string | null; subject: string; body: string; purpose: string } | null; needsJudgment: boolean; localOnly: boolean }
+export interface DecisionOut { title: string; body: string; summary: string; sources: SrcRef[]; flags: any[]; applied: string[]; unapplied: string[]; analysis: AnalysisJson | PlanJson; draft: { to: string | null; subject: string; body: string; purpose: string } | null; needsJudgment: boolean; localOnly: boolean }
 
 export function composeDecision(ctx: Ctx, b: { items: { id: string }[]; localOnly?: boolean }, request: string, o: { wantDraft: boolean; applied: string[]; unapplied: string[] }): DecisionOut | null {
   const ids = b.items.map((i) => i.id); const items = toItems(ctx, ids);
@@ -120,10 +121,63 @@ function buildDraft(a: Analysis, rec: Analysis["recommendation"], me: string, re
   return { to, subject: `Following up on ${topic}`, purpose: "follow-up", body: [`Hi ${to ? first(to) : "there"},`, "", `Thank you for the quote${price ? ` of ${price}` : ""}. I would like to go ahead. What are the next steps?`, "", "Thanks,", me].join("\n") };
 }
 
+// ---------- time and capacity plans ----------
+const rowJson = (r: PlanRow) => ({ label: r.label, value: r.value, note: r.note ?? null, itemId: r.src?.itemId ?? null, title: r.srcTitle, at: r.src?.at ?? null, quote: r.quote });
+function planJson(p: PlanAnalysis, itemIds: string[]) { return { version: 1, type: "plan" as const, kind: p.kind, itemIds, recommendation: p.recommendation, inputs: p.inputs.map(rowJson), computation: p.computation, options: p.options, setAside: p.setAside.map(rowJson), notes: p.notes }; }
+export type PlanJson = ReturnType<typeof planJson>;
+const isPlan = (a: unknown): a is PlanJson => !!a && (a as any).type === "plan";
+export { isPlan };
+
+/** Answer a time, capacity or duration question: a recommendation first, the calculation behind it, and a draft of the next step when asked. */
+export function composePlan(ctx: Ctx, b: { items: { id: string }[]; planIds?: string[]; localOnly?: boolean }, request: string, o: { wantDraft: boolean; applied: string[]; unapplied: string[] }): DecisionOut | null {
+  const ids = [...new Set([...b.items.map((i) => i.id), ...(b.planIds ?? [])])]; const items = toItems(ctx, ids);
+  const p = analyzePlan(items, request); if (!p) return null;
+  const rec = p.recommendation; const sources: SrcRef[] = []; const flags: any[] = [];
+  for (const r of p.inputs) if (r.src && r.quote && !sources.some((x) => x.itemId === r.src!.itemId && x.quote === r.quote)) sources.push({ itemId: r.src.itemId, revision: r.src.revision, title: r.src.title, kind: r.src.kind, at: r.src.at, sourceLabel: r.src.sourceLabel, mode: r.src.mode, role: r.label, quote: r.quote });
+  const lines: string[] = [`**Recommendation**`, "", rec.headline, ""];
+  if (rec.nextAction && rec.nextAction.kind !== "none" && rec.nextAction.kind !== "ask_missing") lines.push(`**Next step**`, "", rec.nextAction.text, "");
+  if (rec.tradeoff.length) lines.push(`**Why**`, "", ...rec.tradeoff.map((t) => `- ${t}`));
+  const depends = [...rec.qualifiers]; if (rec.question) depends.unshift(rec.question); for (const n of p.notes) depends.push(n);
+  if (depends.length) lines.push("", `**What still depends on you**`, "", ...depends.map((d) => `- ${d}`));
+  if (p.setAside.length) { lines.push("", `**Set aside, with the reason**`, "", ...p.setAside.map((r) => `- ${r.label}${r.value && r.value !== "set aside" ? ` (${r.value})` : ""}: ${r.note ?? ""} (${r.srcTitle})`)); for (const r of p.setAside) if (r.src && r.quote) sources.push({ itemId: r.src.itemId, revision: r.src.revision, title: r.src.title, kind: r.src.kind, at: r.src.at, sourceLabel: r.src.sourceLabel, mode: r.src.mode, role: `set aside: ${r.note ?? r.label}`.slice(0, 120), quote: r.quote }); }
+  if (rec.kind === "insufficient" || rec.question) flags.push({ kind: "missing_input", text: rec.question ?? "An input is missing." });
+  const me = ownerName(ctx); const draft = o.wantDraft && rec.kind !== "insufficient" && !(rec.kind === "none_fits") ? buildPlanDraft(p, request, me, items) : null;
+  if (!o.wantDraft && rec.nextAction && !["none", "ask_missing"].includes(rec.nextAction.kind)) flags.push({ kind: "draft_available", text: "Say “draft it” to get a ready-to-edit message for that next step. Nothing is sent." });
+  const summary = rec.headline.replace(/\*\*/g, "").slice(0, 260);
+  return { title: `${p.kind === "capacity" ? "Plan" : "Schedule"}: ${shortTitle(request.split(/[,.?!]| and /)[0], 72)}`, body: lines.join("\n"), summary, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: planJson(p, ids), draft, needsJudgment: false, localOnly: !!b.localOnly };
+}
+
+function recipientIn(request: string, items: ItemIn[], fallback: string | null): string | null {
+  const m = /(?:to|for|ask|tell|email|message)\s+([A-Z][a-z]+)/.exec(request);
+  if (m) { const hit = items.find((i) => i.author && first(i.author).toLowerCase() === m[1].toLowerCase()); if (hit) return hit.author; }
+  return fallback;
+}
+/** A ready-to-edit message for the plan's next step. It states only what the plan computed, and says which part is still unconfirmed. */
+function buildPlanDraft(p: PlanAnalysis, request: string, me: string, items: ItemIn[]) {
+  const rec = p.recommendation; const to = recipientIn(request, items, p.contact?.name ?? null); const hi = `Hi ${to ? first(to) : "there"},`;
+  if (p.kind === "batch") {
+    const best = p.options.find((o) => o.verdict === "works") ?? p.options[0]; const steps = best?.steps ?? [];
+    const slotTxt = (rec.nextAction?.text.match(/the (.+?) slot/)?.[1]) ?? best?.label.replace(/^.*starting /, "") ?? "";
+    const bad = p.options.find((o) => o.verdict === "fails");
+    const body = [hi, "", `Could you confirm the ${slotTxt || "first"} slot for me and book the following? ${rec.headline.match(/\d+ runs? \([^)]*\)/)?.[0] ?? ""}`.trim(), "", ...steps.map((s) => `- ${s.when}: ${s.what}`), "", bad ? `A later start would not work for me: ${bad.summary.replace(/^[^:]*: /, "")}` : "", "Please let me know if that works, or which slot you can actually give me.", "", "Thanks,", me].filter((x, i, a) => !(x === "" && a[i - 1] === ""));
+    return { to, subject: `Booking the ${p.contact?.why ?? "kiln"}: ${slotTxt || "slots"}`, purpose: "follow-up", body: body.join("\n") };
+  }
+  const sess = (p.data as any).sessions as { s: number; e: number; n: number }[] | undefined; const room = (p.data as any).room as string | undefined;
+  const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const body = [hi, "", `Could you book ${room ?? "the room"} for me${sess?.length ? `: ${sess.map((x) => `${hm(x.s)} to ${hm(x.e)} (${x.n} people)`).join(" and ")}` : ""}? ${rec.headline.replace(/\*\*/g, "")}`, "", "Please confirm it is free then.", "", "Thanks,", me];
+  return { to, subject: `Booking ${room ?? "a room"}`, purpose: "follow-up", body: body.join("\n") };
+}
+
 export function optionsOf(a: AnalysisJson): OptionResult[] { return a.options as unknown as OptionResult[]; }
 
 /** Recompute from the sources as they are now and compare with what was written down. */
-export function recheckAnalysis(ctx: Ctx, stored: AnalysisJson, request: string): string[] {
+export function recheckAnalysis(ctx: Ctx, stored: AnalysisJson | PlanJson, request: string): string[] {
+  if (isPlan(stored)) {
+    const items = toItems(ctx, stored.itemIds); const now = analyzePlan(items, request); const problems: string[] = [];
+    if (items.length < stored.itemIds.length) problems.push("A source behind the plan is no longer available.");
+    if (!now || now.recommendation.kind !== stored.recommendation.kind || now.recommendation.headline !== stored.recommendation.headline) problems.push(`Recomputing the plan gives a different answer: ${now?.recommendation.headline ?? "no plan"}.`);
+    return problems;
+  }
   const items = toItems(ctx, stored.itemIds); const now = analyze(items, request, { fxRates: fxRates(ctx) }); const problems: string[] = [];
   if (items.length < stored.itemIds.length) problems.push("A source behind the calculation is no longer available.");
   if (now.recommendation.label !== stored.recommendation.label || now.recommendation.kind !== stored.recommendation.kind) problems.push(`Recomputing gives a different recommendation (${now.recommendation.label ?? now.recommendation.kind}).`);

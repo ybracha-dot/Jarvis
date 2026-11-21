@@ -50,7 +50,7 @@ function Result({ id }: { id: string }) {
         <div className="flex items-center gap-2 mb-2"><h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium flex-1">{KIND[d.kind]}. Nothing has been sent.</h2><Button size="sm" onClick={copy}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />}{copied ? "Copied" : "Copy"}</Button></div>
         {render(d.body)}</section>}
       {d.analysis && <Calculation a={d.analysis} />}
-      {d.analysis && !d.draft && d.analysis.recommendation.nextAction && d.analysis.recommendation.nextAction.kind !== "none" && <div><Button busy={revise.busy} onClick={() => { setInstr("Draft it please."); revise.run(); }} data-testid="prepare-draft">Prepare the draft for that next step</Button></div>}
+      {d.analysis && !d.draft && d.analysis.recommendation.nextAction && d.analysis.recommendation.nextAction.kind !== "none" && d.analysis.recommendation.kind !== "insufficient" && !(d.analysis.type === "plan" && d.analysis.recommendation.nextAction.kind === "ask_missing") && <div><Button busy={revise.busy} onClick={() => { setInstr("Draft it please."); revise.run(); }} data-testid="prepare-draft">Prepare the draft for that next step</Button></div>}
       {d.draft && <DraftEditor id={d.id} draft={d.draft} version={d.version} />}
       {d.flags.length > 0 && <section aria-label="Things to check"><SectionTitle>Check these</SectionTitle><ul className="space-y-2" data-testid="result-flags">{d.flags.map((f: any, i: number) => <li key={i} className="rounded-lg border border-amber-dim bg-[#1a1508] px-3.5 py-2.5 text-[15px] text-[#f6d7a1]" data-flag={f.kind}>{f.text}{f.itemId && <> <Link className="underline underline-offset-2" href={`/evidence/${f.itemId}`}>Open the source</Link></>}</li>)}</ul></section>}
       {d.applied && (d.applied.applied.length > 0 || d.applied.unapplied.length > 0) && <section aria-label="Instructions"><SectionTitle>Your changes</SectionTitle><ul className="text-[15px] space-y-1" data-testid="result-applied">{d.applied.applied.map((a: string) => <li key={a}>✔ {a}</li>)}{d.applied.unapplied.map((a: string) => <li key={a} className="text-muted">Noted, not applied automatically: {a}</li>)}</ul></section>}
@@ -79,7 +79,29 @@ function BlockedAsk() {
 export { ExternalLink, FileText };
 
 const STATUS: Record<string, { tone: "accent" | "amber" | "danger" | "neutral"; label: string }> = { ok: { tone: "accent", label: "meets it" }, violated: { tone: "danger", label: "does not meet it" }, unknown: { tone: "amber", label: "cannot tell yet" }, unconfirmed: { tone: "amber", label: "unconfirmed" } };
+const VERDICT: Record<string, { tone: "accent" | "amber" | "danger" | "neutral"; label: string }> = { works: { tone: "accent", label: "works" }, fails: { tone: "danger", label: "does not work" }, depends: { tone: "amber", label: "depends on something unconfirmed" } };
+function PlanCalculation({ a }: { a: any }) {
+  const link = (r: any) => r.itemId ? <Link className="underline underline-offset-2" href={`/evidence/${r.itemId}?q=${encodeURIComponent((r.quote ?? "").slice(0, 80))}`}>{r.title}</Link> : <span>{r.title}</span>;
+  return (
+    <section aria-label="Calculation" data-testid="calculation"><SectionTitle>The calculation</SectionTitle>
+      <details className="rounded-xl border border-line bg-surface p-4" open>
+        <summary className="cursor-pointer text-[15px]">What was used, the arithmetic, and each option ({a.options.length})</summary>
+        <div className="mt-3 text-[14px]"><b className="font-medium">Inputs, from the quoted wording</b>
+          <table className="w-full mt-1"><tbody>{a.inputs.map((r: any, i: number) => <tr key={i} className="border-t border-line align-top" data-testid="plan-input"><td className="py-1.5 pr-2">{r.label}{r.quote && <div className="text-[13px] text-muted break-words">“{r.quote}” · {link(r)}</div>}{!r.quote && <div className="text-[13px] text-muted">{r.title}</div>}</td><td className="py-1.5 text-right mono whitespace-nowrap">{r.value}</td><td className="py-1.5 pl-2 text-[13px] text-muted">{r.note}</td></tr>)}</tbody></table></div>
+        {a.computation.length > 0 && <div className="mt-3 text-[14px]"><b className="font-medium">Arithmetic</b><ul className="mt-1 space-y-1" data-testid="plan-computation">{a.computation.map((c: string, i: number) => <li key={i} className="mono text-[13px] break-words">{c}</li>)}</ul></div>}
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">{a.options.map((o: any) => (
+          <div key={o.option} className="rounded-lg border border-line bg-bg p-3.5" data-testid="calc-option">
+            <div className="flex items-center gap-2 flex-wrap"><b className="text-[16px] font-medium">{o.label}</b><Badge tone={VERDICT[o.verdict].tone}>{VERDICT[o.verdict].label}</Badge></div>
+            {o.steps.length > 0 && <table className="w-full text-[14px] mt-2"><tbody>{o.steps.map((st: any, i: number) => <tr key={i} className="border-t border-line align-top"><td className="py-1.5 pr-2 mono whitespace-nowrap">{st.when}</td><td className="py-1.5">{st.what}</td></tr>)}</tbody></table>}
+            <ul className="mt-2 space-y-1">{o.checks.map((c: string, i: number) => <li key={i} className="text-[14px] text-muted">{c}</li>)}</ul>
+          </div>))}</div>
+        {a.setAside.length > 0 && <details className="mt-3 text-[13px] text-muted"><summary className="cursor-pointer">Set aside, with the reason ({a.setAside.length})</summary><ul className="mt-1 space-y-1" data-testid="plan-set-aside">{a.setAside.map((r: any, i: number) => <li key={i} className="break-words"><b className="font-medium text-ink">{r.label}</b> {r.value && r.value !== "set aside" ? `(${r.value}) ` : ""}· {r.note} · {r.quote ? <>“{r.quote}” · </> : null}{link(r)}</li>)}</ul></details>}
+      </details>
+    </section>
+  );
+}
 function Calculation({ a }: { a: any }) {
+  if (a.type === "plan") return <PlanCalculation a={a} />;
   return (
     <section aria-label="Calculation" data-testid="calculation"><SectionTitle>The calculation</SectionTitle>
       <details className="rounded-xl border border-line bg-surface p-4" open>

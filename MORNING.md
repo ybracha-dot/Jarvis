@@ -33,12 +33,70 @@ Worker offline? Today says so and names the command. Requests made while it is o
 
 An **owner trial stays “pending” until you run it.** I have only run these steps with invented, non-personal notes. No real owner material, token or transcript is in any commit, example or screenshot.
 
-**Status: checkpoint, handoff not complete.**
+## What worked, on what, and what still needs you
 
-- Independent QA of an unfamiliar time/capacity request (kiln firings, safety-training room) was started, but the QA agent was stopped by a platform safeguards error before finishing. It is NOT passed.
-- First observed results (kept as recorded failures, not repaired yet): the kiln request with a draft went down the pitch-draft path and produced a garbled draft; the kiln and safety-training answers were rules-only digests with no capacity or time calculation; raku vs big kiln was mis-paired; no clarifying question about the Tuesday 09:00 vs 15:00 slot.
-- Still to do: time/capacity reasoning in the decision engine, a fresh unseen QA request, full rebuild and e2e re-run, and the status table and owner-only steps in this section.
-- Intermittent voice-quiz failure: cause found (stale question clickable while the next one reloads), reproduced with injected latency, fixed, regression test added.
+Six separate statuses. Nothing is marked connected just because configuration exists.
+
+| | Status | Evidence |
+|---|---|---|
+| **Synthetic fixtures** | **Worked** | Unit tests (232 pass) and the full browser suite (290 checks, 0 problems, run on the final build) on invented notes: the decision workflow (four plumber outcomes), the new time and capacity planner, private-import flow, Blackboard feed (a local test server speaking the real protocol), the Claude round-trip card with a local test client, the quiz fix. |
+| **Owner-imported** | **Pending: needs you** | I never saw any real note of yours. Run the three clicks above with one note you choose. |
+| **Mock model** | **Worked** | The model-synthesis path was exercised with a mock transport: off, budget exhausted, failure, rejected citations or numbers, local-only source. Each falls back to the rules answer and labels the mode. |
+| **Paid model** | **Off, never called** | No key, no budget. Every browser run reports `modelCalls 0`. Premium and Fable stay off. |
+| **Real Claude account** | **Pending: needs you** | The connector, the token and the receipt work against a local test client, which the card labels as a test client (it proves the connector, not your account). The round trip on your account is the test below. |
+| **Real Blackboard account** | **Pending: needs you** | Everything but your login: the feed reader, the sign-in handoff and resume, and “connected only after a successful read”. I have not seen a real Blackboard calendar link or your school's menu, so the exact menu wording is unverified. |
+
+## Exact steps only you can do (each says what you will see)
+
+**1. Blackboard (one read path, about two minutes).** Open Blackboard in your own browser and sign in with Duo. Find the calendar link Blackboard offers (wording varies by school; some schools turn it off). Copy it. In Jarvis open **Connections → Blackboard**, paste it, press **Check the link**, then **Save and read now**.
+*Success:* the card says **connected: last read succeeded** with a time and a count of events. If the link later stops working, the Office shows *needs your sign-in*; sign in, copy a fresh link, press **Read again**, and the requests that were waiting re-run under the same result links. The link is stored only on this Mac, never shown again, never in a URL or log. If your school disables the link, forward Blackboard notification emails or import a file instead.
+
+**2. Claude round trip (about three minutes, needs the connector added in Claude: Settings → Connectors → add the Jarvis URL and token from Connections).** Open **Connections → Prove the round trip with your Claude account**. It gives you three exact messages with a fresh code:
+  1. in a Claude chat with the connector, send the first message (it asks Claude to record a decision on a project and show the receipt);
+  2. press **Change the decision** in Jarvis;
+  3. in a **new** Claude chat, send the second message. Claude should quote the changed decision and say it was edited in Jarvis.
+*Success:* each step shows a tick with a timestamp and the client name the connector reported. If the name looks like Claude the receipt says both ends *reported themselves as Claude*. Jarvis cannot verify an account from a self-reported name, so the receipt says exactly that and no more. If Claude cannot see a long excerpt, it relays it through `share_excerpt` and the answer is revised under the same link.
+
+**3. A real unfamiliar question (one minute).** Ask Jarvis something about time or capacity that you have notes for (a room and a headcount, a batch and a deadline). *Success:* the answer opens with a recommendation and next step, the calculation lists each figure with its quote, and anything replaced or unrelated is listed as set aside with the reason. If an input is missing it asks one precise question.
+
+**Paid model:** leave it off. Nothing above needs it.
+
+## What I built this round
+
+- **Decision workflow** (done, last checkpoint): option terms with source and revision, confirmed vs estimate, included vs extra, start vs finish dates, code-computed totals in integer cents, no double counting, an unknown component kept visible, a recommendation or one precise question, an expandable calculation and a ready-to-edit local draft.
+- **Time and capacity planner (new, from the QA failures below):** reads the notes that state numbers, windows and dates even when they share no words with the question; picks the latest statement and shows the replaced one; sets aside another date's limit, another person's batch and another process, with the reason; computes sessions per room (people ÷ seats, session length, breaks, availability windows) or runs per resource (quantity ÷ capacity, cycle time, load and unload windows, deadline); when two readings give different answers it asks which one applies, with the numbers for each; drafts the next step to the right person from the request.
+- **Blackboard read path, Claude round-trip card, owner import trial:** as described above.
+
+## Independent QA of an unfamiliar request
+
+I asked an independent agent to choose a goal that is not about price, with a distractor, a later correction and a reason to ask. It chose two: the time and room for a 20-person safety training (rooms of different sizes and times, a trainer window and breaks, a registration count that was corrected from 14 to 20, another training in another room on another date) and getting 50 pottery pieces fired and unloaded before a craft fair (kiln capacity, firing length, load and unload windows, a load-in date that moved a day earlier, another person's kiln figures, a raku figure for a different kiln, and a kiln slot that was either 09:00 or 15:00 depending on someone's schedule).
+
+**First observed results (kept, not rewritten): FAIL.**
+- The kiln request that also asked for a draft went down the pitch-draft path and produced a garbled draft addressed to the right person but saying nothing about kilns.
+- The kiln and safety-training answers were extractive digests: no division, no schedule, no recommendation. The room notes were not even read, because they share no words with the question.
+- The digest paired the raku figures with the big kiln as “replaced”, which is wrong.
+- It did not ask whether the Tuesday slot was 09:00 or 15:00, and that question decides the answer.
+
+**Repair (by me, with regression tests built from the recorded data):** the planner above. First-pass success is **not** claimed: these are repairs after a failed first attempt. After the repair the same two requests give: Room C, Thu Nov 19, 12:30 to 14:00, one session seats all 20 (Room B would need two, Room A is booked, the earlier 14 flips it to Room B); and 3 runs (24 + 24 + 2), yes if the 09:00 slot is confirmed (last unload Fri Nov 20 09:00, 3 hours before the 12:00 load-in), 3 hours too late with 15:00, one question asking which slot, a draft to Priya listing the starts and unloads.
+
+**What is not done: a fresh independent re-test.** The QA agent was stopped by a platform safeguards error before it could try a second, unseen request. I did not run that test myself and call it independent. The two requests above are the same data it recorded; a different one is yours to try (step 3).
+
+## The intermittent browser failure (voice quiz)
+
+- **Cause:** after an answer was submitted, the page still showed the question just answered until the server replied with the next one. On a slow response a second tap in that window answered the same question again, which scrambled the order and the score. It depended on network timing, so it came and went.
+- **Reproduction:** the browser suite delays the quiz answer response (0 ms and 700 ms) and taps through every question. A second tap during the gap reproduced it.
+- **Fix:** the question just answered is hidden, with a visible *Loading the next question* status, until the server has moved on (`src/app/(app)/guides/[id]/page.tsx`).
+- **Evidence:** regression journey `quizlatency` (every question shown once, score 5 of 8, at both delays). Earlier repeated full runs on the unfixed build did not fail on their own, so I do not claim the failure rate fell from a measurement: the cause was found by reasoning and reproduced with the injected delay.
+
+## What does not exist yet
+
+Gmail, Slack, Notion and CRM adapters; Obsidian vault mapping and overnight consolidation; skill learning and rollback; routines beyond the morning brief; a Blackboard portal reader (only the calendar feed exists); changes to Claude Code itself. The Pixel Agents Mac smoke test stays pending. The Office reference image was only compared last round. `JARVIS_PUBLIC_URL` is needed only if you later expose the connector; this build does not deploy anywhere.
+
+## Build-process notes (from the second brief)
+
+- Ponytail, Graphify and OmniRoute were **not trialed**: no repeated-navigation cost justified Graphify, Ponytail needs a controlled A/B that this cloud host cannot measure (savings are **unmeasured**), and OmniRoute is skipped because it would switch providers automatically. The Jarvis runtime depends on none of them.
+- Debugging method used for the quiz failure: reproduce, isolate, repair, keep the regression. Full test logs are on disk in this environment and not committed.
+- Late catch by the full browser run: the Connections page crashed after loading (a data hook sat below an early return, which breaks React's hook order). Fixed, and the suite's Connections check now passes. This is why the whole suite was re-run on the final build.
 
 ---
 

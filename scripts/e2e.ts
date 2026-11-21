@@ -638,6 +638,33 @@ async function journeyDecision(page: Page, browser: Browser) {
   ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole run made zero model calls");
 }
 
+async function journeyPlan(page: Page, browser: Browser) {
+  step("Plan: a time and capacity request with a trap, a later correction and a reason to ask");
+  await post("/demo/reset", { confirm: "RESET DEMO" }); startWorker(300);
+  const imp = (kind: string, title: string, text: string, day: string, author?: string) => post("/evidence/import", { kind, title, text, at: `2026-11-${day}T15:00:00.000Z`, author, label: author ? `Mail from ${author}` : "Notes" });
+  await imp("email", "Raku workshop kiln", "For the raku workshop on Saturday Nov 28 the small kiln takes 8 pieces per firing: 4 hours of heat and 6 hours of cooling, load-in of participants at 10:00. Priya", "09", "Priya Nair");
+  await imp("email", "Kiln rules for members", "Hi, kiln rules for members. The big kiln holds 24 pieces per glaze firing. A glaze firing is 10 hours of heat followed by 14 hours of cooling, and you can only unload after the full 24 hours. Loading and starting a firing is allowed only between 09:00 and 17:00, and unloading is allowed only between 09:00 and 17:00. The big kiln is free from Tuesday Nov 17, either at 09:00 or at 15:00, depending on whether Marcus unloads his previous firing on time. I will confirm which slot on Monday evening. Priya", "11", "Priya Nair");
+  await imp("note", "Harbor Craft Fair plan", "Harbor Craft Fair: load-in is Saturday Nov 21 at 08:00 sharp. Pottery ready to glaze-fire: 46 pieces (22 mugs, 16 bowls, 8 vases). Everything must be fired and unloaded before load-in.", "12");
+  await imp("email", "Re: kiln sharing for cups", "For my cups the big kiln takes 30 pieces per firing and cooling is 20 hours. My Winter Market load-in is Saturday Dec 5 at 10:00, so I need the kiln again the week before. Marcus", "13", "Marcus Bell");
+  await imp("note", "Update to piece count", "Correction: I finished 4 more vases, so I now have 50 pieces to fire, not 46.", "14");
+  await imp("email", "Harbor Craft Fair schedule change", "Hello vendors, the hall is needed on Saturday, so load-in moves from Saturday 08:00 to Friday Nov 20 at 12:00. Please confirm you can make it. Dana, Harbor Craft Fair organiser", "15", "Dana Okafor");
+  await page.goto(base + "/"); await page.getByTestId("transcript").fill("Can I get all my pottery glaze-fired and unloaded before the craft fair load-in, and when do I start each firing? Draft a short note to Priya booking the kiln slots.");
+  await page.getByTestId("send").click(); await page.waitForFunction(() => document.querySelectorAll('[data-testid="goal-result-link"]').length >= 1);
+  await page.getByTestId("goal-result-link").last().click(); await page.getByTestId("result-body").waitFor({ timeout: 40000 });
+  const body = await page.getByTestId("result-body").innerText();
+  ok(/Yes if you can start at Tue Nov 17 09:00/.test(body) && /3 runs \(24 \+ 24 \+ 2\)/.test(body), "the answer opens with the schedule and the number of firings");
+  ok(/Which start slot/.test(body) && /15:00 instead would finish 3 hours too late/.test(body), "the one precise question is asked: which slot, and why it matters");
+  const calc = (await page.getByTestId("calculation").textContent()) ?? "";
+  ok(/50 ÷ 24 per run = 2\.08/.test(calc) && /Kiln rules for members/.test(calc) && /Fri Nov 20 12:00/.test(calc), "the calculation shows the division, the quoted rule and the corrected deadline");
+  ok(/Sat Nov 21 08:00/.test(calc) && /46/.test(calc) && /raku workshop/i.test(calc) && /Winter Market/.test(calc), "replaced and unrelated statements are listed as set aside with the reason");
+  const draft = await page.getByTestId("draft-text").inputValue(); ok(/Hi Priya/.test(draft) && /Tue Nov 17 09:00/.test(draft) && /Fri Nov 20 09:00/.test(draft), "the draft to Priya lists the starts and unloads, and nothing was sent");
+  ok(/rules/.test(await page.getByTestId("exec-mode").innerText()), "the mode is labelled rules");
+  await shot(page, "42-plan-desktop.png");
+  const m = await (await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })).newPage(); watch(m, "mobile-plan");
+  await m.goto(page.url()); await m.getByTestId("result-body").waitFor(); ok((await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0, "the plan page has no horizontal scroll on the phone"); await shot(m, "43-plan-mobile.png");
+  ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole run made zero model calls");
+}
+
 async function journeyPrivate(browser: Browser) {
   step("Private run: one note, one correction, one question (invented material)");
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
@@ -1122,6 +1149,7 @@ async function main() {
     else if (only === "assistant") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "assistant"); await journeyAssistant(p, browser); await c.close(); }
     else if (only === "quizlatency") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "quiz"); startWorker(300); await journeyQuizLatency(p); await c.close(); }
     else if (only === "decision") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "decision"); await journeyDecision(p, browser); await c.close(); }
+    else if (only === "plan") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "plan"); await journeyPlan(p, browser); await c.close(); }
     else if (only === "private") { await journeyPrivate(browser); }
     else if (only === "blackboard") { await journeyBlackboard(browser); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
@@ -1140,6 +1168,7 @@ async function main() {
     await journeyAssistant(page, browser);
     await journeyQuizLatency(page);
     await journeyDecision(page, browser);
+    await journeyPlan(page, browser);
     await journeyPrivate(browser);
     await journeyBlackboard(browser);
     await journeyRoundTrip(browser);
