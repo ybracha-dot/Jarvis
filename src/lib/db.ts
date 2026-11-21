@@ -187,23 +187,48 @@ CREATE TABLE quiz_answers(
   attempt_id TEXT NOT NULL REFERENCES quiz_attempts(id) ON DELETE CASCADE, question_id TEXT NOT NULL, chosen TEXT NOT NULL, correct INTEGER NOT NULL, at TEXT NOT NULL,
   PRIMARY KEY(attempt_id, question_id));
 `,
+  /* 4 projects, revisions, tokens, probes */ `
+ALTER TABLE notes ADD COLUMN project_id TEXT;
+ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE notes ADD COLUMN prev TEXT;
+ALTER TABLE captures ADD COLUMN project_id TEXT;
+ALTER TABLE commitments ADD COLUMN project_id TEXT;
+CREATE TABLE projects(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, slug TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'project', status TEXT NOT NULL DEFAULT 'active',
+  aliases TEXT NOT NULL DEFAULT '[]', course TEXT, revision INTEGER NOT NULL DEFAULT 0, last_origin TEXT, last_source TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(owner_id, slug));
+CREATE TABLE project_facts(
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, key TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
+  status TEXT NOT NULL, revision INTEGER NOT NULL, supersedes TEXT, superseded_by TEXT, source TEXT, source_ref TEXT, origin TEXT NOT NULL, event_id TEXT, locator TEXT,
+  asserted_at TEXT NOT NULL, created_at TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, forgotten INTEGER NOT NULL DEFAULT 0, note TEXT);
+CREATE INDEX project_facts_key ON project_facts(project_id, key, status);
+CREATE TABLE project_events(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, event_id TEXT NOT NULL, dedup_key TEXT, origin TEXT NOT NULL,
+  client TEXT, expected_revision INTEGER, resulting_revision INTEGER NOT NULL, receipt TEXT NOT NULL, at TEXT NOT NULL, undone_at TEXT, UNIQUE(owner_id, event_id));
+CREATE UNIQUE INDEX project_events_dedup ON project_events(owner_id, project_id, dedup_key) WHERE dedup_key IS NOT NULL;
+CREATE TABLE mcp_tokens(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, label TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, scopes TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT, last_used_at TEXT, revoked_at TEXT);
+CREATE TABLE connection_probes(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, code TEXT NOT NULL UNIQUE, edit_marker TEXT NOT NULL, created_at TEXT NOT NULL, written_at TEXT, written_client TEXT, note_id TEXT, capture_id TEXT,
+  edited_at TEXT, read_at TEXT, read_client TEXT, read_stamp TEXT);
+`,
 ];
 
 const cache = new Map<string, DB>();
 
-export function openDb(file: string): DB {
+export function openDb(file: string, upTo = Infinity): DB {
   if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
-  migrate(db);
+  migrate(db, upTo);
   return db;
 }
 
-export function migrate(db: DB): void {
+export function migrate(db: DB, upTo = Infinity): void {
   db.exec("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
   const row = db.prepare("SELECT MAX(version) v FROM schema_migrations").get() as { v: number | null };
   let v = row.v ?? 0;
-  while (v < MIGRATIONS.length) {
+  while (v < Math.min(MIGRATIONS.length, upTo)) {
     db.exec("BEGIN");
     try {
       db.exec(MIGRATIONS[v]);
@@ -216,6 +241,8 @@ export function migrate(db: DB): void {
     v++;
   }
 }
+
+export const SCHEMA_VERSION = () => MIGRATIONS.length;
 
 export function getDb(mode: Mode): DB {
   const key = `${dataRoot()}::${mode}`;

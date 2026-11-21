@@ -9,6 +9,7 @@ import { today, sourceHealth } from "./today";
 import { recentChanges } from "./ingest";
 import { emitDecision } from "./decisions";
 import { captureToJarvis, recallFromJarvis, CaptureInput } from "./capture";
+import { projectContext, applyProjectUpdate, ProjectUpdate, listProjects } from "./projects";
 
 export interface Tool<S extends z.ZodType = z.ZodType> { name: string; description: string; schema: S; mutating: boolean; run(ctx: Ctx, args: z.output<S>): unknown }
 const empty = z.object({}).strict();
@@ -32,7 +33,11 @@ export const TOOLS: Tool[] = [
     schema: z.object({ text: z.string().min(3).max(4000), course: z.string().max(60).optional(), project: z.string().max(80).optional(), sourceRef: z.string().max(300).optional(), dedupKey: z.string().max(200).optional(), sourceKind: z.enum(["claude-chat", "claude-project", "mcp"]).optional(), synthetic: z.boolean().optional() }).strict(), mutating: true,
     run: (c, a: any) => captureToJarvis(c, { ...a, sourceKind: a.sourceKind ?? "claude-chat", via: "mcp", delivery: "MCP tool call: save_to_jarvis" }) },
   { name: "recall_from_jarvis", description: "Search what was saved to Jarvis (captures, commitments, study guides, notes). Searches saved records only, never a user's Claude chats.",
-    schema: z.object({ query: z.string().min(2).max(200) }).strict(), mutating: false, run: (c, a: any) => recallFromJarvis(c, a.query) },
+    schema: z.object({ query: z.string().min(2).max(200), project: z.string().max(120).optional() }).strict(), mutating: false, run: (c, a: any) => recallFromJarvis(c, a.query, { project: a.project }) },
+  { name: "get_project_context", description: "Read one Jarvis project (a trip, course, club): what is decided now, open options, open questions, dated decision history, and its revision. Call this BEFORE answering from memory about an ongoing project, and pass the revision back as expectedRevision when you update. Without a project name it lists the projects.",
+    schema: z.object({ project: z.string().max(120).optional() }).strict(), mutating: false, run: (c, a: any) => a.project ? projectContext(c, a.project) : { projects: listProjects(c).map((p: any) => ({ id: p.id, name: p.name, kind: p.kind, revision: p.revision, aliases: p.aliases })) } },
+  { name: "apply_project_update", description: "Record what was decided in this conversation about a project. Use a fresh unique eventId per message so replays are safe. ops: option (still being considered), decide (final; tentative:true if wording is unsure), fact, action, question, retract. Pass expectedRevision from get_project_context; a conflict returns the current state instead of overwriting newer edits. Never save when the user asked to keep something off the record.",
+    schema: ProjectUpdate as unknown as z.ZodType, mutating: true, run: (c, a: any) => applyProjectUpdate(c, { ...a, origin: "claude" }) },
 ];
 
 /** Roles and what they may call. The Blackboard monitor can read; it cannot propose or change anything. */

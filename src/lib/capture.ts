@@ -1,6 +1,7 @@
 // Capture: "Remember for Jarvis: ..." from ordinary Claude, a pasted note, an import or a connector. One handler for every route.
 // Idempotent by a stable dedup key. Saves the commitment immediately, then wakes the supervisor. Incoming content never authorizes an outbound action.
 import { z } from "zod";
+import { findProject } from "./projects";
 import { Ctx, all, get, run, tx, uid, sha } from "./db";
 import { HttpError } from "./decisions";
 import { createCommitment } from "./commitments";
@@ -52,7 +53,9 @@ export function captureReceipt(ctx: Ctx, id: string) {
   const c = get(ctx.db, "SELECT * FROM captures WHERE id=? AND owner_id=?", id, ctx.owner);
   if (!c) return null;
   const link = c.commitment_id ? `/tasks?tab=followups&focus=${c.commitment_id}` : `/office?capture=${c.id}`;
+  const pj = c.project_id ? get(ctx.db, "SELECT id, name FROM projects WHERE id=?", c.project_id) : null;
   return {
+    project: pj ? { id: pj.id as string, name: pj.name as string } : null,
     id: c.id as string, kind: c.kind as string, source: c.source_label as string, sourceKind: c.source_kind as string, synthetic: !!c.synthetic, undone: !!c.undone_at,
     commitmentId: (c.commitment_id as string) ?? null, noteId: (c.note_id as string) ?? null, decisionId: (c.decision_id as string) ?? null,
     deepLink: `${deepLinkBase()}${link}`, path: link, officePath: `/office?capture=${c.id}`, parsed: JSON.parse(c.parsed as string),
@@ -71,14 +74,19 @@ export function captureToJarvis(ctx: Ctx, raw: CaptureInput) {
     if (recent >= 40) throw new HttpError(429, "Too many captures in the last hour.");
     const parsed = parseCapture(i.text, nowIso);
     const id = uid("cap");
+    // A capture that names a project lands in that project's scope. Exact names only; an unknown name is never guessed.
+    let prj: { id: string; slug: string; name: string } | null = null; let projectWarning = "";
+    if (i.project) { try { prj = findProject(ctx, i.project); } catch (e) { projectWarning = (e as Error).message; } if (!prj && !projectWarning) projectWarning = `No project named "${i.project}", so this was saved to general notes.`; }
     const label = i.sourceLabel ?? SOURCE_LABELS[i.sourceKind];
-    run(ctx.db, `INSERT INTO captures(id,owner_id,dedup_key,source_kind,source_label,delivery,text,course,project,source_ref,synthetic,via,kind,parsed,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      id, ctx.owner, key, i.sourceKind, label, i.delivery ?? (i.sourceKind === "mcp" ? "MCP tool call" : i.via), i.text, i.course ?? null, i.project ?? null, i.sourceRef ?? null, i.synthetic ? 1 : 0, i.via, parsed.kind, JSON.stringify(parsed), nowIso);
+    run(ctx.db, `INSERT INTO captures(id,owner_id,dedup_key,source_kind,source_label,delivery,text,course,project,source_ref,synthetic,via,kind,parsed,created_at,project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      id, ctx.owner, key, i.sourceKind, label, i.delivery ?? (i.sourceKind === "mcp" ? "MCP tool call" : i.via), i.text, i.course ?? null, i.project ?? null, i.sourceRef ?? null, i.synthetic ? 1 : 0, i.via, parsed.kind, JSON.stringify(parsed), nowIso, prj?.id ?? null);
     if (parsed.kind === "commitment") {
       const cid = createCommitment(ctx, { who: parsed.who!, owedTo: parsed.owedTo!, action: parsed.action!, dueDate: parsed.dueDate ?? null, agreement: `Captured from ${label}: "${parsed.body.slice(0, 200)}"`, dedupe: true });
       run(ctx.db, "UPDATE captures SET commitment_id=? WHERE id=?", cid, id);
+      if (prj) run(ctx.db, "UPDATE commitments SET project_id=? WHERE id=?", prj.id, cid);
     } else {
-      const nid = createNote(ctx, { kind: "inbox", title: parsed.body.slice(0, 60), body: parsed.body, source: `capture:${i.sourceKind}`, sourceRef: id, scope: i.course ? `course:${i.course}` : "global" });
+      const nid = createNote(ctx, { kind: "inbox", title: parsed.body.slice(0, 60), body: parsed.body, source: `capture:${i.sourceKind}`, sourceRef: id, scope: prj ? `project:${prj.slug}` : i.course ? `course:${i.course}` : "global" });
+      if (prj) run(ctx.db, "UPDATE notes SET project_id=? WHERE id=?", prj.id, nid);
       run(ctx.db, "UPDATE captures SET note_id=? WHERE id=?", nid, id);
     }
     recordSourceStatus(ctx, `capture:${i.sourceKind}`, label, true, i.synthetic ? "Synthetic source event (fixture)" : undefined);
@@ -91,7 +99,7 @@ export function captureToJarvis(ctx: Ctx, raw: CaptureInput) {
       });
       void j;
     }
-    return { ...captureReceipt(ctx, id)!, created: true, duplicate: false, message: parsed.kind === "commitment" ? `Saved: you owe ${parsed.owedTo} ${parsed.action}${parsed.dueDate ? ` by ${parsed.dueDate}` : ""}.` : "Saved as a note." };
+    return { ...captureReceipt(ctx, id)!, created: true, duplicate: false, message: parsed.kind === "commitment" ? `Saved: you owe ${parsed.owedTo} ${parsed.action}${parsed.dueDate ? ` by ${parsed.dueDate}` : ""}.` : (prj ? `Saved to project ${prj.name}.` : "Saved as a note.") + (projectWarning ? ` ${projectWarning}` : "") };
   });
 }
 
@@ -112,18 +120,25 @@ export function undoCapture(ctx: Ctx, id: string) {
   });
 }
 
-export function recallFromJarvis(ctx: Ctx, query: string) {
+export function recallFromJarvis(ctx: Ctx, query: string, o: { project?: string } = {}) {
   const q = query.trim();
   if (q.length < 2) throw new HttpError(422, "Ask with at least two characters");
   const like = `%${q.replace(/[%_]/g, "")}%`;
   const items: { type: string; id: string; title: string; detail: string; deepLink: string }[] = [];
+  const prj = o.project ? findProject(ctx, o.project) : null;
+  if (o.project && !prj) throw new HttpError(404, `No project matches "${o.project}".`);
+  for (const f of all(ctx.db, `SELECT f.id, f.key, f.text, f.status, f.kind, p.id pid, p.name FROM project_facts f JOIN projects p ON p.id=f.project_id WHERE p.owner_id=? AND f.forgotten=0 AND f.status IN ('current','option') AND (f.text LIKE ? OR f.key LIKE ? OR p.name LIKE ?)${prj ? " AND p.id=?" : ""} ORDER BY f.created_at DESC LIMIT 6`, ...(prj ? [ctx.owner, like, like, like, prj.id] : [ctx.owner, like, like, like])))
+    items.push({ type: "project_fact", id: f.id as string, title: `${f.name}: ${f.text}`, detail: `${f.status === "option" ? "open option" : f.kind}`, deepLink: `${deepLinkBase()}/projects/${f.pid}` });
+  if (prj) for (const n of all(ctx.db, "SELECT id,title,kind FROM notes WHERE owner_id=? AND tombstone=0 AND project_id=? AND (title LIKE ? OR body LIKE ?) LIMIT 5", ctx.owner, prj.id, like, like))
+    items.push({ type: "note", id: n.id as string, title: n.title as string, detail: `note in ${prj.name}`, deepLink: `${deepLinkBase()}/projects/${prj.id}` });
+  if (prj) return { query: q, count: items.length, items, missing: items.length ? null : `Nothing in project ${prj.name} matches "${q}".`, scope: `Project ${prj.name} only.` };
   for (const c of all(ctx.db, "SELECT id,text,source_label,commitment_id FROM captures WHERE owner_id=? AND undone_at IS NULL AND text LIKE ? ORDER BY created_at DESC LIMIT 5", ctx.owner, like))
     items.push({ type: "capture", id: c.id as string, title: String(c.text).slice(0, 80), detail: `from ${c.source_label}`, deepLink: `${deepLinkBase()}${c.commitment_id ? `/tasks?tab=followups&focus=${c.commitment_id}` : `/office?capture=${c.id}`}` });
   for (const c of all(ctx.db, "SELECT id,who,owed_to,action,due_date,status FROM commitments WHERE owner_id=? AND (action LIKE ? OR who LIKE ? OR owed_to LIKE ?) ORDER BY created_at DESC LIMIT 5", ctx.owner, like, like, like))
     items.push({ type: "commitment", id: c.id as string, title: `${c.who} to ${c.owed_to}: ${c.action}`, detail: `${c.status}${c.due_date ? `, due ${c.due_date}` : ""}`, deepLink: `${deepLinkBase()}/tasks?tab=followups&focus=${c.id}` });
   for (const d of all(ctx.db, "SELECT id,title,folder,course FROM documents WHERE owner_id=? AND (title LIKE ? OR course LIKE ?) LIMIT 5", ctx.owner, like, like))
     items.push({ type: "document", id: d.id as string, title: d.title as string, detail: `${d.course} / ${d.folder}`, deepLink: `${deepLinkBase()}/guides/${d.id}` });
-  for (const n of all(ctx.db, "SELECT id,title,kind FROM notes WHERE owner_id=? AND tombstone=0 AND sensitivity='normal' AND (title LIKE ? OR body LIKE ?) LIMIT 5", ctx.owner, like, like))
+  for (const n of all(ctx.db, "SELECT id,title,kind FROM notes WHERE owner_id=? AND tombstone=0 AND project_id IS NULL AND sensitivity='normal' AND (title LIKE ? OR body LIKE ?) LIMIT 5", ctx.owner, like, like))
     items.push({ type: "note", id: n.id as string, title: n.title as string, detail: n.kind as string, deepLink: `${deepLinkBase()}/memory` });
   // Honest about scope: this searches what was saved to Jarvis, not every Claude chat.
   const missing = items.length ? null : `Nothing saved in Jarvis matches "${q}". Jarvis only has what you captured with "Remember for Jarvis", pasted, imported or attached. If it was in a Claude conversation, share that conversation (or export just that one) and import it under Sources, or attach the file here.`;
