@@ -451,30 +451,30 @@ async function journeyProjects(page: Page) {
   const connect = async (t: string) => { const c = new Client({ name: "ordinary-claude-emulator", version: "1" }); await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${t}` } } })); return c; };
   const call = async (c: any, name: string, args: any) => { const r = await c.callTool({ name, arguments: args }); return r.isError ? { error: r.content[0].text } : JSON.parse(r.content[0].text); };
   const claude = await connect(token);
-  const r1 = await call(claude, "apply_project_update", { project: "Iceland trip", createIfMissing: { kind: "trip" }, eventId: "e2e-iceland-0001", dedupKey: "chat:4", changes: [{ op: "option", key: "lodging", text: "Reykjavik apartment" }, { op: "option", key: "lodging", text: "Vik guesthouse" }, { op: "decide", key: "dates", text: "June 14 to 21" }] });
+  const r1 = await call(claude, "apply_project_update", { project: "Maple Court project", createIfMissing: { kind: "trip" }, eventId: "e2e-maple-0001", dedupKey: "chat:4", changes: [{ op: "option", key: "vendor", text: "Oak contractor" }, { op: "option", key: "vendor", text: "Pine contractor" }, { op: "decide", key: "dates", text: "June 14 to 21" }] });
   ok(r1.saved && r1.revision === 1 && r1.origin === "claude", "Claude saved a trip update through the connector and got a receipt");
-  ok((await call(claude, "apply_project_update", { project: "Iceland trip", eventId: "e2e-iceland-0002", dedupKey: "chat:4", changes: [{ op: "fact", key: "z", text: "z" }] })).replay === true, "replaying the message did not write twice");
+  ok((await call(claude, "apply_project_update", { project: "Maple Court project", eventId: "e2e-maple-0002", dedupKey: "chat:4", changes: [{ op: "fact", key: "z", text: "z" }] })).replay === true, "replaying the message did not write twice");
   await page.goto(base + "/projects");
-  await page.getByTestId("project-card").filter({ hasText: "Iceland trip" }).click();
+  await page.getByTestId("project-card").filter({ hasText: "Maple Court project" }).click();
   await page.getByTestId("project-answer").waitFor();
   ok(/June 14 to 21/.test(await page.getByTestId("project-answer").innerText()), "the project page shows the decision Claude saved");
-  ok((await page.getByTestId("project-fact").filter({ hasText: "Vik guesthouse" }).count()) === 1, "undecided options are listed separately");
+  ok((await page.getByTestId("project-fact").filter({ hasText: "Pine contractor" }).count()) === 1, "undecided options are listed separately");
   ok(/Claude conversation/.test(await page.getByTestId("project-fact").filter({ hasText: "June 14 to 21" }).innerText()), "each item says it came from a Claude conversation");
   await shot(page, "21-project-desktop.png");
   await page.getByTestId("project-fact").filter({ hasText: "June 14 to 21" }).locator("button").first().click();
   await page.getByTestId("project-inspector").waitFor();
-  ok(/e2e-iceland-0001/.test(await page.getByTestId("project-inspector").innerText()), "the inspector shows the evidence: event id, revision, source");
+  ok(/e2e-maple-0001/.test(await page.getByTestId("project-inspector").innerText()), "the inspector shows the evidence: event id, revision, source");
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Edit text").fill("June 15 to 22");
   await page.getByRole("button", { name: "Save", exact: true }).first().click();
   await page.getByTestId("project-answer").getByText(/June 15 to 22/).waitFor();
   ok(true, "editing in Jarvis changes the current answer");
-  const ctxNow = await call(claude, "get_project_context", { project: "Iceland trip" });
+  const ctxNow = await call(claude, "get_project_context", { project: "Maple Court project" });
   ok(ctxNow.current.find((f: any) => f.key === "dates").text === "June 15 to 22", "Claude reads the edit you made in Jarvis");
-  const stale = await call(claude, "apply_project_update", { project: "Iceland trip", expectedRevision: 1, eventId: "e2e-iceland-0003", changes: [{ op: "decide", key: "dates", text: "June 20 to 27" }] });
+  const stale = await call(claude, "apply_project_update", { project: "Maple Court project", expectedRevision: 1, eventId: "e2e-maple-0003", changes: [{ op: "decide", key: "dates", text: "June 20 to 27" }] });
   ok(stale.saved === false && stale.conflict === true, "a stale Claude update is refused and does not overwrite your edit");
   await page.getByRole("button", { name: "Choose this" }).first().click();
-  await page.getByTestId("project-fact").filter({ hasText: "Decided" }).filter({ hasText: /Reykjavik|Vik/ }).first().waitFor();
+  await page.getByTestId("project-fact").filter({ hasText: "Decided" }).filter({ hasText: /Oak|Vik/ }).first().waitFor();
   await page.getByTestId("project-undo").click();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="project-fact"]').length > 0);
   ok(true, "undo steps back the last update");
@@ -505,7 +505,7 @@ async function journeyProjects(page: Page) {
   ok(/Claude conversation|Jarvis/.test(await page.getByTestId("memory-answer").innerText()), "memory answers from the project decision and says why");
   await shot(page, "23-memory-desktop.png");
   await page.goto(base + "/activity"); await page.getByTestId("outcomes").waitFor();
-  ok((await page.getByTestId("outcome-row").filter({ hasText: "Iceland trip" }).count()) >= 1, "Activity lists the project update as an outcome with its receipt");
+  ok((await page.getByTestId("outcome-row").filter({ hasText: "Maple Court project" }).count()) >= 1, "Activity lists the project update as an outcome with its receipt");
   await shot(page, "24-activity-desktop.png");
 }
 

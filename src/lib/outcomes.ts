@@ -12,6 +12,7 @@ export function outcomes(ctx: Ctx, limit = 20): Outcome[] {
     const rev = get(ctx.db, "SELECT result FROM jobs WHERE parent_id=? AND kind='capture_reviewer' AND status='done' ORDER BY rowid DESC LIMIT 1", j.id);
     const checks: { ok: boolean }[] = rev ? JSON.parse(rev.result as string).checks ?? [] : [];
     const dec = res.decisionId ? get(ctx.db, "SELECT state, resolution, title FROM decisions WHERE id=? AND owner_id=?", res.decisionId, ctx.owner) : null;
+    if (res.resultId) continue;
     const goal = String(j.title).replace(/^Handle: /, "");
     if (j.status === "failed") out.push({ id: j.id as string, at, source: "agent", status: "failed", goal, result: `Stopped: ${String(j.error ?? "an error")}`.slice(0, 160), receipt: null, href: "/office" });
     else if (j.status === "cancelled") out.push({ id: j.id as string, at, source: "agent", status: "cancelled", goal, result: "You cancelled it. Nothing further was done.", receipt: null, href: "/office" });
@@ -22,6 +23,10 @@ export function outcomes(ctx: Ctx, limit = 20): Outcome[] {
         receipt: checks.length ? `${checks.filter((c) => c.ok).length} of ${checks.length} checks passed by the Reviewer` : null, href: pending ? `/?decision=${res.decisionId}` : "/tasks" });
     } else if (res.docId) out.push({ id: j.id as string, at, source: "agent", status: "verified", goal, result: `Saved study guide version ${res.version} with ${res.questionCount} questions.`, receipt: res.keyCheck ? `Answer key checked: ${res.keyCheck.supported} of ${res.keyCheck.checked} supported` : null, href: `/guides/${res.docId}` });
     else out.push({ id: j.id as string, at, source: "agent", status: "done", goal, result: "Finished.", receipt: null, href: "/office" });
+  }
+  for (const r of all(ctx.db, "SELECT r.id, r.title, r.kind, r.version, r.state, r.updated_at, r.request_id, (SELECT summary FROM result_versions v WHERE v.result_id=r.id AND v.version=r.version) summary, (SELECT COUNT(*) FROM request_reads q WHERE q.request_id=r.request_id AND q.used=1 AND q.kind!='bundle') reads FROM results r WHERE r.owner_id=? AND r.version>0 ORDER BY r.updated_at DESC LIMIT ?", ctx.owner, limit)) {
+    const stale = r.state === "stale";
+    out.push({ id: `res:${r.id}`, at: String(r.updated_at), source: "agent", status: stale ? "waiting" : "verified", goal: String(r.title), result: `${String(r.summary ?? "Saved.")}${stale ? " One of its sources changed or was revoked, so it is out of date." : ""}`, receipt: `Version ${r.version}, ${r.reads} sources read`, href: `/results/${r.id}` });
   }
   for (const e of all(ctx.db, "SELECT e.event_id, e.origin, e.at, e.resulting_revision rev, e.receipt, p.name, p.id pid FROM project_events e JOIN projects p ON p.id=e.project_id WHERE e.owner_id=? AND e.undone_at IS NULL ORDER BY e.at DESC LIMIT ?", ctx.owner, limit)) {
     const r = JSON.parse(e.receipt as string); const n = (r.changes ?? []).filter((c: any) => c.status !== "retracted").length;

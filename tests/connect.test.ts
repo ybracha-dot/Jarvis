@@ -44,27 +44,27 @@ describe("ordinary-Claude emulation over the authenticated route", () => {
   });
   it("a read-only token can read but not write; a revoked token stops working mid-session", async () => {
     const ctx = fresh(); const ro = createToken(ctx, { label: "ro", scopes: ["read"] }); const rw = createToken(ctx, { label: "rw" });
-    const w = await connect(rw.token); expect((await w.call("apply_project_update", { project: "Iceland trip", createIfMissing: { kind: "trip" }, eventId: "evt-aaaa-0001", changes: [{ op: "decide", key: "dates", text: "June 14 to 21" }] })).json.saved).toBe(true);
+    const w = await connect(rw.token); expect((await w.call("apply_project_update", { project: "Maple Court project", createIfMissing: { kind: "trip" }, eventId: "evt-aaaa-0001", changes: [{ op: "decide", key: "dates", text: "June 14 to 21" }] })).json.saved).toBe(true);
     const r = await connect(ro.token);
-    expect((await r.call("get_project_context", { project: "Iceland trip" })).json.current[0].text).toBe("June 14 to 21");
-    expect((await r.call("apply_project_update", { project: "Iceland trip", eventId: "evt-aaaa-0002", changes: [{ op: "fact", key: "x", text: "y" }] })).isError).toBe(true);
+    expect((await r.call("get_project_context", { project: "Maple Court project" })).json.current[0].text).toBe("June 14 to 21");
+    expect((await r.call("apply_project_update", { project: "Maple Court project", eventId: "evt-aaaa-0002", changes: [{ op: "fact", key: "x", text: "y" }] })).isError).toBe(true);
     expect((await r.call("save_to_jarvis", { text: "Remember for Jarvis: should not save" })).isError).toBe(true);
     revokeToken(ctx, ro.id); await expect(r.call("get_project_context", {})).rejects.toThrow();
   });
-  it("the golden Iceland conversation survives a new session, a replay and a Jarvis-side edit", async () => {
+  it("the golden Maple conversation survives a new session, a replay and a Jarvis-side edit", async () => {
     const ctx = fresh(); const t = createToken(ctx, { label: "Claude" });
     let s = await connect(t.token);
-    const first = (await s.call("apply_project_update", { project: "Iceland trip", createIfMissing: { name: "Iceland trip", kind: "trip" }, eventId: "evt-golden-01", dedupKey: "chat-1:msg-4", changes: [{ op: "option", key: "lodging", text: "Reykjavik apartment" }, { op: "option", key: "lodging", text: "Vik guesthouse" }, { op: "decide", key: "dates", text: "June 14 to 21" }] })).json;
+    const first = (await s.call("apply_project_update", { project: "Maple Court project", createIfMissing: { name: "Maple Court project", kind: "trip" }, eventId: "evt-golden-01", dedupKey: "chat-1:msg-4", changes: [{ op: "option", key: "vendor", text: "Oak contractor" }, { op: "option", key: "vendor", text: "Pine contractor" }, { op: "decide", key: "dates", text: "June 14 to 21" }] })).json;
     expect(first).toMatchObject({ saved: true, revision: 1, origin: "claude" }); expect(first.workspace.mode).toBe("personal");
-    expect((await s.call("apply_project_update", { project: "Iceland trip", eventId: "evt-golden-02", dedupKey: "chat-1:msg-4", changes: [{ op: "fact", key: "z", text: "z" }] })).json).toMatchObject({ replay: true, revision: 1 });
+    expect((await s.call("apply_project_update", { project: "Maple Court project", eventId: "evt-golden-02", dedupKey: "chat-1:msg-4", changes: [{ op: "fact", key: "z", text: "z" }] })).json).toMatchObject({ replay: true, revision: 1 });
     await s.client.close(); s = await connect(t.token);                                           // a brand new Claude conversation
-    const ctxNow = (await s.call("get_project_context", { project: "Iceland trip" })).json;
-    expect(ctxNow.current.map((f: any) => f.text)).toEqual(["June 14 to 21"]); expect(ctxNow.options.map((f: any) => f.text).sort()).toEqual(["Reykjavik apartment", "Vik guesthouse"]);
+    const ctxNow = (await s.call("get_project_context", { project: "Maple Court project" })).json;
+    expect(ctxNow.current.map((f: any) => f.text)).toEqual(["June 14 to 21"]); expect(ctxNow.options.map((f: any) => f.text).sort()).toEqual(["Oak contractor", "Pine contractor"]);
     const { projectContext, editFact } = await import("@/lib/projects");
-    editFact(ctx, projectContext(ctx, "Iceland trip").current[0].id, "June 15 to 22", 1);          // you fix the date in Jarvis
-    const stale = (await s.call("apply_project_update", { project: "Iceland trip", expectedRevision: 1, eventId: "evt-golden-03", changes: [{ op: "decide", key: "dates", text: "June 20 to 27" }] })).json;
+    editFact(ctx, projectContext(ctx, "Maple Court project").current[0].id, "June 15 to 22", 1);          // you fix the date in Jarvis
+    const stale = (await s.call("apply_project_update", { project: "Maple Court project", expectedRevision: 1, eventId: "evt-golden-03", changes: [{ op: "decide", key: "dates", text: "June 20 to 27" }] })).json;
     expect(stale).toMatchObject({ saved: false, conflict: true }); expect(stale.current.current[0].text).toBe("June 15 to 22");
-    expect((await s.call("get_project_context", { project: "Iceland trip" })).json.answer).toMatch(/June 15 to 22/);
+    expect((await s.call("get_project_context", { project: "Maple Court project" })).json.answer).toMatch(/June 15 to 22/);
     expect(JSON.stringify(all(ctx.db, "SELECT * FROM activity"))).not.toContain(t.token);
   });
   it("the two-way connection check completes only when Claude writes, Jarvis edits, and Claude reads the edit back", async () => {

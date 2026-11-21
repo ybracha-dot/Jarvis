@@ -22,7 +22,7 @@ import { runCommand } from "./commands";
 import { ingestRevision } from "./ingest";
 import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJarvis } from "./capture";
 import { outcomes } from "./outcomes";
-import { submitGoal, GoalInput as AssistantGoalInput, receipt as goalReceipt, reviseRequest, cancelRequest, resumeRequest, resultView, listResults, listRequests, readsFor } from "./assistant";
+import { submitGoal, GoalInput as AssistantGoalInput, receipt as goalReceipt, reviseRequest, refreshRequest, cancelRequest, resumeRequest, resultView, listResults, listRequests, readsFor } from "./assistant";
 import { listSources, getItem, importText, revokeSource, reauthorizeSource, forgetItem, searchEvidence, listItems, tokens, SOURCE_KINDS } from "./evidence";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
@@ -117,6 +117,7 @@ on("POST", "/asks", (c, r) => { const out = submitGoal(c, { ...r.json(AssistantG
 on("GET", "/asks", (c) => ({ goals: listRequests(c) }));
 on("GET", "/asks/:id", (c, r) => goalReceipt(c, r.params.id));
 on("POST", "/asks/:id/revise", (c, r) => { const out = reviseRequest(c, { requestId: r.params.id, text: r.json(z.object({ text: z.string().min(2).max(600) })).text, origin: "api" }); kick(c.mode); return out; });
+on("POST", "/asks/:id/refresh", (c, r) => { const out = refreshRequest(c, r.params.id); kick(c.mode); return out; });
 on("POST", "/asks/:id/cancel", (c, r) => cancelRequest(c, r.params.id));
 on("POST", "/asks/:id/resume", (c, r) => { const out = resumeRequest(c, r.params.id); kick(c.mode); return out; });
 on("GET", "/results", (c, r) => ({ results: listResults(c, { projectId: r.query.get("project") ?? undefined, limit: Number(r.query.get("limit") ?? 30) || 30 }) }));

@@ -49,6 +49,8 @@ export default function TodayPage() {
     <div className="space-y-6 min-w-0">
       {q.stale && <ErrorBox error="Could not refresh. Showing what was last loaded." onRetry={q.reload} />}
 
+      <VoiceDock />
+
       <section aria-labelledby="next-block">
         <Card className="p-5 md:p-6 relative overflow-hidden">
           <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -74,8 +76,6 @@ export default function TodayPage() {
       </section>
 
       <AgentsAndOutput />
-
-      <VoiceDock />
 
       {empty && <Card className="p-5"><Empty title="This private workspace is empty" hint="Nothing is connected yet. Import a syllabus or follow the connection checklist." ><div className="flex gap-2 justify-center"><Link href="/sources" className="inline-flex rounded-lg px-3.5 py-2 text-sm bg-accent text-[#04141e] font-medium">Import a syllabus</Link><Button onClick={() => open("connections")}>Open checklist</Button></div></Empty></Card>}
 
@@ -144,11 +144,13 @@ function AgentsAndOutput() {
   const out = useQuery<any>("/outcomes?limit=5", { poll: 4000 });
   const jobs: any[] = o.data?.jobs ?? [];
   const working = jobs.filter((j) => j.area !== "supervisor" && ["running", "waiting", "queued"].includes(j.status) && !j.needsYou);
+  const queuedWaiting = jobs.some((j) => j.status === "queued" && j.queuedMs > 20000);
   const needs = jobs.filter((j) => j.needsYou);
   return (
     <section aria-label="Agents and output" className="grid md:grid-cols-2 gap-4" data-testid="agents-output">
       <Link href="/office" className="rounded-xl border border-line bg-surface metal p-4 hover:border-[#3b434e] transition-colors" data-testid="today-agents">
         <div className="flex items-center gap-2 mb-2"><h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium">Agents</h2><ArrowRight className="size-4 text-muted ml-auto" aria-hidden /></div>
+        {o.data && <p className={cx("text-[13px] mb-2", queuedWaiting ? "text-amber" : "text-muted")} data-testid="worker-health">{queuedWaiting ? "Work is waiting and no worker has picked it up. Start the worker: npm run worker. " : ""}{o.data.runner.message}</p>}
         {!o.data ? <p className="text-[14px] text-muted">Loading…</p> : working.length === 0 && needs.length === 0 ? <p className="text-[15px]">All desks are quiet. Nothing is running.</p> : <ul className="space-y-1.5 text-[15px]">
           {needs.map((j) => <li key={j.id} className="flex gap-2"><Badge tone="amber">needs you</Badge><span className="min-w-0 break-words"><b className="font-medium">{displayName(j.area)}</b> <span className="text-muted">{j.needsYou.text.replace(/^Proposed: /, "")}</span></span></li>)}
           {working.map((j) => <li key={j.id} className="flex gap-2"><Badge tone="accent">working</Badge><span className="min-w-0 break-words"><b className="font-medium">{displayName(j.area)}</b> <span className="text-muted">{j.status === "waiting" ? "waiting on helpers" : (j.stage ?? "starting").toLowerCase()}</span></span></li>)}

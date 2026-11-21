@@ -16,7 +16,7 @@ export function VoiceDock({ course, title = "Ask Jarvis" }: { course?: string | 
   const courses = useQuery<any>("/courses");
   const [selCourse, setSelCourse] = useState<string>(course ?? LS.get("jarvis_course") ?? "");
   const activeCourse = course ?? (selCourse || null);
-  const conv = useQuery<any>(`/assistant/conversation${activeCourse ? `?course=${activeCourse}` : ""}`, { poll: 2000 });
+  const conv = useQuery<any>(`/assistant/conversation${course ? `?course=${course}` : ""}`, { poll: 2000 });   // the conversation is the owner's, not a course's
   const [text, setText] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [mic, setMic] = useState<"off" | "listening">("off");
@@ -87,7 +87,7 @@ export function VoiceDock({ course, title = "Ask Jarvis" }: { course?: string | 
   const send = useAction(async () => {
     const t = text.trim(); if (!t) return;
     stopMic();
-    const r = await api("/assistant/message", { body: { text: t, conversationId: conv.data?.conversation?.id, course: activeCourse ?? undefined, attachmentIds: photos.map((p) => p.id), via: usedMic.current ? "voice" : "text" } });
+    const r = await api("/assistant/message", { body: { text: t, conversationId: conv.data?.conversation?.id, course: course ?? undefined, attachmentIds: photos.map((p) => p.id), via: usedMic.current ? "voice" : "text" } });
     usedMic.current = false;
     spoken.current.add(r.reply.id); sayIt(r.reply.spoken);
     setText(""); setPhotos([]); conv.reload();
@@ -100,7 +100,7 @@ export function VoiceDock({ course, title = "Ask Jarvis" }: { course?: string | 
   return (
     <Card className="p-4 md:p-5 space-y-4" data-testid="voice-dock" aria-label={title}>
       <div className="flex items-center gap-2 flex-wrap">
-        <h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium flex-1">{title}{activeCourse ? ` · ${activeCourse}` : ""}</h2>
+        <h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium flex-1">{title}{course ? ` · ${course}` : ""}</h2>
         <span data-testid="mic-state" role="status" aria-live="polite" className={cx("inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[13px]", mic === "listening" ? "border-[#6b2b25] text-danger bg-[#241211]" : "border-line text-muted")}>
           <span className={cx("size-2 rounded-full", mic === "listening" ? "bg-danger animate-pulse" : "bg-muted")} aria-hidden />{mic === "listening" ? "Microphone on, listening" : "Microphone off"}
         </span>
@@ -110,7 +110,8 @@ export function VoiceDock({ course, title = "Ask Jarvis" }: { course?: string | 
       {!supportsMic && <p className="text-[13px] text-muted">Voice input is not available in this browser, so type below. Everything else works the same.</p>}
 
       <ol className="space-y-2 max-h-[320px] overflow-y-auto scroll-thin pr-1" data-testid="conversation" aria-label="Conversation" aria-live="polite">
-        {msgs.length === 0 && <li className="text-sm text-muted">Try: “Make me a study guide like the last one you did for bio.” Attach photos of your last test first.</li>}
+        {msgs.length === 0 && <li className="text-[15px] text-muted space-y-2"><p>Tell me an outcome, by voice or typing. I will find what applies in the sources you have connected, write it up, check it, and tell you when it is ready. Try:</p>
+          <div className="flex flex-wrap gap-2" data-testid="examples">{["Get me ready for tomorrow", "Pick up where we left off on the pitch and draft my follow-up.", "What did I promise after that meeting?"].map((q) => <button key={q} onClick={() => setText(q)} className="rounded-full border border-line bg-surface2 hover:bg-[#222831] px-3 py-1.5 text-[14px] text-fg text-left">{q}</button>)}</div></li>}
         {msgs.map((m) => <Message key={m.id} m={m} />)}
       </ol>
 
@@ -152,10 +153,11 @@ function Message({ m }: { m: any }) {
       <div className="whitespace-pre-wrap">{m.text}</div>
       {user && m.data?.attachmentIds?.length > 0 && <div className="flex gap-1.5 mt-1.5 flex-wrap">{m.data.attachmentIds.map((id: string) => <img key={id} src={`/api/attachments/${id}/raw`} alt="attached photo" className="size-10 rounded object-cover border border-line" />)}</div>}
       {links && <div className="flex gap-2 mt-2 flex-wrap" data-testid="result-actions">
-        <Link href={links.open} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[14px] bg-accent text-[#04141e] font-medium" data-testid="open-guide"><BookOpen className="size-3.5" />Open guide</Link>
-        <Link href={links.quiz} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[14px] bg-surface2 border border-line" data-testid="quiz-me"><ListChecks className="size-3.5" />Quiz me</Link>
-        <a href={links.pdf} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[14px] bg-surface2 border border-line" data-testid="export-pdf"><FileDown className="size-3.5" />Export PDF</a></div>}
+        <Link href={links.open} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[14px] bg-accent text-[#04141e] font-medium" data-testid="open-guide"><BookOpen className="size-3.5" />{links.label ?? "Open guide"}</Link>
+        {links.quiz && <Link href={links.quiz} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[14px] bg-surface2 border border-line" data-testid="quiz-me"><ListChecks className="size-3.5" />Quiz me</Link>}
+        {links.pdf && <a href={links.pdf} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[14px] bg-surface2 border border-line" data-testid="export-pdf"><FileDown className="size-3.5" />Export PDF</a>}</div>}
       {m.kind === "question" && !m.data?.answered && <AskPanel jobId={m.data.jobId} ask={m.data.ask} />}
+      {m.kind === "goal" && <div className="flex gap-3 flex-wrap mt-1.5 text-[14px]" data-testid="goal-links"><Link href={m.data.path} className="inline-flex items-center gap-1 text-accent underline underline-offset-2" data-testid="goal-result-link"><ExternalLink className="size-3.5" />Open the result page</Link><Link href={m.data.office} className="inline-flex items-center gap-1 text-accent underline underline-offset-2"><ExternalLink className="size-3.5" />Watch it in the Office</Link></div>}
       {m.kind === "ack" && <Link href="/office" className="inline-flex items-center gap-1 mt-1.5 text-[13px] text-accent underline underline-offset-2"><ExternalLink className="size-3" />Watch it work in the Office</Link>}
       {(m.kind === "quiz" || m.kind === "capture") && m.data?.path && <Link href={m.data.path} className="inline-flex items-center gap-1 mt-1.5 text-[13px] text-accent underline underline-offset-2"><ExternalLink className="size-3" />{m.kind === "quiz" ? "Open the quiz" : "Open it"}</Link>}
       <div className="mt-1 text-[12px] text-muted mono">{user ? (m.data?.via === "voice" ? "you · voice" : "you") : "Jarvis"}</div>

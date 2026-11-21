@@ -231,7 +231,7 @@ export function officeState(ctx: Ctx, clock: Clock = real) {
     synthetic: !!j.synthetic, result: j.result, error: j.error, finishedAgoMs: j.finished_at ? now - j.finished_at : null,
     steps: all(ctx.db, "SELECT step,label FROM job_steps WHERE job_id=? ORDER BY done_at", j.id).map((s) => s.label),
     events: jobEvents(ctx, j.id, 10),
-    createdAgoMs: now - j.created_at, parentRole: j.parent_id ? byId.get(j.parent_id)?.role ?? null : null,
+    rootId: j.root_id, requestId: (j.input as any)?.requestId ?? null, createdAgoMs: now - j.created_at, parentRole: j.parent_id ? byId.get(j.parent_id)?.role ?? null : null,
     // Who needs you: a helper stopped on a question, or a finished helper whose decision you have not answered yet.
     needsYou: needsYou(ctx, j),
   }));

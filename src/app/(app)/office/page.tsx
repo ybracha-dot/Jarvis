@@ -31,13 +31,17 @@ function Office() {
   const tpl = useAction(async (id: string, name: string) => api(`/office/jobs/${id}/template`, { body: { name } }));
   const approve = useAction(async (id: string) => { await api(`/office/templates/${id}/approve`, { body: { confirm: true } }); });
   const [tplMsg, setTplMsg] = useState<string | null>(null);
+  const reqParam = sp.get("request");
   useEffect(() => { const c = sp.get("capture"); if (c && !receipt) api(`/captures/${c}`).then(setReceipt).catch(() => {}); }, [sp, receipt]);
 
   const o = q.data;
   if (q.loading && !o) return <Spinner label="Opening the office" />;
   if (q.error && !o) return <ErrorBox error={q.error} onRetry={q.reload} offline={q.error.status === 0} />;
   const jobs: any[] = o.jobs; const active = jobs.filter((j) => !["done", "failed", "cancelled"].includes(j.status));
-  const selected = jobs.find((j) => j.id === sel) ?? null;
+  const fromRequest = reqParam ? jobs.find((j) => j.requestId === reqParam && j.depth === 0) : null;
+  const selected = jobs.find((j) => j.id === (sel ?? fromRequest?.id)) ?? null;
+  const rootOf = (j: any) => j ? (j.depth === 0 ? j : jobs.find((x) => x.id === j.rootId)) : null;
+  const resultId = selected ? (selected.result?.resultId ?? rootOf(selected)?.result?.resultId ?? null) : null;
   const synthetic = jobs.some((j) => j.synthetic);
 
   return (
@@ -49,7 +53,7 @@ function Office() {
 
       <div className={cx("grid gap-5", selected ? "xl:grid-cols-[minmax(0,1fr)_360px]" : "")}>
         <div className="space-y-4 min-w-0">
-          <div className="hidden sm:block"><OfficeScene jobs={jobs as OfficeJob[]} pendingDecisions={o.decisions} selected={sel} onSelect={setSel} onOpenDecision={(id) => open("decision", id)} /></div>
+          <div className="hidden sm:block"><OfficeScene jobs={jobs as OfficeJob[]} pendingDecisions={o.decisions} selected={selected?.id ?? null} onSelect={setSel} onOpenDecision={(id) => open("decision", id)} /></div>
           {synthetic && <Notice>Source events here are synthetic fixtures. The workers handling them are real, and they act only on this example workspace.</Notice>}
           <section aria-label="Roster"><SectionTitle>Roster</SectionTitle>
             <ul className="space-y-2" data-testid="roster">
@@ -68,6 +72,8 @@ function Office() {
             {selected && <>
               <div className="flex items-center gap-2 flex-wrap"><b className="text-sm">{displayName(selected.area)}</b><span className="text-[14px] text-muted">{selected.role}</span><Badge tone={TONE[selected.status]}>{selected.status}</Badge>{selected.synthetic && <Badge tone="amber">synthetic source</Badge>}</div>
               <p className="text-sm break-words">{selected.title}</p>
+              {resultId && <Link href={`/results/${resultId}`} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[14px] bg-accent text-[#04141e] font-medium" data-testid="inspector-open-result"><FileText className="size-4" />Open what it produced</Link>}
+              {!resultId && selected.requestId && <Link href={`/results/res_${String(selected.requestId).slice(4)}`} className="text-[14px] text-accent underline underline-offset-2">Open the request page</Link>}
               <dl className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1.5 text-[14px]">
                 <dt className="text-muted">Assigned by</dt><dd>{selected.parentRole ? `${selected.parentRole === "Supervisor" ? "Jarvis" : selected.parentRole}` : "you (a capture)"}{selected.delegatedBy ? <span className="text-muted"> · {selected.delegatedBy}</span> : null}</dd>
                 <dt className="text-muted">Current step</dt><dd data-testid="inspector-stage">{selected.stage ?? "waiting to start"}{selected.progress ? ` (${selected.progress.done} of ${selected.progress.total})` : ""}</dd>

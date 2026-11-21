@@ -10,18 +10,18 @@ export const ORIGIN: Record<string, string> = { claude: "Claude conversation", "
 
 export default function ProjectsPage() {
   const q = useQuery<any>("/projects", { poll: 4000 });
-  const [name, setName] = useState(""); const [kind, setKind] = useState("trip");
+  const [name, setName] = useState(""); const [kind, setKind] = useState("project");
   const create = useAction(async () => { await api("/projects", { body: { name, kind } }); setName(""); });
   if (q.loading && !q.data) return <Spinner label="Opening projects" />;
   if (q.error && !q.data) return <ErrorBox error={q.error} onRetry={q.reload} offline={q.error.status === 0} />;
   const list: any[] = q.data.projects;
   return (
     <div className="space-y-6">
-      <header><h1 className="text-2xl font-semibold tracking-tight">Projects</h1><p className="text-[15px] text-muted mt-1 max-w-2xl">A project is where Claude and Jarvis keep the same decisions. Plan a trip in Claude, and what you settled shows up here with where it came from.</p></header>
+      <header><h1 className="text-2xl font-semibold tracking-tight">Projects</h1><p className="text-[15px] text-muted mt-1 max-w-2xl">A project is where Claude and Jarvis keep the same decisions. Plan something in Claude, and what you settled shows up here with where it came from.</p></header>
       {list.length === 0 ? (
         <Card className="p-6 metal space-y-3" data-testid="projects-empty">
           <h2 className="text-lg font-medium">No projects yet</h2>
-          <p className="text-[15px] text-muted max-w-xl">Start one here, or in ordinary Claude say: <span className="text-fg">&ldquo;Use Jarvis to start a project called Iceland trip, and note that we picked June 14 to 21.&rdquo;</span> Claude needs the Jarvis connector for that. Open Connections to set it up.</p>
+          <p className="text-[15px] text-muted max-w-xl">Start one here, or in ordinary Claude say: <span className="text-fg">&ldquo;Use Jarvis to start a project called Maple Court project, and note that we picked June 14 to 21.&rdquo;</span> Claude needs the Jarvis connector for that. Open Connections to set it up.</p>
           <Link href="/connections" className="inline-flex items-center gap-1.5 text-accent text-[15px]">Open Connections <ArrowRight className="size-4" /></Link>
         </Card>
       ) : (
@@ -37,7 +37,7 @@ export default function ProjectsPage() {
       <Card className="p-5 space-y-3">
         <h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium">Start a project</h2>
         <div className="grid sm:grid-cols-[1fr_160px_auto] gap-3 items-end">
-          <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Iceland trip" data-testid="project-name" /></Field>
+          <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Maple Court project" data-testid="project-name" /></Field>
           <Field label="Kind"><select className={inputCls} value={kind} onChange={(e) => setKind(e.target.value)}>{["trip", "course", "club", "project", "other"].map((k) => <option key={k}>{k}</option>)}</select></Field>
           <Button variant="primary" busy={create.busy} disabled={name.trim().length < 1} onClick={() => create.run()} data-testid="project-create"><Plus className="size-4" />Create</Button>
         </div>

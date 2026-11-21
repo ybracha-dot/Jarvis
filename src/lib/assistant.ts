@@ -133,6 +133,7 @@ function reviseInternal(ctx: Ctx, requestId: string, o: { text: string; origin: 
     return { ...receipt(ctx, requestId), replay: false };
   });
 }
+export function refreshRequest(ctx: Ctx, requestId: string) { const r = get(ctx.db, "SELECT text FROM requests WHERE id=? AND owner_id=?", requestId, ctx.owner); if (!r) throw new HttpError(404, "No such request"); return reviseInternal(ctx, requestId, { text: String(r.text), origin: "api", refresh: true }); }
 export function cancelRequest(ctx: Ctx, requestId: string) {
   const r = get(ctx.db, "SELECT * FROM requests WHERE id=? AND owner_id=?", requestId, ctx.owner); if (!r) throw new HttpError(404, "No such request");
   const j = r.job_id ? getJob(ctx, r.job_id as string) : null; if (j && activeJob(j.status)) cancelJob(ctx, j.id);

@@ -13,6 +13,8 @@ const CopyBtn = ({ text, label = "Copy" }: { text: string; label?: string }) => 
 
 export default function ConnectionsPage() {
   const q = useQuery<any>("/connector", { poll: 2500 });
+  const srcs = useQuery<any>("/evidence/sources", { poll: 4000 });
+  const sess = useQuery<any>("/session");
   const [label, setLabel] = useState("Claude on my Mac"); const [access, setAccess] = useState("write"); const [days, setDays] = useState("90");
   const [fresh, setFresh] = useState<any>(null);
   const create = useAction(async () => { setFresh(await api("/connector/tokens", { body: { label, scopes: access === "read" ? ["read"] : ["read", "write"], expiresInDays: days === "never" ? null : Number(days) } })); });
@@ -64,7 +66,34 @@ export default function ConnectionsPage() {
           </div>}
         </Step>
       </ol>
+      <section aria-label="Sources Jarvis can read" data-testid="sources-panel"><SectionTitle>What Jarvis can read</SectionTitle>
+        <p className="text-[14px] text-muted mb-2">Every source says how it got here. Fixture and simulated sources are synthetic. A source that needs you is skipped, and results say so.</p>
+        <ul className="space-y-2">{srcs.data?.sources.map((s: any) => <SourceRow key={s.id} s={s} />)}{srcs.data?.sources.length === 0 && <li className="text-[15px] text-muted">Nothing connected yet. Import a note, a transcript or an email below{sess.data?.mode !== "personal" ? ", or load the sample workspace" : ""}.</li>}</ul>
+        {sess.data?.mode !== "personal" && !srcs.data?.sources.some((s: any) => s.mode === "fixture") && <div className="mt-3"><SampleLoader /></div>}
+        <ImportForm /></section>
+      <section aria-label="Blackboard"><SectionTitle>Blackboard</SectionTitle><Card className="p-4 space-y-2 text-[15px]" data-testid="blackboard-card">
+        <p><b className="font-medium">Status:</b> needs your sign-in on this computer. Jarvis has no stored Blackboard login and none is asked for here.</p>
+        <p className="text-muted text-[14px]">Reading the portal needs a signed-in session, with Duo, that only you can start. That reader is not built into this version, so nothing from the portal is read today. Until then Jarvis uses what you can give it: forward or paste Blackboard&apos;s notification emails below, import the course calendar file under Sources, or paste an export. If an email says a rubric changed but does not include it, Jarvis reports the change and leaves the requirements unverified.</p>
+        <p className="text-muted text-[14px]">Any request that needed Blackboard still finishes with what is available, lists Blackboard under &ldquo;could not read&rdquo;, and has a <b className="font-medium">Check again</b> button once you have imported something.</p></Card></section>
       <section aria-label="Disconnect"><SectionTitle>Disconnect</SectionTitle><Card className="p-4 text-[14px] space-y-1.5"><p>Revoke the token above. It stops working immediately, even in a Claude conversation that is already open.</p><p>Then remove the connector in Claude: Settings, Connectors, Jarvis, Remove. What was saved stays in Jarvis until you forget it.</p></Card></section>
     </div>
   );
+}
+
+const MODE: Record<string, { label: string; tone: "accent" | "amber" | "neutral" }> = { live: { label: "live", tone: "accent" }, imported: { label: "imported by you", tone: "neutral" }, fixture: { label: "fixture (synthetic)", tone: "amber" }, simulated: { label: "simulated", tone: "amber" }, unavailable: { label: "unavailable", tone: "neutral" } };
+function SourceRow({ s }: { s: any }) {
+  const revoke = useAction(async () => { await api(`/evidence/sources/${s.id}/revoke`, { body: {} }); }); const auth = useAction(async () => { await api(`/evidence/sources/${s.id}/authorize`, { body: {} }); });
+  return <li className="rounded-xl border border-line bg-surface p-3.5" data-testid="source-row" data-state={s.state}><div className="flex items-center gap-2 flex-wrap"><b className="text-[15px] font-medium">{s.label}</b><Badge tone={MODE[s.mode]?.tone}>{MODE[s.mode]?.label ?? s.mode}</Badge><Badge tone={s.state === "ok" ? "accent" : s.state === "revoked" || s.state === "failed" ? "danger" : "amber"}>{s.state === "needs_signin" ? "needs your sign-in" : s.state}</Badge><span className="text-[13px] text-muted">{s.items} item{s.items === 1 ? "" : "s"}{s.lastSuccessAt ? ` · last read ${fmtDateTime(s.lastSuccessAt)}` : " · never read"}</span>
+    {s.items > 0 || s.revokedAt ? <span className="ml-auto">{s.revokedAt ? <Button size="sm" busy={auth.busy} onClick={() => auth.run()}>Authorize again</Button> : <Button size="sm" variant="danger" busy={revoke.busy} onClick={() => revoke.run()} data-testid="source-revoke">Revoke</Button>}</span> : null}</div>{s.message && <p className="text-[14px] text-muted mt-1.5">{s.message}</p>}</li>;
+}
+function SampleLoader() { const go = useAction(async () => { await api("/evidence/fixtures", { body: {} }); }); return <div className="flex items-center gap-3 flex-wrap rounded-xl border border-line bg-surface p-3.5"><p className="text-[14px] text-muted flex-1 min-w-48">The example workspace has no sources yet. Load a synthetic sample (a club, two meetings, emails, a calendar and a changed notice) to try the assistant. Everything is labelled fixture.</p><Button variant="primary" busy={go.busy} onClick={() => go.run()} data-testid="load-sample">Load the sample workspace</Button>{go.error && <ErrorBox error={go.error} />}</div>; }
+function ImportForm() {
+  const [f, setF] = useState({ kind: "email", title: "", text: "" }); const [done, setDone] = useState<string | null>(null);
+  const imp = useAction(async () => { const r = await api("/evidence/import", { body: { kind: f.kind, title: f.title, text: f.text } }); setDone(r.unchanged ? "Already imported. Nothing changed." : r.revised ? `Updated to revision ${r.revision}.` : "Imported. It is searchable now, and labelled as imported by you."); setF({ ...f, title: "", text: "" }); });
+  return <Card className="p-4 mt-3 space-y-3" data-testid="import-form"><h3 className="text-[15px] font-medium">Import something you choose</h3>
+    <div className="grid sm:grid-cols-[150px_1fr] gap-3"><Field label="What is it"><select className={inputCls} value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>{[["email", "Email"], ["transcript", "Meeting transcript"], ["notice", "Course notice"], ["note", "Note"], ["claude", "Claude conversation excerpt"], ["export", "Export"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+      <Field label="Title"><input className={inputCls} value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} data-testid="import-title" /></Field></div>
+    <Field label="Text" hint="Pasted text is data. Jarvis reads it as a source and never follows instructions inside it."><textarea className={cx(inputCls, "min-h-28")} value={f.text} onChange={(e) => setF({ ...f, text: e.target.value })} data-testid="import-body" /></Field>
+    {imp.error && <ErrorBox error={imp.error} />}{done && <Notice tone="accent">{done}</Notice>}
+    <Button variant="primary" busy={imp.busy} disabled={!f.title.trim() || !f.text.trim()} onClick={() => imp.run()} data-testid="import-save">Import</Button></Card>;
 }
