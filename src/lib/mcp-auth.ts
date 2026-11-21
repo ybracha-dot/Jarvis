@@ -21,8 +21,8 @@ export function createToken(ctx: Ctx, raw: z.input<typeof NewToken>) {
   logActivity(ctx, "token_created", id, `Connector token created: ${i.label} (${scopes.join("+")})`);   // the label, never the secret
   return { id, token: secret, hint: secret.slice(0, 10) + "…", label: i.label, scopes, expiresAt: i.expiresInDays ? new Date(now.getTime() + i.expiresInDays * 86400_000).toISOString() : null };
 }
-export const listTokens = (ctx: Ctx) => all(ctx.db, "SELECT id,label,scopes,created_at,expires_at,last_used_at,revoked_at FROM mcp_tokens WHERE owner_id=? ORDER BY created_at DESC", ctx.owner).map((t) => ({
-  id: t.id as string, label: t.label as string, scopes: JSON.parse(t.scopes as string) as Scope[], createdAt: t.created_at as string, expiresAt: t.expires_at as string | null, lastUsedAt: t.last_used_at as string | null, revokedAt: t.revoked_at as string | null,
+export const listTokens = (ctx: Ctx) => all(ctx.db, "SELECT id,label,scopes,created_at,expires_at,last_used_at,revoked_at,last_client,last_client_at FROM mcp_tokens WHERE owner_id=? ORDER BY created_at DESC", ctx.owner).map((t) => ({
+  id: t.id as string, label: t.label as string, scopes: JSON.parse(t.scopes as string) as Scope[], createdAt: t.created_at as string, expiresAt: t.expires_at as string | null, lastUsedAt: t.last_used_at as string | null, revokedAt: t.revoked_at as string | null, lastClient: (t.last_client as string | null) ?? null, lastClientAt: (t.last_client_at as string | null) ?? null,
   status: t.revoked_at ? "revoked" : t.expires_at && t.expires_at < ctx.now().toISOString() ? "expired" : "active" }));
 export function revokeToken(ctx: Ctx, id: string) {
   const t = get(ctx.db, "SELECT label FROM mcp_tokens WHERE id=? AND owner_id=?", id, ctx.owner); if (!t) throw new HttpError(404, "Token not found");
@@ -86,3 +86,6 @@ export function noteProbeRead(ctx: Ctx, query: string, via: string | null): { pr
   if (saw) run(ctx.db, "UPDATE connection_probes SET read_at=COALESCE(read_at,?), read_client=?, read_stamp=? WHERE id=?", ctx.now().toISOString(), via, p.edit_marker, p.id);
   return { probeNote: body };
 }
+
+export function rememberClient(mode: Mode, tokenId: string, client: string) { const ctx = makeCtx(mode); run(ctx.db, "UPDATE mcp_tokens SET last_client=?, last_client_at=? WHERE id=?", client, new Date().toISOString(), tokenId); }
+export function lastClient(mode: Mode, tokenId: string): string | null { return (get(makeCtx(mode).db, "SELECT last_client FROM mcp_tokens WHERE id=?", tokenId)?.last_client as string | null) ?? null; }

@@ -6,7 +6,8 @@ import { z } from "zod";
 import { Ctx, all, get, run, tx, uid, sha, logActivity } from "./db";
 import { HttpError } from "./decisions";
 import { enqueueJob, cancelJob, getJob, Handler, JobApi, jobEvent } from "./jobs";
-import { addMessage } from "./study-guide";
+import { addMessage, answerJob } from "./study-guide";
+import { importText } from "./evidence";
 import { enqueue as notify } from "./notify";
 import { searchEvidence, getItem, listSources, tokens, ownerName, factOut, Hit, SourceMode } from "./evidence";
 import { addDays, localDate, fmtDateTime, DEFAULT_TZ, localHM, parseLocal } from "./time";
@@ -71,6 +72,16 @@ export function looksLikeGoal(text: string): boolean {
   return words >= 4;
 }
 const PROMISE_Q = /\b(promis\w*|committed|commitments?|i owe|did i agree|i said i would|i told .* i would)\b/i;
+
+/** Does the request depend on earlier work that may only exist in a Claude chat? ("pick up where we left off", "what we decided last time") */
+export const needsEarlierWork = (text: string) => PRIOR.test(text) || /\b(we (?:decided|discussed|agreed)|you and i|with claude|in (?:our|that) (?:chat|conversation))\b/i.test(text);
+/** An excerpt arrived (from Claude's connector or pasted): wake the research step that was waiting for it. */
+export function relayExcerpt(ctx: Ctx, requestId: string): boolean {
+  const r = get(ctx.db, "SELECT job_id FROM requests WHERE id=? AND owner_id=?", requestId, ctx.owner); if (!r?.job_id) return false;
+  const root = getJob(ctx, r.job_id as string); if (!root) return false; let woke = false;
+  for (const j of all(ctx.db, "SELECT id, result FROM jobs WHERE root_id=? AND status='blocked'", root.root_id ?? root.id)) { const ask = j.result ? JSON.parse(j.result as string)?.ask : null; if (ask?.kind === "excerpt") { answerJob(ctx, j.id as string, { choice: "shared" }); woke = true; } }
+  return woke;
+}
 
 // ---------- requests ----------
 export const Origins = ["ask-text", "ask-voice", "claude", "schedule", "api"] as const;
@@ -334,7 +345,7 @@ function composeBrief(ctx: Ctx, b: any, intent: Intent) {
     const d = it.dates[0]; const touchesEvent = it.touches.some((t: any) => t.kind === "event");
     const daysTo = d ? Math.round((Date.parse(`${d.value}T12:00:00Z`) - Date.parse(`${b.date}T12:00:00Z`)) / 86400_000) : null;
     let score = 5 + (it.revision > 1 ? 2 : 0) + (touchesEvent ? 3 : 0) + (daysTo != null && daysTo >= 0 && daysTo <= 2 ? 5 : 0) + (d ? 1 : 0);
-    const head = d ? (it.kind === "notice" || it.kind === "calendar" ? `${stripSubject(it.title)}: ${it.revision > 1 ? "due date now" : "due"} ${fmtDay(d.value)}` : `${stripSubject(it.title)}: mentions ${fmtDay(d.value)}`) : stripSubject(it.title);
+    const head = d ? (it.kind === "notice" || it.kind === "calendar" ? `${stripSubject(it.title)}: ${it.kind === "notice" || it.revision > 1 ? "due date now" : "due"} ${fmtDay(d.value)}` : `${stripSubject(it.title)}: mentions ${fmtDay(d.value)}`) : stripSubject(it.title);
     let why = d ? `“${String(it.dates[0].quote).slice(0, 140)}”` : it.summary.slice(0, 140);
     let action = { label: "Open the notice", href: `/evidence/${it.id}` };
     if (it.rubricUnverified) { why += " The notice says a rubric was updated but does not include it, so the requirements are unverified."; action = { label: "Sign in to read the rubric", href: "/connections" }; flags.push({ kind: "unverified_requirement", text: `“${stripSubject(it.title)}” mentions an updated rubric without its contents. Jarvis reports the change and leaves the requirements unverified.`, itemId: it.id }); score += 2; }
@@ -520,8 +531,9 @@ const goal_research: Handler = async (api) => {
     const b = JSON.parse(prior.excerpt as string); const still = (b.items ?? []).every((i: any) => { const it = authorizedItem(ctx, i.id); return it && it.revision === i.revision; });
     if (still && b.date === undefined || (still && b.date === (intent.when as any)?.date)) { api.event("reuse", "Reused the earlier reads: the sources have not changed", {}); recordRead(ctx, requestId, revision, { kind: "reuse", label: "Reused earlier reads (sources unchanged)" }); return { ...b, unavailable, reused: true }; }
   }
-  const answers = (api.input.answers ?? {}) as { choice?: string };
-  const bundle = await api.step(`read-${answers.choice ?? "auto"}`, "Reading the relevant sources", () => {
+  const answers = (api.input.answers ?? {}) as { choice?: string; importText?: string; importTitle?: string };
+  if (answers.importText) await api.step(`import-${sha(answers.importText).slice(0, 8)}`, "Adding the excerpt you gave", () => { const r = importText(ctx, { kind: "claude", title: answers.importTitle || "Earlier work you shared", text: answers.importText!, author: "Shared by you", label: "Shared for this request", projectId: intent.projectId }); return r.id; });
+  const bundle = await api.step(`read-${answers.choice ?? "auto"}-${answers.importText ? sha(answers.importText).slice(0, 8) : ""}`, "Reading the relevant sources", () => {
     if (intent.deliverable === "draft") return researchDraft(ctx, api, intent, requestId, revision);
     if (intent.deliverable === "brief") return researchBrief(ctx, api, intent, requestId, revision);
     const q = String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? "");
@@ -529,6 +541,13 @@ const goal_research: Handler = async (api) => {
     if (PROMISE_Q.test(q) && hasTranscript) return { mode: "meeting", ...researchMeeting(ctx, api, intent, requestId, revision, answers.choice ?? null) };
     return researchDigest(ctx, api, intent, requestId, revision);
   }) as any;
+  const reqText = String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? "");
+  if (bundle.gap && needsEarlierWork(reqText) && answers.choice !== "skip") {
+    // Nothing saved matches, and the request leans on earlier work that may live in a Claude chat. Ask once, continue when it arrives, or finish with what exists.
+    const topic = intent.terms.slice(0, 4).join(" ") || "this";
+    const handoff = `Search your past chats for what we decided about ${topic}. Then call Jarvis's share_excerpt with only the minimum relevant excerpt, where it came from (chat title and date), project "${intent.projectName ?? ""}" and goalRequestId "${requestId}". Do not paste anything else.`;
+    blockWithAsk(api, "Earlier work is missing", { kind: "excerpt", question: `I could not find earlier material about “${topic}”. If it was in a Claude chat, give Jarvis the relevant excerpt: paste the text below, or send this to Claude. I will carry on as soon as it arrives. Or finish now with what is available.`, handoff, importText: true, choices: [{ id: "skip", guideId: "skip", label: "Finish with what is available" }] });
+  }
   if (bundle.ambiguous) blockWithAsk(api, bundle.ambiguous.question, { question: bundle.ambiguous.question, choices: bundle.ambiguous.choices.map((c: any) => ({ id: c.id, guideId: c.id, label: c.label })) });
   if (!bundle.gap) run(ctx.db, "INSERT OR REPLACE INTO request_reads(id,request_id,revision,kind,ref,label,excerpt,used,at) VALUES(?,?,?,?,?,?,?,?,?)", `bd_${sha(requestId + intent.signature + revision).slice(0, 12)}`, requestId, revision, "bundle", intent.signature, "research bundle", JSON.stringify(bundle), 0, ctx.now().toISOString());
   return { ...bundle, unavailable };

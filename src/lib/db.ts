@@ -250,6 +250,9 @@ CREATE TABLE result_drafts(
 ALTER TABLE evidence_items ADD COLUMN corrects TEXT;
 ALTER TABLE mcp_tokens ADD COLUMN last_client TEXT;
 ALTER TABLE mcp_tokens ADD COLUMN last_client_at TEXT;
+CREATE TABLE roundtrips(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, code TEXT NOT NULL UNIQUE, project_id TEXT NOT NULL, project_name TEXT NOT NULL, value_a TEXT NOT NULL, value_b TEXT NOT NULL, created_at TEXT NOT NULL,
+  written_at TEXT, written_client TEXT, fact_id TEXT, edited_at TEXT, read_at TEXT, read_client TEXT, read_saw TEXT, read_origin TEXT);
 CREATE TABLE feed_state(source_id TEXT PRIMARY KEY REFERENCES evidence_sources(id), etag TEXT, last_modified TEXT, last_status TEXT, checked_at TEXT);
 `,
 ];

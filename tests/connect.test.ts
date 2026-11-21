@@ -3,13 +3,13 @@ import { tmpDataDir } from "./helpers";
 import { closeDb, makeCtx, all } from "@/lib/db";
 import { createToken, listTokens, revokeToken, rotateToken, verifyToken, startProbe, probeState, editProbe } from "@/lib/mcp-auth";
 
-async function connect(token: string | null, host = "127.0.0.1:3000") {
+async function connect(token: string | null, host = "127.0.0.1:3000", clientName = "ordinary-claude-emulator") {
   const { POST } = await import("@/app/mcp/route");
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
   const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
   const f: typeof fetch = async (url, init) => { const h = new Headers(init?.headers); h.set("host", host); return POST(new Request(String(url), { ...init, headers: h })); };
   const transport = new StreamableHTTPClientTransport(new URL("http://127.0.0.1:3000/mcp"), { fetch: f, requestInit: token ? { headers: { authorization: `Bearer ${token}` } } : undefined });
-  const client = new Client({ name: "ordinary-claude-emulator", version: "1" }); await client.connect(transport);
+  const client = new Client({ name: clientName, version: "1" }); await client.connect(transport);
   const call = async (name: string, args: any) => { const r: any = await client.callTool({ name, arguments: args }); return { isError: !!r.isError, json: r.isError ? r.content[0].text : JSON.parse(r.content[0].text) }; };
   return { client, call };
 }
@@ -127,5 +127,32 @@ describe("the same work from ordinary Claude (official MCP client over the authe
     const w = await connect(rw.token); const sh = (await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "Lantern Club", dedupKey: "x1" })).json;
     expect(sh).toMatchObject({ saved: true }); expect((await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "Lantern Club", dedupKey: "x1" })).json.unchanged).toBe(true);
     expect((await w.call("search_evidence", { query: "pilot checkpoint venue" })).json.hits[0].source).toMatch(/Shared from Claude/);
+  });
+});
+
+
+import { startRoundTrip, roundTripState, editRoundTrip } from "@/lib/roundtrip";
+describe("round trip with Claude: write, change in Jarvis, fresh read", () => {
+  const trip = async (clientName: string) => {
+    const ctx = fresh(); const t = createToken(ctx, { label: "Claude" }); const rt = startRoundTrip(ctx, { project: "Garden co-op" });
+    expect(rt.say.write).toContain(rt.valueA); expect(rt.say.write).toContain("apply_project_update"); expect(rt.say.read).toContain("get_project_context");
+    const early = await connect(t.token, "127.0.0.1:3000", clientName); expect(() => editRoundTrip(ctx, rt.id)).toThrow(/Do step 1 first/);
+    await early.call("get_project_context", { project: "Garden co-op" }); expect(roundTripState(ctx)!.read).toBeNull();                         // a read before the change is not step 3
+    expect((await early.call("apply_project_update", { project: "Garden co-op", eventId: `${rt.code}-1`, changes: [{ op: "decide", key: "roundtrip-check", text: rt.valueA }] })).json.saved).toBe(true);
+    expect(roundTripState(ctx)!.written).toMatchObject({ client: expect.stringContaining(clientName) }); expect(roundTripState(ctx)!.complete).toBe(false);
+    await early.client.close();
+    const edited = editRoundTrip(ctx, rt.id); expect(edited.edited).not.toBeNull(); expect(edited.complete).toBe(false);
+    const fresh2 = await connect(t.token, "127.0.0.1:3000", clientName);                                                                            // a fresh chat
+    const got = (await fresh2.call("get_project_context", { project: "Garden co-op" })).json; expect(got.current.find((f: any) => f.key === "roundtrip-check")).toMatchObject({ text: rt.valueB, origin: "jarvis-ui" });
+    return roundTripState(ctx)!;
+  };
+  it("completes only after write, edit and a read that sees the edit, and says whether it was a Claude client or a test client", async () => {
+    const test = await trip("ordinary-claude-emulator"); expect(test.complete).toBe(true); expect(test.written!.kind).toBe("test"); expect(test.verdict).toMatch(/local test client.*does not prove your Claude account/);
+    const claude = await trip("claude-ai"); expect(claude.complete).toBe(true); expect(claude.read).toMatchObject({ kind: "claude", sawChange: true, origin: "jarvis-ui" }); expect(claude.verdict).toMatch(/reported themselves as Claude.*cannot verify an account/);
+    expect(claude.written!.at <= claude.read!.at).toBe(true);
+  });
+  it("the token list shows which client last used it, as reported", async () => {
+    const ctx = fresh(); const t = createToken(ctx, { label: "Claude" }); const c = await connect(t.token, "127.0.0.1:3000", "claude-ai"); await c.call("get_goal", {});
+    expect(listTokens(ctx)[0].lastClient).toBe("claude-ai 1");
   });
 });

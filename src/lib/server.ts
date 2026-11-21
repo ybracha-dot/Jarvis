@@ -24,6 +24,7 @@ import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJ
 import { outcomes } from "./outcomes";
 import { submitGoal, GoalInput as AssistantGoalInput, receipt as goalReceipt, reviseRequest, refreshRequest, cancelRequest, resumeRequest, resultView, editDraft, listResults, listRequests, readsFor } from "./assistant";
 import { listSources, getItem, importText, revokeSource, reauthorizeSource, forgetItem, searchEvidence, listItems, tokens, SOURCE_KINDS } from "./evidence";
+import { startRoundTrip, roundTripState, editRoundTrip } from "./roundtrip";
 import { blackboardStatus, readFeed, saveFeed, removeFeed } from "./blackboard";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
@@ -155,6 +156,9 @@ on("POST", "/projects/facts/:id/resolve", (c, r) => resolveSuggestion(c, r.param
 on("POST", "/projects/events/:id/undo", (c, r) => undoEvent(c, r.params.id));
 on("GET", "/profile", (c) => ({ ownerName: getSetting<string>(c.db, "owner_name", "Yonathan") }));
 on("POST", "/profile", (c, r) => { const n = r.json(z.object({ ownerName: z.string().trim().min(1).max(60) })).ownerName; setSetting(c.db, "owner_name", n); return { ownerName: n }; });
+on("GET", "/roundtrip", (c) => ({ trip: roundTripState(c) }));
+on("POST", "/roundtrip", (c, r) => startRoundTrip(c, r.json(z.object({ project: z.string().min(2).max(120) }))));
+on("POST", "/roundtrip/:id/edit", (c, r) => editRoundTrip(c, r.params.id));
 on("GET", "/connector", (c) => ({ tokens: listTokens(c), probe: probeState(c), envToken: !!process.env.JARVIS_MCP_TOKEN, publicUrl: process.env.JARVIS_PUBLIC_URL ?? null, ingress: process.env.JARVIS_PUBLIC_MODE === "mcp-only" ? "mcp-only" : "full", mode: c.mode }));
 on("POST", "/connector/tokens", (c, r) => createToken(c, r.json(NewToken)));
 on("POST", "/connector/tokens/:id/revoke", (c, r) => revokeToken(c, r.params.id));

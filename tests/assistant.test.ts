@@ -318,3 +318,30 @@ describe("model-assisted judgment: only for what the rules cannot settle, and on
     expect(m.calls.length).toBe(0); expect(v.mode).toMatch(/local-only/); setDecisionTransport(undefined);
   });
 });
+
+import { TOOLS } from "@/lib/agent";
+import { answerJob } from "@/lib/study-guide";
+describe("a missing earlier Claude conversation: ask once, relay the excerpt into the same job", () => {
+  const blocked = (ctx: any) => get(ctx.db, "SELECT * FROM jobs WHERE status='blocked'")!;
+  it("asks for the earlier work with a ready-to-send handoff, and a connector excerpt resumes the same request", async () => {
+    const { ctx, clock } = bare(); const r: any = await ask(ctx, clock, "Pick up where we left off on the garden swap and draft my follow-up.");
+    const rid = r.reply.data.requestId; expect(receipt(ctx, rid)).toMatchObject({ status: "blocked", ready: false });
+    const ask_ = JSON.parse(blocked(ctx).result as string).ask; expect(ask_.kind).toBe("excerpt"); expect(ask_.handoff).toMatch(/share_excerpt/); expect(ask_.handoff).toContain(`goalRequestId "${rid}"`); expect(ask_.choices[0].label).toMatch(/Finish with what is available/);
+    const share = TOOLS.find((t) => t.name === "share_excerpt")!;
+    const out: any = share.run(ctx, share.schema.parse({ excerpt: "Dana Reyes: We decided to hold the garden swap on Wednesday because the hall is free then. I'll book the hall.", origin: "Claude chat 'Garden swap', Nov 10", goalRequestId: rid })); expect(out.saved).toBe(true);
+    await processQueue(ctx, base(clock)); const v: any = resultView(ctx, r.reply.data.resultId);
+    expect(receipt(ctx, rid).ready).toBe(true); expect(v.version).toBe(1); expect(v.body).toMatch(/Wednesday/); expect(v.sources.some((s: any) => /Claude/.test(s.title) || /Claude/.test(s.sourceLabel))).toBe(true);
+    expect(count(ctx, "results")).toBe(1); expect(count(ctx, "requests")).toBe(1);                                       // the same request, not a new one
+  });
+  it("pasted text in Jarvis does the same, and 'finish with what is available' ends it with the gap stated", async () => {
+    const a = bare(); const ra: any = handleUtterance(a.ctx, { text: "Pick up where we left off on the garden swap and draft my follow-up.", via: "text" }); await processQueue(a.ctx, base(a.clock));
+    answerJob(a.ctx, blocked(a.ctx).id as string, { importText: "Dana Reyes: We decided on Thursday for the garden swap because the hall is free.", importTitle: "Pasted chat" }); await processQueue(a.ctx, base(a.clock));
+    expect((resultView(a.ctx, ra.reply.data.resultId) as any).body).toMatch(/Thursday/);
+    const b = bare(); const rb: any = handleUtterance(b.ctx, { text: "Pick up where we left off on the garden swap and draft my follow-up.", via: "text" }); await processQueue(b.ctx, base(b.clock));
+    answerJob(b.ctx, blocked(b.ctx).id as string, { choice: "skip" }); await processQueue(b.ctx, base(b.clock)); const vb: any = resultView(b.ctx, rb.reply.data.resultId);
+    expect(vb.body).toMatch(/Nothing saved matches/); expect(receipt(b.ctx, rb.reply.data.requestId).ready).toBe(true);
+  });
+  it("an excerpt that was never shared is not assumed to exist: with no earlier-work wording the request just reports the gap", async () => {
+    const { ctx, clock } = bare(); const r: any = await ask(ctx, clock, "What did my landlord say about the deposit?"); expect(receipt(ctx, r.reply.data.requestId)).toMatchObject({ status: "done", ready: true }); expect((resultView(ctx, r.reply.data.resultId) as any).body).toMatch(/Nothing saved matches/);
+  });
+});
