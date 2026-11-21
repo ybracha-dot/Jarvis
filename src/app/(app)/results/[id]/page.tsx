@@ -50,7 +50,7 @@ function Result({ id }: { id: string }) {
       {d.stale && <Notice>This version is out of date: {d.stale} Ask again to rebuild it from what is still authorized.</Notice>}
       {d.body && <section aria-label={KIND[d.kind]} className="rounded-2xl border border-line bg-surface metal p-5 md:p-6 space-y-1" data-testid="result-body">
         <div className="flex items-center gap-2 mb-2"><h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium flex-1">{KIND[d.kind]}. Nothing has been sent.</h2><Button size="sm" onClick={copy}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />}{copied ? "Copied" : "Copy"}</Button></div>
-        {d.analysis?.type === "table" ? <><TableView a={d.analysis} />{render(d.body.split("\n").filter((l: string) => !/^\|/.test(l) && l !== "**Handoff table**").join("\n").trim())}</> : render(d.body)}</section>}
+        {d.analysis?.type === "table" && d.analysis.form === "table" && d.analysis.rows.length > 0 ? <><TableView a={d.analysis} />{render(d.body.split("\n").filter((l: string) => !/^\|/.test(l) && l !== "**Handoff table**").join("\n").trim())}</> : render(d.body)}</section>}
       {d.analysis && d.analysis.type !== "table" && <Calculation a={d.analysis} />}
       {d.analysis && !d.draft && d.analysis.recommendation.nextAction && d.analysis.recommendation.nextAction.kind !== "none" && d.analysis.recommendation.kind !== "insufficient" && !(d.analysis.type === "plan" && d.analysis.recommendation.nextAction.kind === "ask_missing") && <div><Button busy={revise.busy} onClick={() => { setInstr("Draft it please."); revise.run(); }} data-testid="prepare-draft">Prepare the draft for that next step</Button></div>}
       {d.draft && <DraftEditor id={d.id} draft={d.draft} version={d.version} />}

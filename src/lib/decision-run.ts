@@ -7,7 +7,7 @@ import { Router, RouterError, Transport, defaultTransport } from "./router";
 import { analyze, itemInFrom, ItemIn, Analysis, fmtMoney, fmtDate, Term, OptionResult } from "./decision";
 import { getItem, ownerName } from "./evidence";
 import { analyzePlan, PlanAnalysis, PlanRow } from "./plan";
-import { buildTaskTable, tableMarkdown, tableTsv, TableAnalysis, Cite, TableSpec } from "./ledger";
+import { buildTaskTable, tableMarkdown, tableTsv, checklistMarkdown, TableAnalysis, Cite, TableSpec } from "./ledger";
 
 export interface SrcRef { itemId: string; revision: number; title: string; kind: string; at: string; sourceLabel: string; mode: string; role: string; quote: string }
 export const DECISION_Q = /\b(which|who)\b[^.?!]*\b(should|go with|choose|pick|hire|book|take|best)\b|\bshould i (go with|choose|pick|take|hire|book|buy|use)\b|\b(compare|recommend|recommendation|decide|decision|cheapest|best option|better option|trade-?offs?|worth it|which one|which of)\b/i;
@@ -183,25 +183,31 @@ function buildPlanDraft(p: PlanAnalysis, request: string, me: string, items: Ite
 // ---------- a table of open work, built from the notes ----------
 const citeJson = (c: Cite) => ({ itemId: c.src.itemId, title: c.src.title, at: c.src.at, quote: c.quote, role: c.role });
 function tableJson(t: TableAnalysis, itemIds: string[], headline: string) {
-  return { version: 1, type: "table" as const, itemIds, columns: t.columns, keys: t.keys, rows: t.rows.map((r) => ({ cells: r.cells, task: r.task, cites: r.cites.map(citeJson) })), leftOut: t.leftOut.map((l) => ({ text: l.text, reason: l.reason, cites: l.cites.map(citeJson) })), notes: t.notes, missingColumns: t.missingColumns, openCount: t.openCount, markdown: tableMarkdown(t), tsv: tableTsv(t),
-    recommendation: { kind: "recommend" as const, option: null, label: null, headline, tradeoff: [] as string[], question: null, nextAction: { kind: "none", text: "Paste the table where you need it." }, basis: [] as string[], qualifiers: [] as string[] } };
+  return { version: 1, type: "table" as const, form: t.form, itemIds, columns: t.columns, keys: t.keys, rows: t.rows.map((r) => ({ cells: r.cells, task: r.task, owner: r.owner, cites: r.cites.map(citeJson) })), leftOut: t.leftOut.map((l) => ({ text: l.text, reason: l.reason, cites: l.cites.map(citeJson) })), notes: t.notes, unparsed: t.unparsed.map((u) => ({ text: u.text, title: u.src.title })), missingColumns: t.missingColumns, openCount: t.openCount, taskCount: t.taskCount, addedTaskColumn: t.addedTaskColumn, markdown: t.form === "checklist" ? checklistMarkdown(t) : tableMarkdown(t), tsv: tableTsv(t),
+    recommendation: { kind: "recommend" as const, option: null, label: null, headline, tradeoff: [] as string[], question: null, nextAction: { kind: "none", text: "Paste it where you need it." }, basis: [] as string[], qualifiers: [] as string[] } };
 }
 export type TableJson = ReturnType<typeof tableJson>;
-export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?: boolean }, request: string, wish: TableSpec, o: { applied: string[]; unapplied: string[] }): DecisionOut | null {
+export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?: boolean }, request: string, wish: TableSpec, o: { applied: string[]; unapplied: string[] }): DecisionOut | { reason: string } {
   const ids = [...new Set(b.items.map((i) => i.id))]; const items = toItems(ctx, ids);
-  const t = buildTaskTable(items, wish); if (!t.rows.length) return null;
+  const t = buildTaskTable(items, wish);
+  if (!t.taskCount) return { reason: `No task could be read from the notes, so no ${wish.form === "checklist" ? "checklist" : "table"} was built and nothing was invented.${t.unparsed.length ? ` Sentences I did not understand: ${t.unparsed.slice(0, 4).map((u) => `“${u.text}”`).join(" ")}` : ""}` };
   const sources: SrcRef[] = []; const flags: any[] = [];
   const addSrc = (c: Cite, role: string) => { if (!sources.some((x) => x.itemId === c.src.itemId && x.quote === c.quote && x.role === role)) sources.push({ itemId: c.src.itemId, revision: c.src.revision, title: c.src.title, kind: c.src.kind, at: c.src.at, sourceLabel: c.src.sourceLabel, mode: c.src.mode, role, quote: c.quote }); };
-  for (const r of t.rows) for (const c of r.cites) addSrc(c, `${r.cells[0] && t.keys[0] === "owner" ? r.cells[0] + ": " : ""}${r.task} (${c.role})`);
+  for (const r of t.rows) for (const c of r.cites) addSrc(c, `${r.owner ? r.owner + ": " : ""}${r.task} (${c.role})`);
   for (const l of t.leftOut) for (const c of l.cites.slice(-1)) addSrc(c, `left out: ${l.text}`);
-  const lines = [`**Handoff table**`, "", tableMarkdown(t), ""];
+  for (const u of t.unparsed) addSrc({ src: items.find((i) => i.itemId === u.src.itemId) ?? (u.src as any), quote: u.text, role: "not applied" }, "not applied");
+  const lines: string[] = [];
+  if (!t.rows.length) lines.push(`**No open tasks**`, "", `All ${t.taskCount} task${t.taskCount === 1 ? "" : "s"} in the notes are complete, so there is nothing to hand off.`, "");
+  else if (t.form === "checklist") lines.push(`**Checklist**`, "", checklistMarkdown(t), "");
+  else lines.push(`**Handoff table**`, "", tableMarkdown(t), "");
   const ch = t.leftOut.filter((l) => l.reason.startsWith("handed over")); const done = t.leftOut.filter((l) => l.reason === "complete");
-  if (done.length || ch.length) { lines.push("**Left out or changed**", ""); for (const l of done) lines.push(`- ${l.text}: complete, so it has no row.`); for (const l of ch) lines.push(`- ${l.text}.`); lines.push(""); }
+  if (done.length || ch.length) { lines.push("**Left out or changed**", ""); for (const l of done) lines.push(`- ${l.text}: complete, so it has no ${t.form === "checklist" ? "item" : "row"}.`); for (const l of ch) lines.push(`- ${l.text}.`); lines.push(""); }
   if (t.notes.length) lines.push("**Check these**", "", ...t.notes.map((n) => `- ${n}`));
-  for (const n of t.notes) flags.push({ kind: "inferred", text: n });
+  for (const u of t.unparsed) flags.push({ kind: "not_applied", text: `Not applied, because I could not read it as a task, a handover or a status: “${u.text}” (${u.src.title}).`, itemId: u.src.itemId });
   if (t.missingColumns.length) flags.push({ kind: "unfilled_column", text: `No note states ${t.missingColumns.join(", ")}, so those cells say “Not stated”.` });
-  const headline = `${t.rows.length} open task${t.rows.length === 1 ? "" : "s"}: ${t.rows.map((r) => `${r.cells[0]}`).join(", ")}`;
-  return { title: "Handoff table", body: lines.join("\n"), summary: headline, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: tableJson(t, ids, headline), draft: null, needsJudgment: false, localOnly: !!b.localOnly };
+  if (t.addedTaskColumn) flags.push({ kind: "task_column", text: "You did not ask for a Task column, but a row without the work it is about is not a handoff, so one was added first." });
+  const headline = t.rows.length ? `${t.rows.length} open task${t.rows.length === 1 ? "" : "s"}: ${t.rows.map((r) => r.owner ?? "Unassigned").join(", ")}` : "No open tasks";
+  return { title: t.form === "checklist" ? "Checklist of open work" : "Handoff table", body: lines.join("\n"), summary: headline, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: tableJson(t, ids, headline), draft: null, needsJudgment: false, localOnly: !!b.localOnly };
 }
 
 export function optionsOf(a: AnalysisJson): OptionResult[] { return a.options as unknown as OptionResult[]; }
@@ -210,7 +216,7 @@ export function optionsOf(a: AnalysisJson): OptionResult[] { return a.options as
 export function recheckAnalysis(ctx: Ctx, stored: AnalysisJson | PlanJson | TableJson, request: string, wish?: TableSpec): string[] {
   if (isTable(stored)) {
     const items = toItems(ctx, stored.itemIds); const problems: string[] = []; if (items.length < stored.itemIds.length) problems.push("A source behind the table is no longer available.");
-    const now = buildTaskTable(items, wish ?? { columns: stored.columns, rowUnit: null, excludeDone: stored.leftOut.some((l) => l.reason === "complete") }); if (tableMarkdown(now) !== stored.markdown) problems.push("Rebuilding the table from the sources as they are now gives a different table."); return problems;
+    const now = buildTaskTable(items, wish ?? { columns: stored.columns, rowUnit: null, excludeDone: stored.leftOut.some((l) => l.reason === "complete"), form: stored.form }); if ((now.form === "checklist" ? checklistMarkdown(now) : tableMarkdown(now)) !== stored.markdown) problems.push("Rebuilding the table from the sources as they are now gives a different table."); return problems;
   }
   if (isPlan(stored)) {
     const items = toItems(ctx, stored.itemIds); const now = analyzePlan(items, request); const problems: string[] = [];

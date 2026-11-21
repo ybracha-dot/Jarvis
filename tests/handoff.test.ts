@@ -69,7 +69,7 @@ describe("varied people, corrections and formats", () => {
   });
   it("no open task with an owner in the notes: no table is invented, the outcome is not done, and the sources are quoted", async () => {
     const { v, ctx } = await go({ original: "Harvest fair notes. The weather looks good this year.", update: "Update: the fair is still on for Saturday." });
-    expect(v.analysis).toBeNull(); expect(v.outcomes[0]).toMatchObject({ kind: "table", status: "missing", detail: expect.stringMatching(/No table could be built/) }); expect(receipt(ctx, v.request.id).plain).toMatch(/none of the requested parts could be done/); expect(v.body).toMatch(/What the sources say/);
+    expect(v.analysis).toBeNull(); expect(v.outcomes[0]).toMatchObject({ kind: "table", status: "missing", detail: expect.stringMatching(/No task could be read from the notes/) }); expect(receipt(ctx, v.request.id).plain).toMatch(/none of the requested parts could be done/); expect(v.body).toMatch(/What the sources say/);
   });
   it("without the instruction to leave completed work out, completed items get their own row marked complete", async () => {
     const { v } = await go(undefined, "Turn these notes into a table with the owner, next action, and blocker for each task.");

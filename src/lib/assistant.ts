@@ -229,7 +229,8 @@ const unitOf = (v: string) => v.replace(/[\d.,]/g, "").trim().toLowerCase();
 /** The general answer path: search every authorized source, keep what matches the question, show what changed and what is still open. Extractive, not invented. */
 function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
   const hits = searchEvidence(ctx, intent.terms, { projectId: intent.projectId, limit: 12 });
-  const tableOfProject = !!intent.projectId && parseOutcomes(String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? "")).some((o) => o.kind === "table");   // "turn these notes into a table": the project's notes are the material, whatever words they share with the question
+  const projectHasNotes = !!intent.projectId && !!get(ctx.db, "SELECT 1 x FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.project_id=? AND i.tombstone=0 AND s.revoked_at IS NULL LIMIT 1", ctx.owner, intent.projectId);
+  const tableOfProject = projectHasNotes;   // the selected project's notes are the material when no note shares words with the question: never claim nothing is saved while the project holds notes
   if (!hits.length && !tableOfProject) return { mode: "digest", gap: `Nothing saved matches “${intent.terms.join(" ")}”. Share the conversation, forward the email or import the note, then ask again.`, items: [] as any[], terms: intent.terms, reads: 0 };
   const scored = hits.map((h) => ({ h, m: matchedTerms(intent.terms, `${h.title} ${authorizedItem(ctx, h.itemId)?.body ?? ""}`) }));
   const top = Math.max(0, ...scored.map((x) => x.m.length)); const need = Math.max(1, Math.ceil(top / 2));
@@ -260,7 +261,7 @@ function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string
   const wantTable = parseOutcomes(question).some((o) => o.kind === "table");
   const have = new Set(items.map((i) => i.id));
   const extra: { id: string; why: string }[] = linkedCorrections(ctx, [...have]).map((x) => ({ id: x.id, why: `, added: ${x.why}` }));
-  if (wantTable && intent.projectId) for (const row of all(ctx.db, "SELECT i.id FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.project_id=? AND i.tombstone=0 AND s.revoked_at IS NULL ORDER BY i.at DESC LIMIT 30", ctx.owner, intent.projectId)) extra.push({ id: row.id as string, why: ", added: a note of the selected project" });
+  if ((wantTable || !items.length) && intent.projectId) for (const row of all(ctx.db, "SELECT i.id FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.project_id=? AND i.tombstone=0 AND s.revoked_at IS NULL ORDER BY i.at DESC LIMIT 30", ctx.owner, intent.projectId)) extra.push({ id: row.id as string, why: wantTable ? ", added: a note of the selected project" : ", added: a note of the selected project because no note shares words with your question" });
   for (const x of extra) { if (have.has(x.id)) continue; const it = authorizedItem(ctx, x.id); if (!it || !["email", "transcript", "claude", "note", "slack", "export"].includes(it.kind)) continue; have.add(x.id); items.push(shapeItem(it, [], null, x.why)); }
   for (const x of linkedCorrections(ctx, [...have])) { if (have.has(x.id)) continue; const it = authorizedItem(ctx, x.id); if (!it) continue; have.add(x.id); items.push(shapeItem(it, [], null, `, added: ${x.why}`)); }
   items.sort((a, b) => String(b.at).localeCompare(String(a.at)));
@@ -396,8 +397,8 @@ function composeAnswer(ctx: Ctx, b: any, instr?: ReturnType<typeof parseInstruct
   if (b.table) {
     const wish = parseOutcomes(String(b.question ?? "")).find((o) => o.kind === "table")?.table;
     const tb = wish ? composeTable(ctx, b, String(b.question ?? ""), wish, { applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] }) : null;
-    if (tb) return tb;
-    const dg: any = composeDigest(ctx, b); dg.tableReason = "No table could be built: the notes name no open task with an owner. Here is what the sources say."; dg.flags.unshift({ kind: "no_table", text: dg.tableReason }); return dg;
+    if (tb && "body" in tb) return tb;
+    const dg: any = composeDigest(ctx, b); dg.tableReason = tb && "reason" in tb ? `${tb.reason} Here is what the sources say.` : "No table could be built from the notes. Here is what the sources say."; dg.flags.unshift({ kind: "no_table", text: dg.tableReason }); return dg;
   }
   if (b.plan) {
     const pl = composePlan(ctx, b, String(b.question ?? ""), { wantDraft: !!instr?.wantDraft || DRAFT_CUE.test(String(b.question ?? "")), applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] });
@@ -600,7 +601,7 @@ const goal_writer: Handler = async (api) => {
     return { kind: intent.deliverable, projectId: bundle.projectId ?? intent.projectId ?? null, unavailable: bundle.unavailable ?? [], mode: "rules", ...c };
   });
   // Every requested part gets a status, checked against what was actually produced. A part with no matching result is reported, not papered over.
-  { const asked = parseOutcomes(String(bundle.question ?? "")); out.needsCalc = !!bundle.plan; out.outcomes = asked.length >= 2 || asked.some((a) => a.kind === "table" || a.kind === "draft") ? scoreOutcomes(asked, out) : []; }
+  { const asked = parseOutcomes(String(bundle.question ?? "")); out.needsCalc = !!bundle.plan; if (bundle.gap) out.gapOutcome = true; if (bundle.gap) out.outcomes = [{ id: "o1", kind: "answer", text: String(bundle.question ?? bundle.gap).slice(0, 160), recipient: null, status: "missing", detail: String(bundle.gap) }]; else out.outcomes = asked.length >= 2 || asked.some((a) => a.kind === "table" || a.kind === "draft") ? scoreOutcomes(asked, out) : []; }
   // Only what the rules could not settle may go to a model, and only if it is on, authorized and allowed for these sources.
   if (out.analysis && out.needsJudgment) {
     const j = await api.step("judgment", "Asking for an evidence-bounded judgment, if allowed", async () => {
@@ -619,7 +620,7 @@ const goal_reviewer: Handler = async (api) => {
   const request = String(get(api.ctx.db, "SELECT text FROM requests WHERE id=?", (api.input as any).requestId)?.text ?? "");
   const v = await api.step("verify", "Checking every cited source", () => {
     const base = (content.sources?.length || !content.flags?.some((f: any) => f.kind === "gap")) ? verifyResult(api.ctx, content) : { ok: true, problems: [] as string[], checks: [{ name: "Nothing to cite", ok: true, detail: "The request found no sources, and says so." }] };
-    if (content.outcomes?.length) {
+    if (content.outcomes?.length && !content.gapOutcome) {
       const again = scoreOutcomes(parseOutcomes(request), content); const drift = again.filter((x, i) => x.status !== content.outcomes[i]?.status);
       const left = content.outcomes.filter((x: OutcomeStatus) => x.status !== "done");
       base.checks.push({ name: "Every requested part has a status that matches the result", ok: drift.length === 0, detail: drift.length ? `Re-checking disagrees on: ${drift.map((x) => x.text).join("; ")}.` : `${completionLine(content.outcomes)}${left.length ? `; open: ${left.map((x: OutcomeStatus) => x.text).join("; ")}` : ""}.` });

@@ -2,9 +2,10 @@
 // checked against what the result actually contains: an answer that settled the question, a figure that was actually computed, a draft
 // addressed to the person named that carries the verified figures. A result that is missing a part says so, part by part.
 import { wordsOf } from "./plan";
+import { columnMentions, coversMention } from "./ledger";
 
 export type OutcomeKind = "answer" | "report" | "draft" | "table";
-export interface TableWish { columns: string[]; rowUnit: string | null; excludeDone: boolean }
+export interface TableWish { columns: string[]; rowUnit: string | null; excludeDone: boolean; form?: "table" | "checklist"; groupByOwner?: boolean; mentions?: string[] }
 export interface Outcome { id: string; kind: OutcomeKind; text: string; recipient: string | null; table?: TableWish }
 export interface OutcomeStatus extends Outcome { status: "done" | "partial" | "missing"; detail: string }
 export type Completion = "complete" | "partial" | "incomplete";
@@ -17,31 +18,32 @@ const REPORT = /^(?:and\s+|also\s+|then\s+)?(?:show|tell|list|give|work out|figu
 const NOT_NAMES = new Set("Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March April May June July August September October November December I Jarvis The A An My Our".split(" "));
 
 const TABLE_ASK = /\b(?:turn|put|convert|make|build|give me|produce|create|draft|write|prepare|show)\b[^.?!]{0,80}?\b(?:table|spreadsheet|grid)\b/i;
+const CHECK_ASK = /\b(?:give me|make|turn|show|write|build|create|put|prepare|produce|list)\b[^.?!]{0,60}?\b(?:check-?list|bulleted list|bullet list|to-?do list|bullets)\b[^.?!]{0,80}\b(?:per|for each|by|each)\s+(?:person|owner|people|assignee)\b|\b(?:check-?list|bulleted list|to-?do list)\b[^.?!]{0,40}\b(?:what|who|open|still)\b/i;
 const TABLE_MOD = /\b(?:rows?|columns?)\b|\bleave\b[^.?!]*\bout\b|\bexclude\b|\bonly (?:include|show|list)\b|\bskip\b/i;
-const splitList = (t: string) => t.split(/\s*,\s*(?:and\s+)?|\s+and\s+/i).map((x) => x.replace(/^(?:the|a|an)\s+/i, "").replace(/[.]+$/, "").trim()).filter(Boolean);
+const splitList = (t: string) => t.split(/\s*[,|]\s*(?:and\s+)?|\s+and\s+/i).map((x) => x.replace(/^(?:the|a|an)\s+/i, "").replace(/[.]+$/, "").trim()).filter(Boolean);
 
 /** The parts of a request. A single-part request returns one outcome; the caller decides whether that is worth showing. */
 export function parseOutcomes(request: string): Outcome[] {
   const out: Outcome[] = [];
   const sentences = request.split(/(?<=[.?!])\s+(?=[A-Za-z])/).map((x) => x.trim()).filter(Boolean);
   const clauses = sentences.flatMap((s) => s.split(/,?\s+and\s+(?=(?:show|draft|write|tell|list|give|prepare|also|then|reply|email|work out|figure out|calculate|what|how|when|which|where|can|could)\b)/i));
-  const tableAt = clauses.findIndex((c) => TABLE_ASK.test(c));
+  const tableAt = clauses.findIndex((c) => TABLE_ASK.test(c) || CHECK_ASK.test(c));
   // A table is one outcome. The sentences that describe its rows, columns and exclusions belong to it and are not separate requests.
   let wish: TableWish | null = null; const consumed = new Set<number>();
   if (tableAt >= 0) {
-    wish = { columns: [], rowUnit: null, excludeDone: false }; consumed.add(tableAt);
+    wish = { columns: [], rowUnit: null, excludeDone: false, form: CHECK_ASK.test(clauses[tableAt]) && !/\btable\b/i.test(clauses[tableAt]) ? "checklist" : "table", mentions: columnMentions(request) }; wish.groupByOwner = wish.form === "checklist" && /\b(?:per|for each|by|each)\s+(?:person|owner|people|assignee)\b/i.test(request); consumed.add(tableAt);
     clauses.forEach((c, i) => {
       if (i !== tableAt && !TABLE_MOD.test(c)) return; if (i !== tableAt) consumed.add(i);
-      const cols = /\b(?:with|columns?(?:\s+for)?:?|showing|listing|including)\s+(.+?)[.?!]*$/i.exec(c); if (cols && /\b(?:row|column)s?\b/i.test(c)) wish!.columns = splitList(cols[1]);
+      const cols = /\b(?:with|columns?(?:\s+for)?:?|showing|listing|including)\s+(.+?)[.?!]*$/i.exec(c); if (cols && /\b(?:row|column)s?\b/i.test(c)) wish!.columns = splitList(cols[1].replace(/^columns?:?\s+/i, "").replace(/\s+for\s+(?:this|the|each|every)\s+[a-z ]+$/i, ""));
       const unit = /\b(?:each|every|per)\s+(.+?)\s+(?:one row|a row|its own row|gets|get)\b|\bone row (?:per|for each)\s+(.+?)(?:\s+with|[.,]|$)/i.exec(c); if (unit) wish!.rowUnit = (unit[1] ?? unit[2]).trim();
       if (/\bleave\s+(?:the\s+)?(?:completed|finished|done|closed)\b|\bexclude\s+(?:the\s+)?(?:completed|finished|done)\b|\bonly (?:include|show|list)\s+(?:the\s+)?(?:open|unfinished|incomplete)\b/i.test(c)) wish!.excludeDone = true;
     });
-    if (/\bopen\b/i.test(wish.rowUnit ?? "")) wish.excludeDone = true;
+    if (/\bopen\b|\bstill (?:need|to do|have to)|\bremaining\b|\boutstanding\b/i.test(clauses.filter((_, i) => consumed.has(i)).join(" ")) || wish.form === "checklist") wish.excludeDone = true;
   }
   clauses.forEach((raw, i) => {
     if (consumed.has(i) && i !== tableAt) return;
     const text = raw.replace(/^[\s,;]+|[\s]+$/g, "").replace(/^(?:please|then)\s+/i, ""); if (text.length < 4) return;
-    if (i === tableAt && wish) { const cols = wish.columns.length ? wish.columns.map((c) => c.charAt(0).toUpperCase() + c.slice(1)).join(", ") : "default columns"; out.push({ id: `o${out.length + 1}`, kind: "table", text: `A pasteable table${wish.rowUnit ? `: one row per ${wish.rowUnit}` : ""} with ${cols}${wish.excludeDone ? "; completed work left out" : ""}`, recipient: null, table: wish }); return; }
+    if (i === tableAt && wish) { const cols = wish.columns.length ? wish.columns.map((c) => c.charAt(0).toUpperCase() + c.slice(1)).join(", ") : "default columns"; out.push({ id: `o${out.length + 1}`, kind: "table", text: `${wish.form === "checklist" ? "A bulleted checklist" + (wish.groupByOwner ? " per person" : "") + " of open work" : "A pasteable table"}${wish.form === "checklist" ? "" : wish.rowUnit ? `: one row per ${wish.rowUnit}` : ""} ${wish.form === "checklist" ? "" : ` with ${cols}`}${wish.excludeDone ? "; completed work left out" : ""}`, recipient: null, table: wish }); return; }
     if (DRAFT.test(text)) { const m = /\b(?:to|for)\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)/.exec(text); const rec = m && !NOT_NAMES.has(m[1].split(" ")[0]) ? m[1] : null; out.push({ id: `o${out.length + 1}`, kind: "draft", text: text.replace(/[.?!]+$/, ""), recipient: rec }); }
     else if (/\?$/.test(text) || ASK.test(text)) out.push({ id: `o${out.length + 1}`, kind: "answer", text: text.replace(/[.?!]+$/, ""), recipient: null });
     else if (REPORT.test(text)) out.push({ id: `o${out.length + 1}`, kind: "report", text: text.replace(/[.?!]+$/, ""), recipient: null });
@@ -93,17 +95,24 @@ export const completionLine = (s: OutcomeStatus[]) => { const done = s.filter((x
 
 /** A table is done only when the saved artifact has the requested columns, a cited row for every open item, nothing that was asked to be left out, and no empty column. */
 function scoreTable(o: Outcome, c: Content): OutcomeStatus {
-  const t = c.analysis; const wish = o.table;
-  if (!t || t.type !== "table") return { ...o, status: "missing", detail: c.tableReason ?? "No table could be built: Jarvis found no open tasks with owners in the notes. Nothing was invented." };
-  const want = (wish?.columns.length ? wish.columns : t.columns).map((x: string) => x.toLowerCase()); const have: string[] = t.columns.map((x: string) => x.toLowerCase());
+  const t = c.analysis; const wish = o.table; const what = wish?.form === "checklist" ? "checklist" : "table";
+  if (!t || t.type !== "table") return { ...o, status: "missing", detail: c.tableReason ?? `No ${what} could be built: Jarvis found no tasks with owners in the notes. Nothing was invented.` };
   const probs: string[] = [];
-  if (want.join("|") !== have.join("|")) probs.push(`the columns are ${t.columns.join(", ")}, not the ${want.join(", ")} you asked for`);
-  if (!t.rows.length) return { ...o, status: "missing", detail: "The notes hold no open tasks, so the table has no rows." };
-  const uncited = t.rows.filter((r: any) => !r.cites?.length || r.cites.some((x: any) => !x.quote)); if (uncited.length) probs.push(`${uncited.length} row${uncited.length === 1 ? "" : "s"} without a cited source`);
-  if (wish?.excludeDone) { const leaked = t.rows.filter((r: any) => (t.leftOut ?? []).some((l: any) => l.reason === "complete" && l.text.toLowerCase() === String(r.task).toLowerCase())); if (leaked.length) probs.push("a completed item is in a row"); }
-  if (t.rows.length !== t.openCount && wish?.excludeDone) probs.push(`${t.rows.length} rows for ${t.openCount} open items`);
+  if (t.unparsed?.length) probs.push(`${t.unparsed.length} sentence${t.unparsed.length === 1 ? "" : "s"} naming a person or task could not be read and ${t.unparsed.length === 1 ? "was" : "were"} not applied`);
+  if (!t.rows.length) {
+    if (t.taskCount > 0 && t.openCount === 0 && !probs.length) return { ...o, status: "done", detail: `No open tasks: all ${t.taskCount} task${t.taskCount === 1 ? "" : "s"} in the notes are complete, so the ${what} has no rows.` };
+    return { ...o, status: probs.length ? "partial" : "missing", detail: probs.length ? `No ${what} rows: ${probs.join("; ")}.` : `The notes hold no open tasks, so the ${what} has no rows.` };
+  }
+  if (what === "table") {
+    const want = (wish?.columns.length ? wish.columns : t.columns).map((x: string) => x.toLowerCase()); const have: string[] = t.columns.map((x: string) => x.toLowerCase());
+    const wantFull = t.addedTaskColumn ? ["task", ...want] : want;
+    if (wantFull.join("|") !== have.join("|")) probs.push(`the columns are ${t.columns.join(", ")}, not the ${want.join(", ")} you asked for`);
+    for (const m of wish?.mentions ?? []) if (!coversMention(m, t.keys, t.columns)) probs.push(`your request mentions ${m} but no column covers it`);
+  }
+  const uncited = t.rows.filter((r: any) => !r.cites?.length || r.cites.some((x: any) => !x.quote)); if (uncited.length) probs.push(`${uncited.length} ${what === "table" ? "row" : "item"}${uncited.length === 1 ? "" : "s"} without a cited source`);
+  if (wish?.excludeDone) { const leaked = t.rows.filter((r: any) => (t.leftOut ?? []).some((l: any) => l.reason === "complete" && l.text.toLowerCase() === String(r.task).toLowerCase())); if (leaked.length) probs.push("a completed item is in a row"); if (t.rows.length !== t.openCount) probs.push(`${t.rows.length} rows for ${t.openCount} open items`); }
   if (t.missingColumns?.length) probs.push(`no source states ${t.missingColumns.join(", ")}, so those cells say “Not stated”`);
-  if (probs.length) return { ...o, status: "partial", detail: `A table was built, but ${probs.join("; ")}.` };
+  if (probs.length) return { ...o, status: "partial", detail: `A ${what} was built, but ${probs.join("; ")}.` };
   const left = (t.leftOut ?? []).filter((l: any) => l.reason === "complete").length;
-  return { ...o, status: "done", detail: `Table with ${t.rows.length} row${t.rows.length === 1 ? "" : "s"} (${t.columns.join(", ")}), every row cited${left ? `; ${left} completed item${left === 1 ? "" : "s"} left out` : ""}.` };
+  return { ...o, status: "done", detail: `${what === "table" ? `Table with ${t.rows.length} row${t.rows.length === 1 ? "" : "s"} (${t.columns.join(", ")})` : `Checklist with ${t.rows.length} open item${t.rows.length === 1 ? "" : "s"}${wish?.groupByOwner ? " grouped by person" : ""}`}, every ${what === "table" ? "row" : "item"} cited${left ? `; ${left} completed item${left === 1 ? "" : "s"} left out` : ""}.` };
 }
