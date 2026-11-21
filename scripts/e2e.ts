@@ -44,7 +44,7 @@ function watch(page: Page, label: string) {
   page.on("requestfailed", (r) => { if (!/_next\/webpack-hmr|\.map$/.test(r.url()) && !/ERR_ABORTED/.test(r.failure()?.errorText ?? "") && !(restarting && /ERR_CONNECTION_REFUSED/.test(r.failure()?.errorText ?? ""))) problems.push(`requestfailed(${label}): ${r.url()} ${r.failure()?.errorText}`); });
   page.on("response", (r) => { if (r.status() >= 400 && !r.url().includes("/__expect")) problems.push(`http ${r.status()}(${label}): ${r.request().method()} ${r.url()}`); });
 }
-const shot = async (page: Page, name: string) => { await page.evaluate(() => { (document.querySelector('[data-testid="handoff-strip"]') ?? document.querySelector("h1"))?.scrollIntoView({ block: "start" }); window.scrollBy(0, -64); }).catch(() => {}); return page.screenshot({ path: path.join(SHOTS, name), fullPage: false }); };
+const shot = async (page: Page, name: string, keepScroll = false) => { if (!keepScroll) await page.evaluate(() => { (document.querySelector('[data-testid="handoff-strip"]') ?? document.querySelector("h1"))?.scrollIntoView({ block: "start" }); window.scrollBy(0, -64); }).catch(() => {}); return page.screenshot({ path: path.join(SHOTS, name), fullPage: false }); };
 const post = (p: string, body: unknown) => fetch(`${base}/api${p}`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify(body) });
 
 async function journeyDesktop(ctx: BrowserContext) {
@@ -489,8 +489,8 @@ async function journeyProjects(page: Page) {
   await page.getByTestId("probe-edit").click(); await page.getByTestId("probe").getByText(/Marker added/).waitFor();
   const back = await call(claude, "recall_from_jarvis", { query: `connection check ${code}` });
   ok(back.items[0].type === "connection_check", "Claude reads the note back");
-  await page.getByTestId("connection-status").getByText(/connected and verified/).waitFor({ timeout: 10000 });
-  ok(true, "the status turns verified only after write, edit and read-back");
+  await page.getByTestId("connection-status").getByText(/only been tested with a local test client/).waitFor({ timeout: 10000 });
+  ok(true, "after write, edit and read-back by a test client the status says it was a test client and not your account");
   await shot(page, "22-connections-desktop.png");
 
   step("Revoke stops the connector at once");
@@ -675,7 +675,7 @@ async function journeyBlackboard(browser: Browser) {
   ok(/Duo/.test(await p.locator("body").innerText()), "when it fails the page says to sign in on Blackboard, including Duo, and paste a fresh link");
   await p.goto(base + "/office"); await p.getByTestId("handoff-needs").getByText(/Blackboard did not accept the calendar link/).waitFor({ timeout: 15000 }); ok(true, "the Office shows the pending sign-in as something that needs you");
   await p.goto(base + "/connections"); mode = "moved"; await p.getByTestId("bb-read").click(); await p.getByTestId("bb-state").filter({ hasText: /connected: last read succeeded/ }).waitFor({ timeout: 15000 }); ok(true, "after a fresh link works the source is connected again");
-  await shot(p, "43-blackboard-desktop.png"); srv.close(); await ctx.close();
+  await p.getByTestId("blackboard-card").scrollIntoViewIfNeeded(); await p.evaluate(() => window.scrollBy(0, -70)); await shot(p, "43-blackboard-desktop.png", true); srv.close(); await ctx.close();
 }
 
 async function journeyRoundTrip(browser: Browser) {
@@ -695,7 +695,7 @@ async function journeyRoundTrip(browser: Browser) {
   await p.getByTestId("rt-start").click(); await p.waitForFunction((old) => { const e = document.querySelector('[data-testid="rt-say-write"]'); return !!e && e.textContent !== old; }, w).catch(async (e) => { throw new Error(`${e.message}\n${(await p.locator("main").innerText()).slice(0, 1500)}`); }); const code2 = (await p.getByTestId("rt-say-write").innerText()).match(/RT-[0-9A-F]{4}/)![0];
   const t = await open("e2e-test-client"); await t.callTool({ name: "apply_project_update", arguments: { project: "Round trip check", eventId: `${code2}-1`, changes: [{ op: "decide", key: "roundtrip-check", text: `ALPHA-${code2}` }] } }); await p.getByTestId("rt-edit").click(); await p.getByText(/Changed /).first().waitFor(); await t.callTool({ name: "get_project_context", arguments: { project: "Round trip check" } });
   await p.getByTestId("rt-verdict").waitFor({ timeout: 10000 }); ok(/local test client/.test(await p.getByTestId("rt-verdict").innerText()) && /does not prove your Claude account/.test(await p.getByTestId("rt-verdict").innerText()), "a test client is labelled as one and does not count as the account"); await t.close();
-  await shot(p, "44-roundtrip-desktop.png"); await ctx.close();
+  await p.getByTestId("roundtrip").scrollIntoViewIfNeeded(); await p.evaluate(() => window.scrollBy(0, -70)); await shot(p, "44-roundtrip-desktop.png", true); await ctx.close();
 }
 
 async function journeyMobile(browser: Browser) {

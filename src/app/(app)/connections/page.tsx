@@ -25,15 +25,16 @@ export default function ConnectionsPage() {
   const edit = useAction(async (id: string) => { await api(`/connector/probe/${id}/edit`, { body: {} }); });
   if (q.loading && !q.data) return <Spinner label="Checking connections" />;
   if (q.error && !q.data) return <ErrorBox error={q.error} onRetry={q.reload} offline={q.error.status === 0} />;
-  const d = q.data; const p = d.probe; const active = d.tokens.filter((t: any) => t.status === "active");
+  const d = q.data; const p = d.probe; const rtq = useQuery<any>("/roundtrip", { poll: 4000 }); const rt = rtq.data?.trip; const claudeVerified = !!((rt?.complete && rt.written?.kind === "claude" && rt.read?.kind === "claude") || (p?.complete && p.written?.kind === "claude" && p.read?.kind === "claude")); const testOnly = !claudeVerified && !!(rt?.complete || p?.complete); const active = d.tokens.filter((t: any) => t.status === "active");
   const url = `${d.publicUrl ?? "https://YOUR-HOST"}/mcp`;
   const err = [create.error, revoke.error, rotate.error, start.error, edit.error].find(Boolean);
   return (
     <div className="space-y-6 max-w-3xl">
       <header><h1 className="text-2xl font-semibold tracking-tight">Connections</h1><p className="text-[15px] text-muted mt-1">Let ordinary Claude read and update your projects, and prove it works in both directions.</p></header>
-      <section aria-label="Status" className={cx("rounded-2xl border p-5 metal", p?.complete ? "border-accent-dim bg-[#0b1c29]" : "border-line bg-surface")} data-testid="connection-status">
-        <div className="flex items-center gap-2"><ShieldCheck className={cx("size-5", p?.complete ? "text-accent" : "text-muted")} aria-hidden /><h2 className="text-[17px] font-medium">{p?.complete ? "Ordinary Claude is connected and verified" : "Not verified with ordinary Claude yet"}</h2></div>
-        <p className="text-[14px] text-muted mt-1.5">{p?.complete ? `Claude saved a note, you edited it in Jarvis, and Claude read your edit back (${fmtDateTime(p.read.at)}).` : "Local tests and the example workspace prove the connector code. Only the check below proves that your own Claude account can reach this Jarvis."}</p>
+      <nav aria-label="On this page" className="flex gap-3 flex-wrap text-[14px]"><a className="text-accent underline underline-offset-2" href="#roundtrip">Prove it with Claude</a><a className="text-accent underline underline-offset-2" href="#blackboard">Blackboard</a><a className="text-accent underline underline-offset-2" href="#sources">What Jarvis can read</a></nav>
+      <section aria-label="Status" className={cx("rounded-2xl border p-5 metal", claudeVerified ? "border-accent-dim bg-[#0b1c29]" : "border-line bg-surface")} data-testid="connection-status">
+        <div className="flex items-center gap-2"><ShieldCheck className={cx("size-5", claudeVerified ? "text-accent" : "text-muted")} aria-hidden /><h2 className="text-[17px] font-medium">{claudeVerified ? "A round trip finished with clients that reported themselves as Claude" : testOnly ? "The connector works. It has only been tested with a local test client" : "Not verified with ordinary Claude yet"}</h2></div>
+        <p className="text-[14px] text-muted mt-1.5">{claudeVerified ? "Jarvis cannot verify an account from a self-reported client name, but this is the write, change and fresh read you asked for. Details and timestamps are under the round trip." : testOnly ? "A test client proves the connector code works. It does not prove your own Claude account can reach this Jarvis. Run the round trip below from Claude." : "Local tests and the example workspace prove the connector code. Only a round trip from your own Claude account proves it reaches this Jarvis."}</p>
       </section>
       {err && <ErrorBox error={err as any} />}
       <ol className="space-y-3">
@@ -70,7 +71,7 @@ export default function ConnectionsPage() {
       <section aria-label="Claude Project instruction"><SectionTitle>For Claude: a Project instruction</SectionTitle><Card className="p-4 space-y-2" data-testid="project-instruction">
         <p className="text-[14px] text-muted">Paste this into the instructions of the Claude Project you use with Jarvis. It makes Claude look through its own past chats first, hand Jarvis only the excerpt that matters, and read results back.</p>
         <pre className="mono text-[13px] whitespace-pre-wrap rounded-lg bg-bg border border-line p-3 select-all">{PROJECT_INSTRUCTION}</pre><CopyBtn text={PROJECT_INSTRUCTION} label="Copy the instruction" /></Card></section>
-      <section aria-label="Sources Jarvis can read" data-testid="sources-panel"><SectionTitle>What Jarvis can read</SectionTitle>
+      <section aria-label="Sources Jarvis can read" data-testid="sources-panel" id="sources"><SectionTitle>What Jarvis can read</SectionTitle>
         <p className="text-[14px] text-muted mb-2">Every source says how it got here. Fixture and simulated sources are synthetic. A source that needs you is skipped, and results say so.</p>
         <ul className="space-y-2">{srcs.data?.sources.map((s: any) => <SourceRow key={s.id} s={s} />)}{srcs.data?.sources.length === 0 && <li className="text-[15px] text-muted">Nothing connected yet. Import a note, a transcript or an email below{sess.data?.mode !== "personal" ? ", or load the sample workspace" : ""}.</li>}</ul>
         {sess.data?.mode !== "personal" && !srcs.data?.sources.some((s: any) => s.mode === "fixture") && <div className="mt-3"><SampleLoader /></div>}
@@ -116,7 +117,7 @@ function BlackboardCard() {
   const remove = useAction(async () => { await api("/blackboard/remove", { body: {} }); setMsg("The link was removed from this computer."); });
   const st = q.data; const bs = BB_STATE[st?.state ?? "not_configured"] ?? BB_STATE.pending;
   return (
-    <section aria-label="Blackboard" data-testid="blackboard-card"><SectionTitle>Blackboard</SectionTitle>
+    <section aria-label="Blackboard" data-testid="blackboard-card" id="blackboard"><SectionTitle>Blackboard</SectionTitle>
       <Card className="p-4 space-y-3 text-[15px]">
         <div className="flex items-center gap-2 flex-wrap"><Badge tone={bs.tone} data-testid="bb-state">{bs.label}</Badge>{st?.linkHint && <span className="mono text-[13px] text-muted">{st.linkHint}</span>}<span className="text-[13px] text-muted">{st?.lastSuccessAt ? `last successful read ${fmtDateTime(st.lastSuccessAt)}` : "never read"}{st?.lastAttemptAt && st.lastAttemptAt !== st.lastSuccessAt ? ` · last attempt ${fmtDateTime(st.lastAttemptAt)}` : ""}</span></div>
         {st?.message && <Notice>{st.message}</Notice>}
@@ -137,7 +138,7 @@ function RoundTripCard() {
   const edit = useAction(async (id: string) => { await api(`/roundtrip/${id}/edit`, { body: {} }); });
   const t = q.data?.trip;
   return (
-    <section aria-label="Round trip with Claude" data-testid="roundtrip"><SectionTitle>Prove the round trip with your Claude account</SectionTitle>
+    <section aria-label="Round trip with Claude" data-testid="roundtrip" id="roundtrip"><SectionTitle>Prove the round trip with your Claude account</SectionTitle>
       <Card className="p-4 space-y-3">
         <p className="text-[14px] text-muted">Three messages. Claude saves a project decision, you change it in Jarvis, and a <b className="text-fg font-medium">new</b> Claude chat reads the changed decision with its source. Each step gets a timestamp and the client name it reported. A local test client is labelled as one: it proves the connector, not your account.</p>
         {!t || t.complete ? <div className="flex gap-2 items-end flex-wrap"><Field label="Project for the check"><input className={inputCls} value={project} onChange={(e) => setProject(e.target.value)} data-testid="rt-project" /></Field><Button variant="primary" busy={start.busy} disabled={project.trim().length < 2} onClick={() => start.run()} data-testid="rt-start">{t ? "Run it again" : "Start the round trip"}</Button></div> : null}
