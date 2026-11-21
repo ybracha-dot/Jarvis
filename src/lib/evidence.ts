@@ -35,7 +35,7 @@ const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "frida
 const CONFIRM = /\b(confirm(?:ed|ing|s)|agreed?|decided|we'?ll go with|locked in|settled|final(?:ly)?|moved to|changed to|moving (?:it )?to|instead|works for (?:me|us|everyone)|see you|sounds good|let'?s do|go(?:ing)? with|booked)\b/i;
 const PROPOSE = /\b(propos\w*|suggest\w*|how about|what about|could we|maybe|perhaps|tentativ\w*|i'?d say|thinking|let'?s|would .* work)\b/i;
 const REASON = /\b(because|since|so that|in order to|due to|as the|given that|that way|the reason)\b/i;
-const MONEY = /(?:[$€£]\s?\d[\d,]*(?:\.\d+)?(?:\s?[kKmM]\b)?)|(?:\b(?:EUR|USD|GBP|CAD|AUD)\s?\d[\d,]*(?:\.\d+)?)|(?:\b\d[\d,]*(?:\.\d+)?\s?(?:EUR|USD|GBP|CAD|AUD)\b)/g;
+const MONEY = /(?:[$€£]\s?\d(?:[\d,]*\d)?(?:\.\d+)?(?:\s?[kKmM]\b)?)|(?:\b(?:EUR|USD|GBP|CAD|AUD)\s?\d(?:[\d,]*\d)?(?:\.\d+)?)|(?:\b\d(?:[\d,]*\d)?(?:\.\d+)?\s?(?:EUR|USD|GBP|CAD|AUD)\b)/g;
 const PCT = /\b\d+(?:\.\d+)?\s?%/g;
 const COUNT = /\b\d+\s+(?:pilots?|customers?|users?|students?|people|clubs?|seats?|weeks?|hours?|slides?|sponsors?|members?|teams?|nights?|days?|months?|guests?|rooms?|tickets?|units?|pages?|miles?|attendees?)\b/gi;
 

@@ -3,7 +3,7 @@
 import { Ctx, all, get, run, uid, getSetting, sha } from "./db";
 import { localDate } from "./time";
 
-export type Role = "vision" | "guide_writer" | "extract_small" | "brief" | "study_plan" | "advisor" | "skill_candidate" | "essay_review" | "council_editor" | "deep_review";
+export type Role = "vision" | "guide_writer" | "extract_small" | "brief" | "study_plan" | "advisor" | "skill_candidate" | "decision" | "essay_review" | "council_editor" | "deep_review";
 export interface RoleConfig { model: string; effort: "low" | "medium" | "high"; premium: boolean; maxTokens: number }
 
 export const ROLE_DEFAULTS: Record<Role, RoleConfig> = {
@@ -15,6 +15,7 @@ export const ROLE_DEFAULTS: Record<Role, RoleConfig> = {
   study_plan: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 8000 },
   advisor: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 6000 },
   skill_candidate: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 6000 },
+  decision: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 4000 },
   essay_review: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 8000 },
   council_editor: { model: "claude-sonnet-5-5", effort: "high", premium: false, maxTokens: 10000 },
   deep_review: { model: "claude-fable-5-2", effort: "high", premium: true, maxTokens: 12000 },

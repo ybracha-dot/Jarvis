@@ -242,6 +242,16 @@ CREATE TABLE result_versions(
   result_id TEXT NOT NULL REFERENCES results(id), version INTEGER NOT NULL, request_revision INTEGER NOT NULL, body TEXT NOT NULL, summary TEXT NOT NULL, sources TEXT NOT NULL, flags TEXT NOT NULL DEFAULT '[]',
   unavailable TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, stale TEXT, PRIMARY KEY(result_id, version));
 `,
+  /* 6 decisions, drafts, corrections, client identity, feeds */ `
+ALTER TABLE result_versions ADD COLUMN analysis TEXT;
+ALTER TABLE result_versions ADD COLUMN mode TEXT NOT NULL DEFAULT 'rules';
+CREATE TABLE result_drafts(
+  result_id TEXT NOT NULL REFERENCES results(id), version INTEGER NOT NULL, to_addr TEXT, subject TEXT NOT NULL, body TEXT NOT NULL, edited_body TEXT, edited_at TEXT, purpose TEXT NOT NULL DEFAULT 'follow-up', PRIMARY KEY(result_id, version));
+ALTER TABLE evidence_items ADD COLUMN corrects TEXT;
+ALTER TABLE mcp_tokens ADD COLUMN last_client TEXT;
+ALTER TABLE mcp_tokens ADD COLUMN last_client_at TEXT;
+CREATE TABLE feed_state(source_id TEXT PRIMARY KEY REFERENCES evidence_sources(id), etag TEXT, last_modified TEXT, last_status TEXT, checked_at TEXT);
+`,
 ];
 
 const cache = new Map<string, DB>();

@@ -22,7 +22,7 @@ import { runCommand } from "./commands";
 import { ingestRevision } from "./ingest";
 import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJarvis } from "./capture";
 import { outcomes } from "./outcomes";
-import { submitGoal, GoalInput as AssistantGoalInput, receipt as goalReceipt, reviseRequest, refreshRequest, cancelRequest, resumeRequest, resultView, listResults, listRequests, readsFor } from "./assistant";
+import { submitGoal, GoalInput as AssistantGoalInput, receipt as goalReceipt, reviseRequest, refreshRequest, cancelRequest, resumeRequest, resultView, editDraft, listResults, listRequests, readsFor } from "./assistant";
 import { listSources, getItem, importText, revokeSource, reauthorizeSource, forgetItem, searchEvidence, listItems, tokens, SOURCE_KINDS } from "./evidence";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
@@ -121,6 +121,7 @@ on("POST", "/asks/:id/refresh", (c, r) => { const out = refreshRequest(c, r.para
 on("POST", "/asks/:id/cancel", (c, r) => cancelRequest(c, r.params.id));
 on("POST", "/asks/:id/resume", (c, r) => { const out = resumeRequest(c, r.params.id); kick(c.mode); return out; });
 on("GET", "/results", (c, r) => ({ results: listResults(c, { projectId: r.query.get("project") ?? undefined, limit: Number(r.query.get("limit") ?? 30) || 30 }) }));
+on("POST", "/results/:id/draft", (c, r) => editDraft(c, r.params.id, r.json(z.object({ body: z.string().min(1).max(20000), version: z.number().int().optional() })).body));
 on("GET", "/results/:id", (c, r) => resultView(c, r.params.id, r.query.get("version") ? Number(r.query.get("version")) : undefined));
 on("GET", "/evidence/sources", (c) => ({ sources: listSources(c) }));
 on("GET", "/evidence/items", (c, r) => ({ items: listItems(c, { projectId: r.query.get("project") ?? undefined, kind: r.query.get("kind") ?? undefined }) }));

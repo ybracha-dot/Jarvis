@@ -221,23 +221,100 @@ describe("QA regression: unseen requests over emails and notes (first attempt fa
 });
 
 
-// Regression from QA round 2 (verdict: partial). Kept as the QA agent described it.
-describe("QA round 2 regression: which plumber and what will it cost", () => {
-  it("keeps the user's own budget note, carries the permit caveat, and does not turn availability into promises", async () => {
-    const { ctx, clock } = fresh();
-    imp(ctx, { kind: "email", title: "Quote for bathroom re-pipe", text: "Hi Alex, Bellini Plumbing quote for the bathroom re-pipe: $4,800 including the permit. We can start December 7.", at: "2026-11-09T15:00:00.000Z", author: "Marco Bellini" });
-    imp(ctx, { kind: "email", title: "Revised quote after site visit", text: "Alex, after seeing the second-floor pipes I have to revise the bathroom re-pipe quote to $5,350. The permit is not included, which is about $400 extra. We can still start December 7.", at: "2026-11-11T15:00:00.000Z", author: "Marco Bellini" });
-    imp(ctx, { kind: "email", title: "Okafor & Sons estimate", text: "Okafor & Sons will do the bathroom re-pipe for $5,100 with the permit included. We can start November 30.", at: "2026-11-12T15:00:00.000Z", author: "Tom Okafor" });
-    imp(ctx, { kind: "note", title: "Bathroom plan", text: "Budget cap $5,500 all-in. Need it done before the in-laws arrive December 20. Only two quotes so far.", at: "2026-11-14T15:00:00.000Z" });
-    imp(ctx, { kind: "email", title: "Catering quote", text: "Bellini's Pizzeria catering quote for the party: $4,800.", at: "2026-11-10T15:00:00.000Z", author: "Marco Bellini" });
-    const r: any = await ask(ctx, clock, "Which plumber should I go with for the bathroom re-pipe, and what will it really cost?"); const v = resultView(ctx, r.reply.data.resultId);
-    expect(v.sources.some((s: any) => /Bathroom plan/.test(s.title))).toBe(true); expect(v.body).toMatch(/Budget cap \$5,500/); expect(v.body).toMatch(/December 20/);
-    expect(v.body).toMatch(/permit is not included/i);
-    expect(v.sources.some((s: any) => /Catering/.test(s.title))).toBe(false);
-    expect(v.body).toMatch(/\$4,800[^.]*replaced by \$5,350/);
-    expect(v.body).not.toMatch(/- Sons: |- We: /); expect(v.body).not.toMatch(/due (Monday|Sunday), (Nov 30|Dec 7)/);
-    expect(v.title).toMatch(/^Answer: Which plumber should I go with/);
-    const nf = v.flags.find((f: any) => f.kind === "not_found"); expect(nf?.text ?? "").not.toMatch(/should|really|cost|plumber/);
-    expect(v.flags.find((f: any) => f.kind === "extractive")!.text).toMatch(/does not compare options or recommend/);
+// Regression from QA round 2 (verdict: partial) was superseded by the decision workflow below: the same request now gets a supported recommendation.
+import { seedQuotes } from "./decision.test";
+import { setDecisionTransport } from "@/lib/decision-run";
+import { setSetting as setS } from "@/lib/db";
+import type { Transport } from "@/lib/router";
+const PLUMBER = "Which plumber should I go with for the bathroom re-pipe, and what will it really cost?";
+const bare = () => { const ctx = memCtx("2026-11-16T10:00:00-05:00"); let t = 1_000_000; return { ctx, clock: () => new Date(t) }; };
+const MOCK = (reply: string): { t: Transport; calls: number[] } => { const calls: number[] = []; return { calls, t: async () => { calls.push(1); return { text: reply, usage: { input: 900, output: 120 } }; } }; };
+const money = (ctx: any) => all(ctx.db, "SELECT COUNT(*) n FROM runs")[0].n as number;
+
+describe("decision workflow (paid calls off)", () => {
+  it("recommends from the evidence, shows the calculation, prepares the requested draft, and makes zero model calls", async () => {
+    const { ctx, clock } = bare(); seedQuotes(ctx, "base"); setDecisionTransport(undefined);
+    const r: any = await ask(ctx, clock, `${PLUMBER} Draft the follow-up.`); const v: any = resultView(ctx, r.reply.data.resultId);
+    expect(v.body.startsWith("**Recommendation**")).toBe(true); expect(v.body).toMatch(/Okafor & Sons fits best on your stated budget/); expect(v.body).toMatch(/\$5,100/);
+    expect(v.body.indexOf("**Next step**")).toBeLessThan(v.body.indexOf("**Why**")); expect(v.body).toMatch(/Ask Okafor & Sons to confirm the work will be finished before December 20/);
+    const a = v.analysis; const by = (n: string) => a.options.find((o: any) => o.label.includes(n));
+    expect(by("Bellini").total).toMatchObject({ min: 575000, approx: true, text: "about $5,750" }); expect(by("Okafor").total).toMatchObject({ min: 510000, approx: false });
+    expect(by("Bellini").checks.find((c: any) => c.kind === "budget_max").detail).toMatch(/\$250 over/); expect(by("Okafor").checks.find((c: any) => c.kind === "budget_max").detail).toMatch(/\$400 under/);
+    expect(v.body).toMatch(/\$650 more than Okafor|\$650/); expect(by("Bellini").history.some((h: any) => h.amount === "$4,800")).toBe(true);
+    expect(v.body).toMatch(/Completion before December 20 is unconfirmed/); expect(v.body).not.toMatch(/will be finished on/i);
+    expect(v.draft).toMatchObject({ to: "Tom Okafor", edited: false }); expect(v.draft.body).toMatch(/completed before December 20/); expect(v.draft.body).toMatch(/Dear|Hi Tom/);
+    expect(v.sources.map((s: any) => s.role)).toEqual(expect.arrayContaining(["your budget", "your deadline", "Bellini Plumbing: earlier quote, replaced", "Okafor & Sons: current price"]));
+    expect(v.mode).toBe("rules"); expect(money(ctx)).toBe(0); expect(all(ctx.db, "SELECT model_calls FROM jobs").every((j) => j.model_calls === 0)).toBe(true);
+    expect(v.receipt.ready).toBe(true);
+  });
+  it("without a draft request it offers one; saying 'draft it' adds a ready-to-edit draft as a new version, and edits are kept", async () => {
+    const { ctx, clock } = bare(); seedQuotes(ctx, "base");
+    const r: any = await ask(ctx, clock, PLUMBER); const id = r.reply.data.resultId; expect(resultView(ctx, id).draft).toBeNull(); expect(resultView(ctx, id).flags.some((f: any) => f.kind === "draft_available")).toBe(true);
+    reviseRequest(ctx, { requestId: r.reply.data.requestId, text: "Draft it please.", origin: "ask-text" }); await processQueue(ctx, base(clock));
+    const v: any = resultView(ctx, id); expect(v.version).toBe(2); expect(v.draft.subject).toMatch(/Confirming the completion date/);
+    const { editDraft } = await import("@/lib/assistant"); editDraft(ctx, id, "My own wording."); expect(resultView(ctx, id).draft).toMatchObject({ body: "My own wording.", edited: true, original: expect.stringContaining("completed before") });
+    expect(resultView(ctx, id, 1).draft).toBeNull();                                                                       // version 1 is untouched history
+  });
+  it("new information reverses the ranking", async () => {
+    const { ctx, clock } = bare(); seedQuotes(ctx, "reversal"); const r: any = await ask(ctx, clock, PLUMBER); const v: any = resultView(ctx, r.reply.data.resultId);
+    expect(v.body).toMatch(/Bellini Plumbing fits best/); expect(v.analysis.options.find((o: any) => o.label.includes("Okafor")).checks.find((c: any) => c.kind === "budget_max").status).toBe("violated");
+  });
+  it("a missing required cost changes the result: another option leads, or one precise question is asked instead of a guess", async () => {
+    const a = bare(); seedQuotes(a.ctx, "bellini_permit_unknown"); const va: any = resultView(a.ctx, ((await ask(a.ctx, a.clock, PLUMBER)) as any).reply.data.resultId);
+    expect(va.body).toMatch(/Okafor & Sons fits best/); expect(va.flags.some((f: any) => f.kind === "unknown_component")).toBe(true);
+    const b = bare(); seedQuotes(b.ctx, "okafor_permit_unknown"); const vb: any = resultView(b.ctx, ((await ask(b.ctx, b.clock, PLUMBER)) as any).reply.data.resultId);
+    expect(vb.analysis.recommendation.kind).toBe("ask"); expect(vb.body).toMatch(/How much is the permit for Okafor & Sons\?/); expect(vb.body).toMatch(/Provisional/);
+  });
+  it("a changed source changes the answer on the next run, and a revoked source drops out of it", async () => {
+    const { ctx, clock } = bare(); seedQuotes(ctx, "base"); const r: any = await ask(ctx, clock, PLUMBER); const id = r.reply.data.resultId;
+    revokeSource(ctx, listSources(ctx).find((s) => s.label === "Mail from Tom Okafor")!.id);
+    expect(resultView(ctx, id).stale).toMatch(/revoked/);
+    const r2: any = await ask(ctx, clock, PLUMBER); const v: any = resultView(ctx, id);
+    expect(v.version).toBe(2); expect(v.analysis.recommendation.kind).toBe("insufficient"); expect(v.body).toMatch(/Only one option was found \(Bellini Plumbing\)/); expect(v.sources.every((s: any) => !/Okafor/.test(s.title))).toBe(true);
+    void r2;
+  });
+  it("a worker killed mid-request and a repeated message produce one result and one draft", async () => {
+    const { ctx, clock } = bare(); seedQuotes(ctx, "base"); let t = 1_000_000;
+    const r: any = handleUtterance(ctx, { text: `${PLUMBER} Draft the follow-up.`, via: "text" });
+    await processQueue(ctx, base(() => new Date(t), { workerId: "A", crashAfterStep: "compose" })); t += 2000; await processQueue(ctx, base(() => new Date(t), { workerId: "B" }));
+    const again: any = handleUtterance(ctx, { text: `${PLUMBER} Draft the follow-up.`, via: "text" }); void again;
+    expect(count(ctx, "results")).toBe(1); expect(count(ctx, "result_drafts")).toBe(1); expect(count(ctx, "result_versions", `result_id='${r.reply.data.resultId}' AND request_revision=1`)).toBe(1);
+    void clock;
+  });
+});
+
+describe("model-assisted judgment: only for what the rules cannot settle, and only when it checks out", () => {
+  const TIGHT = (ctx: any) => importText(ctx, { kind: "note", title: "Bathroom tighter plan", text: "Budget cap $4,000 all-in for the bathroom.", at: "2026-11-16T09:00:00.000Z" });
+  const settle = async (opts: { budget?: number; transport?: Transport | null }) => {
+    const { ctx, clock } = bare(); seedQuotes(ctx, "base"); TIGHT(ctx); if (opts.budget != null) setS(ctx.db, "daily_budget_usd", opts.budget); setDecisionTransport(opts.transport === undefined ? null : opts.transport);
+    const r: any = await ask(ctx, clock, PLUMBER); return { ctx, v: resultView(ctx, r.reply.data.resultId) as any };
+  };
+  it("the rules alone say that no option fits, with the model disabled, and no call is made", async () => {
+    const m = MOCK("{}"); const { ctx, v } = await settle({ transport: m.t, budget: 0 });
+    expect(v.analysis.recommendation.kind).toBe("none_fits"); expect(v.mode).toBe("rules only (paid model off)"); expect(m.calls.length).toBe(0); expect(money(ctx)).toBe(0); expect(v.body).toMatch(/No option meets/);
+  });
+  it("no provider configured: same, labelled", async () => { const { v } = await settle({ transport: null, budget: 5 }); expect(v.mode).toBe("rules only (model not configured)"); });
+  it("exhausted budget: labelled, no call", async () => {
+    const m = MOCK("{}"); const { ctx, v } = await settle({ transport: m.t, budget: 0.0000001 }); expect(v.mode).toMatch(/budget used/); expect(m.calls.length).toBe(0); expect(money(ctx)).toBe(0);
+  });
+  it("a valid mock answer is kept, labelled as mock, with its citations as sources", async () => {
+    const m = MOCK(JSON.stringify({ choice: "Okafor & Sons", rationale: "Neither fits the $4,000 cap; Okafor & Sons is closest at $5,100 and has the earlier start.", citations: ["E1", "E2"] }));
+    const { ctx, v } = await settle({ transport: m.t, budget: 5 });
+    expect(m.calls.length).toBe(1); expect(v.mode).toBe("model-assisted (mock model)"); expect(v.body).toMatch(/Model-assisted judgment/); expect(v.body).toMatch(/Okafor & Sons is closest/); expect(v.sources.some((s: any) => s.role === "cited by the model-assisted judgment")).toBe(true);
+    expect(all(ctx.db, "SELECT SUM(model_calls) n FROM jobs")[0].n).toBe(1);
+  });
+  it("a provider failure leaves the rules' answer, labelled, and a retry makes no second result", async () => {
+    const t: Transport = async () => { const e: any = new Error("503"); e.status = 503; throw e; };
+    const { ctx, v } = await settle({ transport: t, budget: 5 }); expect(v.mode).toMatch(/model call failed/); expect(v.analysis.recommendation.kind).toBe("none_fits"); expect(count(ctx, "results")).toBe(1);
+  }, 20000);
+  it("an answer that invents a number, cites an unknown excerpt, or names an unknown option is rejected", async () => {
+    const bad = [{ choice: "Okafor & Sons", rationale: "Okafor & Sons is cheapest at $3,900 all-in, well under the cap.", citations: ["E1"] }, { choice: "Okafor & Sons", rationale: "Okafor & Sons is the better choice overall here.", citations: ["E99"] }, { choice: "Acme Pipes", rationale: "Acme Pipes would be the better choice overall here.", citations: ["E1"] }];
+    const modes: string[] = []; for (const b of bad) { const { v } = await settle({ transport: MOCK(JSON.stringify(b)).t, budget: 5 }); modes.push(v.mode); expect(v.body).not.toMatch(/Model-assisted judgment/); }
+    expect(modes[0]).toMatch(/rejected: it used the number \$3,900/); expect(modes[1]).toMatch(/cited E99/); expect(modes[2]).toMatch(/option that is not in the evidence/);
+  });
+  it("sources marked local-only are never sent to a model", async () => {
+    const m = MOCK(JSON.stringify({ choice: null, rationale: "No option fits the stated cap here at all.", citations: ["E1"] })); const { ctx, clock } = bare(); seedQuotes(ctx, "base"); TIGHT(ctx); setS(ctx.db, "daily_budget_usd", 5); setDecisionTransport(m.t);
+    ctx.db.exec("UPDATE evidence_sources SET local_only=1"); const r: any = await ask(ctx, clock, PLUMBER); const v: any = resultView(ctx, r.reply.data.resultId);
+    expect(m.calls.length).toBe(0); expect(v.mode).toMatch(/local-only/); setDecisionTransport(undefined);
   });
 });

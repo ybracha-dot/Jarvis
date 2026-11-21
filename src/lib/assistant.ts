@@ -11,6 +11,7 @@ import { enqueue as notify } from "./notify";
 import { searchEvidence, getItem, listSources, tokens, ownerName, factOut, Hit, SourceMode } from "./evidence";
 import { addDays, localDate, fmtDateTime, DEFAULT_TZ, localHM, parseLocal } from "./time";
 import { deepLinkBase } from "./capture";
+import { composeDecision, synthesizeJudgment, recheckAnalysis, DECISION_Q, DRAFT_CUE, AnalysisJson } from "./decision-run";
 
 // ---------- understanding ----------
 export type Deliverable = "draft" | "brief" | "answer";
@@ -33,7 +34,7 @@ export function resolveWhen(text: string, now: Date, tz = DEFAULT_TZ): Intent["w
 }
 
 export function understand(ctx: Ctx, text: string, o: { projectHint?: string | null } = {}): Intent {
-  const deliverable: Deliverable = DRAFT_STRONG.test(text) ? "draft" : BRIEF.test(text) ? "brief" : "answer";
+  const deliverable: Deliverable = DECISION_Q.test(text) ? "answer" : DRAFT_STRONG.test(text) ? "draft" : BRIEF.test(text) ? "brief" : "answer";   // a decision request that also asks for a draft is a decision with a next-step draft
   const when = resolveWhen(text, ctx.now()); const tk = tokens(text);
   const projects = all(ctx.db, "SELECT id,name,aliases FROM projects WHERE owner_id=? AND status!='archived'", ctx.owner);
   const low = text.toLowerCase();
@@ -155,12 +156,13 @@ export function resumeRequest(ctx: Ctx, requestId: string) {
 
 /** Extra instructions are applied on top of the request, in order. What cannot be applied is said, not silently dropped. */
 export function parseInstructions(texts: string[]) {
-  const out: { maxSentences?: number; preferValue?: string; applied: string[]; unapplied: string[] } = { applied: [], unapplied: [] };
+  const out: { maxSentences?: number; preferValue?: string; wantDraft?: boolean; applied: string[]; unapplied: string[] } = { applied: [], unapplied: [] };
   const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
   for (const t of texts) {
     let used = false; let m: RegExpExecArray | null;
     if ((m = /\b(?:keep it to|no more than|at most|in|under|just)\s+(\w+)\s+sentences?\b/i.exec(t))) { const n = NUM[m[1].toLowerCase()] ?? Number(m[1]); if (n >= 1 && n <= 10) { out.maxSentences = n; out.applied.push(`Keep it to ${n} sentence${n === 1 ? "" : "s"}`); used = true; } }
     if ((m = /\buse the (monday|tuesday|wednesday|thursday|friday|saturday|sunday) (?:decision|date|plan)\b/i.exec(t))) { out.preferValue = m[1].toLowerCase(); out.applied.push(`Use the ${m[1].toLowerCase()} decision`); used = true; }
+    if (/\b(draft it|also draft|prepare (?:a |the )?(?:draft|message|email)|write (?:it|the message|the email)|draft the follow[- ]?up)\b/i.test(t)) { out.wantDraft = true; out.applied.push("Prepare the follow-up draft"); used = true; }
     if (!used) out.unapplied.push(t);
   }
   return out;
@@ -231,7 +233,9 @@ function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string
     const relevant = [...new Set([...sents.filter((s2) => matchedTerms(intent.terms, s2).length > 0).slice(0, 2), ...sents.filter((s2) => SALIENT.test(s2)).slice(0, 3)])].slice(0, 4);
     return { id: it.id, title: it.title, kind: it.kind, at: it.at, revision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode, author: it.author, participants: it.participants, matched: m, say: relevant.length ? relevant : sents.slice(0, 1), todo: sents.filter((s2) => TODO.test(s2)), unknown: sents.filter((s2) => UNKNOWN.test(s2) && !TODO.test(s2)),
       facts: it.facts.map((f) => ({ ...f, itemTitle: it.title, itemKind: it.kind, itemAt: it.at, itemRevision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode })) }; });
-  return { mode: "digest", question: String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? ""), items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
+  const question = String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? "");
+  const localOnly = items.some((it) => !!get(ctx.db, "SELECT 1 x FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.id=? AND s.local_only=1", it.id));
+  return { mode: "digest", decide: DECISION_Q.test(question), localOnly, question, items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
 }
 
 function researchBrief(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
@@ -351,7 +355,15 @@ function composeBrief(ctx: Ctx, b: any, intent: Intent) {
   return { title: `Ready for ${fmtDay(b.date)}`, body: lines.join("\n"), summary, sources, flags, applied: [] as string[], unapplied: [] as string[], unavailable, actions: top.map((t) => t.action) };
 }
 
-function composeAnswer(ctx: Ctx, b: any) { return b.mode === "digest" ? composeDigest(ctx, b) : composeMeeting(ctx, b); }
+function composeAnswer(ctx: Ctx, b: any, instr?: ReturnType<typeof parseInstructions>) {
+  if (b.mode !== "digest") return composeMeeting(ctx, b);
+  if (b.decide) {
+    const d = composeDecision(ctx, b, String(b.question ?? ""), { wantDraft: !!instr?.wantDraft || DRAFT_CUE.test(String(b.question ?? "")), applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] });
+    if (d) return d;
+    const dg = composeDigest(ctx, b); dg.flags.unshift({ kind: "not_comparable", text: "You asked for a decision, but I could not find two options with comparable prices, capacity or dates in the sources. Here is what the sources say." }); return dg;
+  }
+  return composeDigest(ctx, b);
+}
 
 function composeDigest(ctx: Ctx, b: any) {
   const sources: SrcRef[] = []; const flags: any[] = []; const items: any[] = b.items ?? [];
@@ -413,7 +425,7 @@ export function verifyResult(ctx: Ctx, c: { sources: SrcRef[]; body: string }) {
 const fmtDayFromQuote = (_s: SrcRef) => null as string | null;
 
 // ---------- saving ----------
-export function saveResult(ctx: Ctx, o: { requestId: string; revision: number; title: string; body: string; summary: string; sources: SrcRef[]; flags: any[]; unavailable: any[]; kind: string; projectId: string | null; verification?: any }) {
+export function saveResult(ctx: Ctx, o: { requestId: string; revision: number; title: string; body: string; summary: string; sources: SrcRef[]; flags: any[]; unavailable: any[]; kind: string; projectId: string | null; verification?: any; analysis?: unknown; mode?: string; draft?: { to: string | null; subject: string; body: string; purpose: string } | null }) {
   return tx(ctx.db, () => {
     const r = get(ctx.db, "SELECT * FROM requests WHERE id=? AND owner_id=?", o.requestId, ctx.owner); if (!r) throw new HttpError(404, "No such request");
     // A result produced for an older instruction can never replace the current one.
@@ -421,7 +433,8 @@ export function saveResult(ctx: Ctx, o: { requestId: string; revision: number; t
     const resultId = r.result_id as string; const have = get(ctx.db, "SELECT version FROM result_versions WHERE result_id=? AND request_revision=?", resultId, o.revision);
     if (have) return { discarded: false as const, resultId, version: have.version as number, replay: true };
     const version = ((get(ctx.db, "SELECT MAX(version) v FROM result_versions WHERE result_id=?", resultId)?.v as number | null) ?? 0) + 1; const now = ctx.now().toISOString();
-    run(ctx.db, "INSERT INTO result_versions(result_id,version,request_revision,body,summary,sources,flags,unavailable,created_at) VALUES(?,?,?,?,?,?,?,?,?)", resultId, version, o.revision, o.body, o.summary, JSON.stringify(o.sources), JSON.stringify([...o.flags, ...(o.verification?.problems ?? []).map((p: string) => ({ kind: "verification", text: p }))]), JSON.stringify(o.unavailable), now);
+    run(ctx.db, "INSERT INTO result_versions(result_id,version,request_revision,body,summary,sources,flags,unavailable,created_at,analysis,mode) VALUES(?,?,?,?,?,?,?,?,?,?,?)", resultId, version, o.revision, o.body, o.summary, JSON.stringify(o.sources), JSON.stringify([...o.flags, ...(o.verification?.problems ?? []).map((p: string) => ({ kind: "verification", text: p }))]), JSON.stringify(o.unavailable), now, o.analysis ? JSON.stringify(o.analysis) : null, o.mode ?? "rules");
+    if (o.draft) run(ctx.db, "INSERT OR REPLACE INTO result_drafts(result_id,version,to_addr,subject,body,purpose) VALUES(?,?,?,?,?,?)", resultId, version, o.draft.to, o.draft.subject, o.draft.body, o.draft.purpose);
     run(ctx.db, "UPDATE results SET version=?, title=?, kind=?, project_id=?, state='current', updated_at=? WHERE id=?", version, o.title, o.kind, o.projectId, now, resultId);
     run(ctx.db, "UPDATE requests SET status='done', project_id=COALESCE(?,project_id), updated_at=? WHERE id=?", o.projectId, now, o.requestId);
     return { discarded: false as const, resultId, version, replay: false };
@@ -436,9 +449,15 @@ export function resultView(ctx: Ctx, id: string, version?: number) {
   const sources = v ? (JSON.parse(v.sources as string) as SrcRef[]).map((s) => ({ ...s, link: `/evidence/${s.itemId}?q=${encodeURIComponent(s.quote.slice(0, 80))}`, url: `${deepLinkBase()}/evidence/${s.itemId}`, live: (() => { const it = getItem(ctx, s.itemId); return !!it && !("forgotten" in it && it.forgotten) && !("revoked" in it && it.revoked); })() })) : [];
   const revs = all(ctx.db, "SELECT revision, text, origin, at FROM request_revisions WHERE request_id=? ORDER BY revision", req.id).map((r) => ({ revision: r.revision as number, text: String(r.text).replace(/^\(asked again\)\s*/, ""), origin: String(r.origin).split("#")[0], at: r.at as string }));
   return { id: res.id as string, kind: res.kind as string, title: res.title as string, state: res.state as string, projectId: res.project_id as string | null, projectName: res.project_id ? (get(ctx.db, "SELECT name FROM projects WHERE id=?", res.project_id)?.name as string) : null, version: (v?.version as number) ?? 0, latestVersion: res.version as number, versions: vers.map((x) => ({ version: x.version as number, requestRevision: x.request_revision as number, summary: x.summary as string, at: x.created_at as string, stale: x.stale as string | null })),
+    analysis: v?.analysis ? JSON.parse(v.analysis as string) : null, mode: (v?.mode as string) ?? "rules", draft: (() => { if (!v) return null; const d = get(ctx.db, "SELECT * FROM result_drafts WHERE result_id=? AND version=?", res.id, v.version); return d ? { to: d.to_addr as string | null, subject: d.subject as string, body: (d.edited_body ?? d.body) as string, original: d.body as string, edited: !!d.edited_body, purpose: d.purpose as string } : null; })(),
     body: (v?.body as string) ?? null, summary: (v?.summary as string) ?? null, sources, flags: v ? JSON.parse(v.flags as string) : [], unavailable: v ? JSON.parse(v.unavailable as string) : [], stale: (v?.stale as string) ?? null,
     request: { id: req.id as string, text: req.text as string, revision: req.revision as number, origin: req.origin as string, revisions: revs, synthetic: !!req.synthetic }, receipt: rcpt, reads: readsFor(ctx, req.id as string, v ? (v.request_revision as number) : undefined),
     applied: v ? parseInstructions(instructionsFor(ctx, req.id as string, v.request_revision as number)) : null, links: links(res.id as string, req.id as string) };
+}
+export function editDraft(ctx: Ctx, resultId: string, body: string, version?: number) {
+  const res = get(ctx.db, "SELECT id, version FROM results WHERE id=? AND owner_id=?", resultId, ctx.owner); if (!res) throw new HttpError(404, "No such result");
+  const v = version ?? (res.version as number); const d = get(ctx.db, "SELECT 1 x FROM result_drafts WHERE result_id=? AND version=?", resultId, v); if (!d) throw new HttpError(404, "This version has no draft");
+  run(ctx.db, "UPDATE result_drafts SET edited_body=?, edited_at=? WHERE result_id=? AND version=?", body.slice(0, 20000), ctx.now().toISOString(), resultId, v); return { ok: true };
 }
 export const listResults = (ctx: Ctx, o: { projectId?: string; limit?: number } = {}) => all(ctx.db, `SELECT r.id, r.title, r.kind, r.version, r.state, r.project_id, r.updated_at, r.request_id, (SELECT summary FROM result_versions v WHERE v.result_id=r.id AND v.version=r.version) summary FROM results r WHERE r.owner_id=? AND r.version>0 ${o.projectId ? "AND r.project_id=?" : ""} ORDER BY r.updated_at DESC LIMIT ?`, ...[ctx.owner, ...(o.projectId ? [o.projectId] : []), o.limit ?? 30]).map((r) => ({ id: r.id as string, requestId: r.request_id as string, title: r.title as string, kind: r.kind as string, version: r.version as number, state: r.state as string, projectId: r.project_id as string | null, at: r.updated_at as string, summary: r.summary as string | null, link: `/results/${r.id}` }));
 export const listRequests = (ctx: Ctx, limit = 20) => all(ctx.db, "SELECT id FROM requests WHERE owner_id=? ORDER BY updated_at DESC LIMIT ?", ctx.owner, limit).map((r) => receipt(ctx, r.id as string));
@@ -470,7 +489,7 @@ const supervise_goal: Handler = async (api) => {
     await api.step(`retry${round}`, "The reviewer found a gap and sent the work back once", () => { api.event("retry", "The reviewer found a gap and sent the work back once", { problems: verdict.problems }); return true; });
   }
   api.assertNotCancelled();
-  const saved = await api.step("save", "Saving the result", () => saveResult(ctx, { requestId, revision, title: outcome.title, body: outcome.body, summary: outcome.summary, sources: outcome.sources, flags: outcome.flags ?? [], unavailable: outcome.unavailable ?? [], kind: outcome.kind, projectId: outcome.projectId ?? null, verification: verdict }));
+  const saved = await api.step("save", "Saving the result", () => saveResult(ctx, { requestId, revision, title: outcome.title, body: outcome.body, summary: outcome.summary, sources: outcome.sources, flags: outcome.flags ?? [], unavailable: outcome.unavailable ?? [], kind: outcome.kind, projectId: outcome.projectId ?? null, verification: verdict, analysis: outcome.analysis, mode: outcome.mode, draft: outcome.draft }));
   if (saved.discarded) { api.event("discarded", saved.reason); return { discarded: true }; }
   await api.step("announce", "Telling you it is ready", () => {
     const conv = (api.input as any).conversationId as string | null; const rid = saved.resultId; const spoken = `${outcome.summary}${outcome.flags?.length ? ` ${outcome.flags.length} thing${outcome.flags.length === 1 ? "" : "s"} to check.` : ""}`;
@@ -510,17 +529,36 @@ const goal_research: Handler = async (api) => {
 const goal_writer: Handler = async (api) => {
   const ctx = api.ctx; const { requestId, revision, intent, bundle } = api.input as { requestId: string; revision: number; intent: Intent; bundle: any };
   const instr = parseInstructions(instructionsFor(ctx, requestId, revision));
-  const out = await api.step("compose", "Writing it from the sources", () => {
+  const out: any = await api.step("compose", "Writing it from the sources", () => {
     if (bundle.gap) return { kind: intent.deliverable, title: "Nothing to base it on", body: bundle.gap, summary: bundle.gap, sources: [], flags: [{ kind: "gap", text: bundle.gap }], applied: [], unapplied: instr.unapplied, unavailable: bundle.unavailable ?? [], projectId: null };
-    const c = intent.deliverable === "draft" ? composeDraft(ctx, bundle, instr, intent) : intent.deliverable === "brief" ? composeBrief(ctx, bundle, intent) : composeAnswer(ctx, bundle);
-    return { kind: intent.deliverable, projectId: bundle.projectId ?? intent.projectId ?? null, unavailable: bundle.unavailable ?? [], ...c };
+    const c = intent.deliverable === "draft" ? composeDraft(ctx, bundle, instr, intent) : intent.deliverable === "brief" ? composeBrief(ctx, bundle, intent) : composeAnswer(ctx, bundle, instr);
+    return { kind: intent.deliverable, projectId: bundle.projectId ?? intent.projectId ?? null, unavailable: bundle.unavailable ?? [], mode: "rules", ...c };
   });
+  // Only what the rules could not settle may go to a model, and only if it is on, authorized and allowed for these sources.
+  if (out.analysis && out.needsJudgment) {
+    const j = await api.step("judgment", "Asking for an evidence-bounded judgment, if allowed", async () => {
+      const r = await synthesizeJudgment(ctx, { options: out.analysis.options, constraints: [], recommendation: out.analysis.recommendation, currency: out.analysis.currency, notes: out.analysis.notes } as any, String(bundle.question ?? ""), { sources: out.sources, localOnly: !!out.localOnly, retryKey: `decision:${requestId}:r${revision}`, onCall: () => api.modelCall() });
+      return { text: r.text, citations: r.citations, info: r.info };
+    });
+    out.mode = j.info.mode;
+    if (j.text) { out.body += `\n\n**Model-assisted judgment** (${j.info.mode}; checked against the sources and the computed totals)\n\n${j.text}`; for (const c of j.citations) if (!out.sources.some((x: any) => x.itemId === c.itemId && x.quote === c.quote && x.role === "cited by the model-assisted judgment")) out.sources.push({ ...c, role: "cited by the model-assisted judgment" }); }
+    else out.flags.push({ kind: "model_unavailable", text: `The rules could not settle this and no model judgment was added: ${j.info.mode.replace(/^rules only \(|\)$/g, "")}.` });
+  }
   return out;
 };
 
 const goal_reviewer: Handler = async (api) => {
   const { content } = api.input as { content: any };
-  const v = await api.step("verify", "Checking every cited source", () => (content.sources?.length || !content.flags?.some((f: any) => f.kind === "gap")) ? verifyResult(api.ctx, content) : { ok: true, problems: [], checks: [{ name: "Nothing to cite", ok: true, detail: "The request found no sources, and says so." }] });
+  const request = String(get(api.ctx.db, "SELECT text FROM requests WHERE id=?", (api.input as any).requestId)?.text ?? "");
+  const v = await api.step("verify", "Checking every cited source", () => {
+    const base = (content.sources?.length || !content.flags?.some((f: any) => f.kind === "gap")) ? verifyResult(api.ctx, content) : { ok: true, problems: [] as string[], checks: [{ name: "Nothing to cite", ok: true, detail: "The request found no sources, and says so." }] };
+    if (content.analysis) {
+      const pr = recheckAnalysis(api.ctx, content.analysis as AnalysisJson, request);
+      base.checks.push({ name: "Totals recomputed from the sources as they are now", ok: pr.length === 0, detail: pr.length ? pr.join(" ") : "Every total and the recommendation reproduce." });
+      if (pr.length) { base.problems.push(...pr); base.ok = false; }
+    }
+    return base;
+  });
   return v;
 };
 
