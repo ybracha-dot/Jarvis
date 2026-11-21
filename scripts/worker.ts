@@ -5,6 +5,7 @@ import { tick, heartbeat } from "../src/lib/scheduler";
 import { scanCalendarFeed } from "../src/lib/adapters";
 import { processQueue, recoverStale } from "../src/lib/jobs";
 import { HANDLERS } from "../src/lib/handlers";
+import { isFeedDue, readFeed, refreshFreshness } from "../src/lib/blackboard";
 import { noteRunner, leaseMs, paceMs } from "../src/lib/runner";
 
 const modes: Mode[] = ["demo", "personal"];
@@ -27,6 +28,7 @@ async function once() {
   for (const mode of modes) {
     const ctx = makeCtx(mode);
     heartbeat(ctx);
+    try { if (isFeedDue(ctx)) { const f = await readFeed(ctx); console.log(`[${new Date().toISOString()}] ${mode}: Blackboard feed: ${f.kind}${f.ok ? "" : `, ${f.message}`}`); } refreshFreshness(ctx); } catch (e) { console.error(`[${mode}] blackboard`, (e as Error).message); }
     try {
       const r = await tick(ctx);
       if (r.skipped && mode === "personal") continue;

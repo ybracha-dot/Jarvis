@@ -24,6 +24,7 @@ import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJ
 import { outcomes } from "./outcomes";
 import { submitGoal, GoalInput as AssistantGoalInput, receipt as goalReceipt, reviseRequest, refreshRequest, cancelRequest, resumeRequest, resultView, editDraft, listResults, listRequests, readsFor } from "./assistant";
 import { listSources, getItem, importText, revokeSource, reauthorizeSource, forgetItem, searchEvidence, listItems, tokens, SOURCE_KINDS } from "./evidence";
+import { blackboardStatus, readFeed, saveFeed, removeFeed } from "./blackboard";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
 import { createToken, listTokens, revokeToken, rotateToken, NewToken, startProbe, probeState, editProbe } from "./mcp-auth";
@@ -123,11 +124,21 @@ on("POST", "/asks/:id/resume", (c, r) => { const out = resumeRequest(c, r.params
 on("GET", "/results", (c, r) => ({ results: listResults(c, { projectId: r.query.get("project") ?? undefined, limit: Number(r.query.get("limit") ?? 30) || 30 }) }));
 on("POST", "/results/:id/draft", (c, r) => editDraft(c, r.params.id, r.json(z.object({ body: z.string().min(1).max(20000), version: z.number().int().optional() })).body));
 on("GET", "/results/:id", (c, r) => resultView(c, r.params.id, r.query.get("version") ? Number(r.query.get("version")) : undefined));
+on("GET", "/blackboard", (c) => blackboardStatus(c));
+on("POST", "/blackboard/check", async (c, r) => { const b = r.json(z.object({ url: z.string().min(8).max(2000) })); return readFeed(c, { dryRun: true, url: b.url }); });
+on("POST", "/blackboard/save", async (c, r) => { const b = r.json(z.object({ url: z.string().min(8).max(2000) })); const out = await saveFeed(c, b.url); kick(c.mode); return out; });
+on("POST", "/blackboard/read", async (c) => { const out = await readFeed(c); kick(c.mode); return out; });
+on("POST", "/blackboard/remove", (c) => removeFeed(c));
 on("GET", "/evidence/sources", (c) => ({ sources: listSources(c) }));
 on("GET", "/evidence/items", (c, r) => ({ items: listItems(c, { projectId: r.query.get("project") ?? undefined, kind: r.query.get("kind") ?? undefined }) }));
 on("GET", "/evidence/items/:id", (c, r) => { const it = getItem(c, r.params.id); if (!it) throw new HttpError(404, "Not found"); return it; });
 on("GET", "/evidence/search", (c, r) => ({ hits: searchEvidence(c, tokens(r.query.get("q") ?? ""), { limit: 8 }) }));
-on("POST", "/evidence/import", (c, r) => importText(c, r.json(z.object({ kind: z.enum(SOURCE_KINDS), title: z.string().trim().min(1).max(160), text: z.string().min(1).max(200000), at: z.string().optional(), author: z.string().max(80).optional(), projectId: z.string().nullish(), label: z.string().max(80).optional() }))));
+on("POST", "/evidence/import", (c, r) => {
+  const b = r.json(z.object({ kind: z.enum(SOURCE_KINDS), title: z.string().trim().min(1).max(160), text: z.string().min(1).max(200000), at: z.string().optional(), author: z.string().max(80).optional(), projectId: z.string().nullish(), projectName: z.string().trim().max(120).optional(), label: z.string().max(80).optional(), corrects: z.string().max(60).nullish(), localOnly: z.boolean().optional() }));
+  const pid = b.projectId ?? (b.projectName ? createProject(c, { name: b.projectName, kind: "project" }).id : null);
+  if (b.corrects) { const orig = getItem(c, b.corrects); if (!orig || ("forgotten" in orig && orig.forgotten)) throw new HttpError(404, "The note you are correcting is not available"); }
+  const out = importText(c, { ...b, projectId: pid }); return { ...out, projectId: pid };
+});
 on("POST", "/evidence/sources/:id/revoke", (c, r) => revokeSource(c, r.params.id));
 on("POST", "/evidence/sources/:id/authorize", (c, r) => reauthorizeSource(c, r.params.id));
 on("POST", "/evidence/items/:id/forget", (c, r) => { r.json(z.object({ confirm: z.literal(true) })); return forgetItem(c, r.params.id); });

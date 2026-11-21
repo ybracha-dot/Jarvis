@@ -75,6 +75,7 @@ export default function TodayPage() {
         </Card>
       </section>
 
+      <TryCard />
       <AgentsAndOutput />
 
       {empty && <Card className="p-5"><Empty title="This private workspace is empty" hint="Nothing is connected yet. Import a syllabus or follow the connection checklist." ><div className="flex gap-2 justify-center"><Link href="/sources" className="inline-flex rounded-lg px-3.5 py-2 text-sm bg-accent text-[#04141e] font-medium">Import a syllabus</Link><Button onClick={() => open("connections")}>Open checklist</Button></div></Empty></Card>}
@@ -134,6 +135,13 @@ export default function TodayPage() {
     {pendingCount > 0 && <aside aria-label="Decisions" className="xl:sticky xl:top-16 self-start order-first xl:order-none"><DecisionList /></aside>}
     </div>
   );
+}
+
+/** Shown until you have imported something of your own. It points at the three-step private run. */
+function TryCard() {
+  const q = useQuery<any>("/evidence/sources");
+  if (!q.data || q.data.sources.some((x: any) => x.mode === "imported" && x.items > 0)) return null;
+  return <Link href="/try" className="block rounded-xl border border-accent-dim bg-[#0b1c29] p-4 hover:border-accent transition-colors" data-testid="try-card"><div className="flex items-center gap-2"><b className="text-[16px] font-medium">Try Jarvis with one real note</b><ArrowRight className="size-4 text-accent ml-auto" aria-hidden /></div><p className="text-[14px] text-muted mt-1">Paste one note, add a later correction, ask what was decided. About three minutes. It stays on this computer, with no key and no login.</p></Link>;
 }
 
 const SRC: Record<string, string> = { agent: "Jarvis", claude: "Claude", you: "You", task: "You" };

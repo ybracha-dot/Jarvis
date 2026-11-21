@@ -86,7 +86,7 @@ export function extractFacts(body: string, at: string, author: string | null, ow
 }
 
 // ---------- ingest ----------
-export interface ItemInput { sourceId: string; externalId: string; kind: string; title: string; author?: string | null; participants?: string[]; at: string; body: string; projectId?: string | null }
+export interface ItemInput { sourceId: string; externalId: string; kind: string; title: string; author?: string | null; participants?: string[]; at: string; body: string; projectId?: string | null; corrects?: string | null }
 export const ownerName = (ctx: Ctx): string => getSetting<string>(ctx.db, "owner_name", "Yonathan");
 
 function ftsPutItem(ctx: Ctx, id: string, title: string, body: string) { run(ctx.db, "DELETE FROM evidence_fts WHERE ref=?", `item:${id}`); run(ctx.db, "INSERT INTO evidence_fts(ref,owner,title,body) VALUES(?,?,?,?)", `item:${id}`, ctx.owner, title, body); }
@@ -120,9 +120,9 @@ export function ingestItem(ctx: Ctx, i: ItemInput): { id: string; created: boole
     if (ex && ex.body_sha === bodySha && !ex.tombstone) { markSource(ctx, i.sourceId, { attempt: true, success: true }); return { id: ex.id as string, created: false, revised: false, unchanged: true, revision: ex.revision as number }; }
     let id: string; let revision = 1;
     if (ex) { id = ex.id as string; revision = (ex.revision as number) + 1; run(ctx.db, "UPDATE evidence_items SET revision=?, kind=?, title=?, author=?, participants=?, at=?, body=?, body_sha=?, project_id=?, tombstone=0, updated_at=? WHERE id=?", revision, i.kind, i.title, i.author ?? null, JSON.stringify(i.participants ?? []), i.at, i.body, bodySha, i.projectId ?? ex.project_id ?? null, now, id); }
-    else { id = `ev_${sha(`${ctx.owner}|${i.sourceId}|${i.externalId}`).slice(0, 12)}`; run(ctx.db, "INSERT INTO evidence_items(id,owner_id,source_id,external_id,revision,kind,title,author,participants,at,body,body_sha,project_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, ctx.owner, i.sourceId, i.externalId, 1, i.kind, i.title, i.author ?? null, JSON.stringify(i.participants ?? []), i.at, i.body, bodySha, i.projectId ?? src.project_id ?? null, now, now); }
+    else { id = `ev_${sha(`${ctx.owner}|${i.sourceId}|${i.externalId}`).slice(0, 12)}`; run(ctx.db, "INSERT INTO evidence_items(id,owner_id,source_id,external_id,revision,kind,title,author,participants,at,body,body_sha,project_id,created_at,updated_at,corrects) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, ctx.owner, i.sourceId, i.externalId, 1, i.kind, i.title, i.author ?? null, JSON.stringify(i.participants ?? []), i.at, i.body, bodySha, i.projectId ?? src.project_id ?? null, now, now, i.corrects ?? null); }
     run(ctx.db, "INSERT OR REPLACE INTO evidence_revisions(item_id,revision,body,at) VALUES(?,?,?,?)", id, revision, i.body, now);
-    indexItem(ctx, id); reconcile(ctx, (get(ctx.db, "SELECT project_id FROM evidence_items WHERE id=?", id)!.project_id as string | null));
+    indexItem(ctx, id); reconcile(ctx, (get(ctx.db, "SELECT project_id FROM evidence_items WHERE id=?", id)!.project_id as string | null)); applyCorrections(ctx);
     markSource(ctx, i.sourceId, { attempt: true, success: true, state: src.state === "needs_signin" ? "needs_signin" : "ok" });
     if (ex) invalidateResultsCiting(ctx, [id], `A source it cites (“${i.title}”) changed to revision ${revision}.`, revision);
     return { id, created: !ex, revised: !!ex, unchanged: false, revision };
@@ -145,6 +145,13 @@ export function reconcile(ctx: Ctx, projectId: string | null) {
   }
 }
 
+/** An item the owner marked as a correction of another replaces that item's dates. The original wording stays, labelled superseded. */
+function applyCorrections(ctx: Ctx) {
+  for (const c of all(ctx.db, "SELECT i.id, i.corrects FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.corrects IS NOT NULL AND i.tombstone=0 AND s.revoked_at IS NULL", ctx.owner)) {
+    const mine = all(ctx.db, "SELECT id FROM evidence_facts WHERE item_id=? AND kind='date' ORDER BY start DESC", c.id); if (!mine.length) continue;
+    for (const o of all(ctx.db, "SELECT id FROM evidence_facts WHERE item_id=? AND kind='date'", c.corrects)) run(ctx.db, "UPDATE evidence_facts SET superseded_by=? WHERE id=?", mine[0].id, o.id);
+  }
+}
 export function revokeSource(ctx: Ctx, id: string) {
   const s = get(ctx.db, "SELECT label FROM evidence_sources WHERE id=? AND owner_id=?", id, ctx.owner); if (!s) throw new HttpError(404, "Source not found");
   tx(ctx.db, () => {
@@ -217,14 +224,14 @@ export function getItem(ctx: Ctx, id: string) {
   const it = get(ctx.db, "SELECT i.*, s.label slabel, s.mode smode, s.revoked_at srev, s.kind skind FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.id=? AND i.owner_id=?", id, ctx.owner);
   if (!it) return null; if (it.tombstone) return { id, forgotten: true as const };
   if (it.srev) return { id, revoked: true as const, title: it.title as string, sourceLabel: it.slabel as string };
-  return { id, forgotten: false as const, revoked: false as const, title: it.title as string, kind: it.kind as string, author: it.author as string | null, participants: JSON.parse(it.participants as string) as string[], at: it.at as string, body: it.body as string, revision: it.revision as number, sourceId: it.source_id as string, sourceLabel: it.slabel as string, mode: it.smode as SourceMode, projectId: it.project_id as string | null, facts: all(ctx.db, "SELECT * FROM evidence_facts WHERE item_id=? ORDER BY start", id).map(factOut) };
+  return { id, forgotten: false as const, revoked: false as const, title: it.title as string, kind: it.kind as string, author: it.author as string | null, participants: JSON.parse(it.participants as string) as string[], at: it.at as string, body: it.body as string, revision: it.revision as number, sourceId: it.source_id as string, sourceLabel: it.slabel as string, mode: it.smode as SourceMode, projectId: it.project_id as string | null, corrects: (it.corrects as string | null) ?? null, facts: all(ctx.db, "SELECT * FROM evidence_facts WHERE item_id=? ORDER BY start", id).map(factOut) };
 }
 export const listItems = (ctx: Ctx, o: { projectId?: string; kind?: string } = {}) => all(ctx.db, `SELECT i.id, i.title, i.kind, i.at, i.revision, i.project_id, s.label slabel, s.mode smode FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.tombstone=0 AND s.revoked_at IS NULL ${o.projectId ? "AND i.project_id=?" : ""} ${o.kind ? "AND i.kind=?" : ""} ORDER BY i.at DESC LIMIT 100`, ...[ctx.owner, ...(o.projectId ? [o.projectId] : []), ...(o.kind ? [o.kind] : [])]);
 
 /** Paste, export or file import. The user chose it, so it is labelled imported. */
-export function importText(ctx: Ctx, o: { kind: string; title: string; text: string; at?: string; author?: string; participants?: string[]; projectId?: string | null; label?: string; externalId?: string }) {
-  const src = registerSource(ctx, { kind: o.kind, label: o.label ?? `Imported ${o.kind}`, mode: "imported", projectId: o.projectId ?? null });
-  const r = ingestItem(ctx, { sourceId: src.id, externalId: o.externalId ?? sha(o.title + o.text).slice(0, 16), kind: o.kind, title: o.title, author: o.author ?? null, participants: o.participants, at: o.at ?? ctx.now().toISOString(), body: o.text, projectId: o.projectId ?? null });
+export function importText(ctx: Ctx, o: { kind: string; title: string; text: string; at?: string; author?: string; participants?: string[]; projectId?: string | null; label?: string; externalId?: string; corrects?: string | null; localOnly?: boolean }) {
+  const src = registerSource(ctx, { kind: o.kind, label: o.label ?? `Imported ${o.kind}`, mode: "imported", projectId: o.projectId ?? null, localOnly: o.localOnly });
+  const r = ingestItem(ctx, { sourceId: src.id, externalId: o.externalId ?? sha(o.title + o.text).slice(0, 16), kind: o.kind, title: o.title, author: o.author ?? null, participants: o.participants, at: o.at ?? ctx.now().toISOString(), body: o.text, projectId: o.projectId ?? null, corrects: o.corrects ?? null });
   return { ...r, sourceId: src.id };
 }
 export const hash8 = (s: string) => crypto.createHash("sha1").update(s).digest("hex").slice(0, 8);

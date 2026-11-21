@@ -18,7 +18,7 @@ function Result({ id }: { id: string }) {
   const sp = useSearchParams(); const ver = sp.get("version");
   const q = useQuery<any>(`/results/${id}${ver ? `?version=${ver}` : ""}`, { poll: 1500 });
   const [instr, setInstr] = useState(""); const [copied, setCopied] = useState(false); const [msg, setMsg] = useState<string | null>(null);
-  const revise = useAction(async () => { await api(`/asks/${q.data.request.id}/revise`, { body: { text: instr } }); setInstr(""); setMsg("Got it. Jarvis keeps what still applies and redoes only what changed. The page updates when the new version is ready."); });
+  const revise = useAction(async () => { await api(`/asks/${q.data.request.id}/revise`, { body: { text: instr || "Draft it please." } }); setInstr(""); setMsg("Got it. Jarvis keeps what still applies and redoes only what changed. The page updates when the new version is ready."); });
   const cancel = useAction(async () => { await api(`/asks/${q.data.request.id}/cancel`, { body: {} }); });
   const refresh = useAction(async () => { await api(`/asks/${q.data.request.id}/refresh`, { body: {} }); setMsg("Re-checking the sources now. The earlier version stays."); });
   const resume = useAction(async () => { await api(`/asks/${q.data.request.id}/resume`, { body: {} }); });
@@ -33,7 +33,7 @@ function Result({ id }: { id: string }) {
     <div className="space-y-6 max-w-4xl">
       <Link href="/" className="inline-flex items-center gap-1.5 text-[14px] text-muted hover:text-fg"><ArrowLeft className="size-4" />Today</Link>
       <header className="space-y-2">
-        <div className="flex items-center gap-2 flex-wrap"><Badge tone="accent">{KIND[d.kind] ?? d.kind}</Badge>{d.version > 0 && <Badge>version {d.version}{d.latestVersion !== d.version ? ` of ${d.latestVersion}` : ""}</Badge>}{d.projectName && <Link href={`/projects/${d.projectId}`}><Badge tone="neutral">{d.projectName}</Badge></Link>}{d.request.synthetic && <Badge tone="amber">synthetic source</Badge>}</div>
+        <div className="flex items-center gap-2 flex-wrap"><Badge tone="accent">{KIND[d.kind] ?? d.kind}</Badge>{d.version > 0 && <Badge>version {d.version}{d.latestVersion !== d.version ? ` of ${d.latestVersion}` : ""}</Badge>}{d.projectName && <Link href={`/projects/${d.projectId}`}><Badge tone="neutral">{d.projectName}</Badge></Link>}{d.request.synthetic && <Badge tone="amber">synthetic source</Badge>}{d.analysis && <Badge tone={/^model-assisted/.test(d.mode) ? "accent" : "neutral"} data-testid="exec-mode">{d.mode}</Badge>}</div>
         <h1 className="text-2xl font-semibold tracking-tight break-words" data-testid="result-title">{d.version > 0 ? d.title : d.request.text}</h1>
         <p className="text-[14px] text-muted">Asked {d.request.origin === "claude" ? "from Claude" : d.request.origin === "ask-voice" ? "by voice" : "in Jarvis"}: “{d.request.text}” · <Mono className="text-[13px]">{d.id}</Mono></p>
       </header>
@@ -49,6 +49,9 @@ function Result({ id }: { id: string }) {
       {d.body && <section aria-label={KIND[d.kind]} className="rounded-2xl border border-line bg-surface metal p-5 md:p-6 space-y-1" data-testid="result-body">
         <div className="flex items-center gap-2 mb-2"><h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium flex-1">{KIND[d.kind]}. Nothing has been sent.</h2><Button size="sm" onClick={copy}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />}{copied ? "Copied" : "Copy"}</Button></div>
         {render(d.body)}</section>}
+      {d.analysis && <Calculation a={d.analysis} />}
+      {d.analysis && !d.draft && d.analysis.recommendation.nextAction && d.analysis.recommendation.nextAction.kind !== "none" && <div><Button busy={revise.busy} onClick={() => { setInstr("Draft it please."); revise.run(); }} data-testid="prepare-draft">Prepare the draft for that next step</Button></div>}
+      {d.draft && <DraftEditor id={d.id} draft={d.draft} version={d.version} />}
       {d.flags.length > 0 && <section aria-label="Things to check"><SectionTitle>Check these</SectionTitle><ul className="space-y-2" data-testid="result-flags">{d.flags.map((f: any, i: number) => <li key={i} className="rounded-lg border border-amber-dim bg-[#1a1508] px-3.5 py-2.5 text-[15px] text-[#f6d7a1]" data-flag={f.kind}>{f.text}{f.itemId && <> <Link className="underline underline-offset-2" href={`/evidence/${f.itemId}`}>Open the source</Link></>}</li>)}</ul></section>}
       {d.applied && (d.applied.applied.length > 0 || d.applied.unapplied.length > 0) && <section aria-label="Instructions"><SectionTitle>Your changes</SectionTitle><ul className="text-[15px] space-y-1" data-testid="result-applied">{d.applied.applied.map((a: string) => <li key={a}>✔ {a}</li>)}{d.applied.unapplied.map((a: string) => <li key={a} className="text-muted">Noted, not applied automatically: {a}</li>)}</ul></section>}
       {d.sources.length > 0 && <section aria-label="Sources"><SectionTitle>Where each claim came from</SectionTitle><ul className="space-y-2" data-testid="result-sources">{d.sources.map((s: any, i: number) => (
@@ -74,3 +77,34 @@ function BlockedAsk() {
   return j ? <AskPanel jobId={j.id} ask={j.result.ask} /> : <p className="text-[14px] text-muted">Open the Office to answer.</p>;
 }
 export { ExternalLink, FileText };
+
+const STATUS: Record<string, { tone: "accent" | "amber" | "danger" | "neutral"; label: string }> = { ok: { tone: "accent", label: "meets it" }, violated: { tone: "danger", label: "does not meet it" }, unknown: { tone: "amber", label: "cannot tell yet" }, unconfirmed: { tone: "amber", label: "unconfirmed" } };
+function Calculation({ a }: { a: any }) {
+  return (
+    <section aria-label="Calculation" data-testid="calculation"><SectionTitle>The calculation</SectionTitle>
+      <details className="rounded-xl border border-line bg-surface p-4" open>
+        <summary className="cursor-pointer text-[15px]">How each total was built, from the quoted wording ({a.options.length} options)</summary>
+        {a.constraints.length > 0 && <div className="mt-3 text-[14px]"><b className="font-medium">Your criteria:</b><ul className="mt-1 space-y-0.5">{a.constraints.map((c: any) => <li key={c.id} className="text-muted">{c.kind === "budget_max" ? `Budget ${c.amount}${c.allIn ? " all-in" : ""}` : c.kind === "deadline" ? `Finished before ${new Date(`${c.date}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}` : `At least ${c.qty} ${c.unit}`} <span>· “{c.quote}”{c.source.itemId ? <> · <Link className="underline underline-offset-2" href={`/evidence/${c.source.itemId}`}>{c.source.title}</Link></> : ` · ${c.source.title}`}</span></li>)}</ul></div>}
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">{a.options.map((o: any) => (
+          <div key={o.option} className="rounded-lg border border-line bg-bg p-3.5" data-testid="calc-option">
+            <div className="flex items-center gap-2 flex-wrap"><b className="text-[16px] font-medium">{o.label}</b>{o.total && <Badge tone="neutral">{o.total.text}</Badge>}{o.unknown.length > 0 && <Badge tone="amber">{o.unknown.join(", ")} not stated</Badge>}</div>
+            <table className="w-full text-[14px] mt-2"><tbody>{o.parts.map((p: any, i: number) => <tr key={i} className="border-t border-line align-top"><td className="py-1.5 pr-2">{p.itemId ? <Link className="underline underline-offset-2" href={`/evidence/${p.itemId}?q=${encodeURIComponent((p.quote ?? "").slice(0, 80))}`}>{p.label}</Link> : p.label}{p.quote && <div className="text-[13px] text-muted break-words">“{p.quote}”</div>}</td><td className="py-1.5 text-right mono whitespace-nowrap">{p.amount ?? "—"}</td><td className="py-1.5 pl-2 text-[13px] text-muted">{p.note}</td></tr>)}
+              {o.total && <tr className="border-t-2 border-line"><td className="py-1.5 font-medium">Total</td><td className="py-1.5 text-right mono font-medium whitespace-nowrap">{o.total.text}</td><td /></tr>}</tbody></table>
+            <ul className="mt-2 space-y-1">{o.checks.map((c: any, i: number) => <li key={i} className="text-[14px]"><Badge tone={STATUS[c.status].tone} className="mr-1.5">{STATUS[c.status].label}</Badge>{c.detail}</li>)}</ul>
+            {o.history.length > 0 && <details className="mt-2 text-[13px] text-muted"><summary className="cursor-pointer">What changed: {o.history.length} earlier statement{o.history.length === 1 ? "" : "s"} replaced</summary><ul className="mt-1 space-y-1">{o.history.map((h: any) => <li key={h.id} className="break-words"><span className="line-through decoration-[#59606b]">{h.amount ?? h.date ?? h.name}</span> · {h.source.title}, {fmtDateTime(h.source.at)} · “{h.quote}” <Link className="underline underline-offset-2" href={`/evidence/${h.source.itemId}`}>original</Link></li>)}</ul></details>}
+          </div>))}</div>
+      </details>
+    </section>
+  );
+}
+function DraftEditor({ id, draft, version }: { id: string; draft: any; version: number }) {
+  const [text, setText] = useState<string | null>(null); const [saved, setSaved] = useState(false); const [copied, setCopied] = useState(false);
+  const save = useAction(async () => { await api(`/results/${id}/draft`, { body: { body: text ?? draft.body, version } }); setSaved(true); });
+  return (
+    <section aria-label="Draft" data-testid="draft-editor"><SectionTitle>Ready-to-edit draft. Nothing has been sent.</SectionTitle>
+      <Card className="p-4 space-y-2"><p className="text-[14px]"><b className="font-medium">To:</b> {draft.to ?? "(choose a recipient)"} <span className="text-muted">· </span><b className="font-medium">Subject:</b> {draft.subject}{draft.edited && <Badge tone="neutral" className="ml-2">edited by you</Badge>}</p>
+        <textarea aria-label="Draft text" className={cx(inputCls, "min-h-44 text-[15px]")} value={text ?? draft.body} onChange={(e) => { setText(e.target.value); setSaved(false); }} data-testid="draft-text" />
+        <div className="flex gap-2 flex-wrap items-center"><Button variant="primary" busy={save.busy} disabled={text === null} onClick={() => save.run()} data-testid="draft-save">Save my edits</Button><Button onClick={async () => { try { await navigator.clipboard.writeText(text ?? draft.body); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* blocked */ } }}>{copied ? "Copied" : "Copy"}</Button>{saved && <span className="text-[14px] text-accent">Saved with this version. Rebuilding the answer makes a new version and keeps this one.</span>}</div>
+        {save.error && <ErrorBox error={save.error} />}</Card></section>
+  );
+}

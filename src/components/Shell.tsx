@@ -218,7 +218,7 @@ function Palette({ onClose }: { onClose: () => void }) {
   const items = useMemo(() => [
     ...NAV.map((n) => ({ label: `Go to ${n.label}`, run: () => router.push(n.href) })),
     ...MORE.map((n) => ({ label: `Go to ${n.label}`, run: () => router.push(n.href) })),
-    { label: "I have 20 minutes", run: () => open("quick", "minutes") }, { label: "Resume", run: () => open("quick", "resume") },
+    { label: "Try Jarvis with one real note", run: () => router.push("/try") }, { label: "I have 20 minutes", run: () => open("quick", "minutes") }, { label: "Resume", run: () => open("quick", "resume") },
     { label: "Capture a promise", run: () => open("capture") }, { label: "What changed?", run: () => router.push("/#changes") },
     { label: "Bring in the council", run: () => router.push("/council") }, { label: "Source health", run: () => open("connections") },
   ], [router, open]);
