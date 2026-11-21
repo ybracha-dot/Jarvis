@@ -12,6 +12,7 @@ import { enqueue as notify } from "./notify";
 import { searchEvidence, getItem, listItems, listSources, tokens, ownerName, factOut, Hit, SourceMode } from "./evidence";
 import { addDays, localDate, fmtDateTime, DEFAULT_TZ, localHM, parseLocal } from "./time";
 import { deepLinkBase } from "./capture";
+import { findProject } from "./projects";
 import { composeDecision, composePlan, synthesizeJudgment, recheckAnalysis, shortTitle, DECISION_Q, DRAFT_CUE, AnalysisJson, PlanJson } from "./decision-run";
 import { PLAN_Q } from "./plan";
 import { parseOutcomes, scoreOutcomes, completionOf, completionLine, OutcomeStatus } from "./requested-parts";
@@ -95,8 +96,13 @@ const activeJob = (st: string) => ["queued", "running", "waiting", "blocked"].in
 
 export function submitGoal(ctx: Ctx, raw: GoalInput) {
   const i = GoalInput.parse(raw); const norm = i.text.toLowerCase().replace(/\s+/g, " ").replace(/[.!?]+$/, "");
-  const key = i.dedupKey ? `k:${i.dedupKey}` : `t:${localDate(ctx.now())}:${sha(norm).slice(0, 20)}`;
+  const replayKey = i.dedupKey ? `k:${i.dedupKey}` : `t:${localDate(ctx.now())}:${sha(norm).slice(0, 20)}`;
   return tx(ctx.db, () => {
+    const hint = i.projectHint?.trim();
+    const selected = hint ? findProject(ctx, hint) : null;
+    if (hint && !selected) throw new HttpError(404, "No such project");
+    const intent = understand(ctx, i.text, { projectHint: selected?.id });
+    const key = JSON.stringify([intent.projectId, replayKey]);
     const ex = get(ctx.db, "SELECT * FROM requests WHERE owner_id=? AND dedup_key=?", ctx.owner, key);
     if (ex) {
       const job = ex.job_id ? getJob(ctx, ex.job_id as string) : null;
@@ -105,7 +111,6 @@ export function submitGoal(ctx: Ctx, raw: GoalInput) {
       return { ...receipt(ctx, ex.id as string), duplicate: true, refreshed: false };
     }
     const id = `req_${sha(`${ctx.owner}|${key}`).slice(0, 12)}`; const resultId = `res_${id.slice(4)}`; const now = ctx.now().toISOString();
-    const intent = understand(ctx, i.text, { projectHint: i.projectHint });
     run(ctx.db, "INSERT INTO requests(id,owner_id,dedup_key,title,origin,text,revision,status,project_id,conversation_id,result_id,synthetic,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, ctx.owner, key, shortTitle(i.text, 84), i.origin, i.text, 1, "queued", intent.projectId, i.conversationId ?? null, resultId, i.synthetic ? 1 : 0, now, now);
     run(ctx.db, "INSERT INTO request_revisions(request_id,revision,text,origin,at) VALUES(?,?,?,?,?)", id, 1, i.text, i.origin, now);
     run(ctx.db, "INSERT INTO results(id,owner_id,request_id,kind,title,project_id,version,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", resultId, ctx.owner, id, intent.deliverable, shortTitle(i.text, 84), intent.projectId, 0, "pending", now, now);

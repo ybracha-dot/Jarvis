@@ -258,6 +258,19 @@ CREATE TABLE feed_state(source_id TEXT PRIMARY KEY REFERENCES evidence_sources(i
   /* 7 requested parts: each part of a multi-part request keeps its own status */ `
 ALTER TABLE result_versions ADD COLUMN outcomes TEXT;
 `,
+  /* 8 scope request replay keys to the project selected at intake; preserve request and result IDs */ `
+UPDATE requests SET dedup_key = json_array(
+  json_extract(COALESCE(
+    (SELECT step.result
+       FROM jobs AS job JOIN job_steps AS step ON step.job_id=job.id
+      WHERE job.owner_id=requests.owner_id
+        AND job.dedup_key='goal:' || requests.id || ':r1:a0'
+        AND step.step='understand'),
+    json_object('projectId', requests.project_id)
+  ), '$.projectId'),
+  dedup_key
+);
+`,
 ];
 
 const cache = new Map<string, DB>();
