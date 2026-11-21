@@ -139,3 +139,34 @@ describe("council", () => {
     expect(checklist("Article 4 and article 13 appear. I argue that this works.", [4, 13, 16]).items[1].evidence).toBe("Not mentioned: 16");
   });
 });
+
+import http from "node:http";
+import { anthropicTransport } from "@/lib/router";
+describe("Claude transport request shape (local stub server, not the live API)", () => {
+  async function withStub(reply: (body: any) => any, fn: (url: string, seen: any[]) => Promise<void>) {
+    const seen: any[] = [];
+    const srv = http.createServer((req, res) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { const body = JSON.parse(b); seen.push({ headers: req.headers, body }); res.setHeader("content-type", "application/json"); res.end(JSON.stringify(reply(body))); }); });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    try { await fn(`http://127.0.0.1:${(srv.address() as any).port}`, seen); } finally { srv.close(); }
+  }
+  it("sends model, max_tokens and output_config.effort, and nothing the current models reject", async () => {
+    await withStub(() => ({ content: [{ type: "thinking", thinking: "" }, { type: "text", text: "OK" }], stop_reason: "end_turn", usage: { input_tokens: 9, output_tokens: 3 } }), async (url, seen) => {
+      const out = await anthropicTransport("test-key", url)({ model: "claude-sonnet-5-5", effort: "medium", system: "s", user: "u", maxTokens: 6000 });
+      expect(out).toEqual({ text: "OK", usage: { input: 9, output: 3 } });
+      const b = seen[0].body;
+      expect(b).toMatchObject({ model: "claude-sonnet-5-5", max_tokens: 6000, output_config: { effort: "medium" }, system: "s" });
+      for (const k of ["temperature", "top_p", "top_k", "thinking", "tool_choice"]) expect(b).not.toHaveProperty(k);
+      expect(seen[0].headers["x-api-key"]).toBe("test-key");
+      expect(seen[0].headers["anthropic-version"]).toBe("2023-06-01");
+    });
+  });
+  it("a refusal or a truncated answer is a clear, non-retried failure", async () => {
+    for (const [reply, re] of [[{ content: [], stop_reason: "refusal", stop_details: { category: "cyber" } }, /declined.*cyber/], [{ content: [{ type: "text", text: "partial" }], stop_reason: "max_tokens" }, /output limit/]] as const) {
+      await withStub(() => reply, async (url, seen) => {
+        const ctx = memCtx(); setSetting(ctx.db, "daily_budget_usd", 5);
+        await expect(new Router(ctx, anthropicTransport("k", url), async () => {}).call("brief", { system: "s", user: "u", initiator: "t" })).rejects.toThrow(re);
+        expect(seen).toHaveLength(1);   // not retried, so not paid for three times
+      });
+    }
+  });
+});

@@ -7,19 +7,21 @@ export type Role = "extract_small" | "brief" | "study_plan" | "advisor" | "skill
 export interface RoleConfig { model: string; effort: "low" | "medium" | "high"; premium: boolean; maxTokens: number }
 
 export const ROLE_DEFAULTS: Record<Role, RoleConfig> = {
-  extract_small: { model: "claude-haiku-5-5", effort: "low", premium: false, maxTokens: 600 },
-  brief: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 1200 },
-  study_plan: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 1600 },
-  advisor: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 1200 },
-  skill_candidate: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 1200 },
-  essay_review: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 1400 },
-  council_editor: { model: "claude-sonnet-5-5", effort: "high", premium: false, maxTokens: 1800 },
-  deep_review: { model: "claude-fable-5-2", effort: "high", premium: true, maxTokens: 2400 },
+  // max_tokens includes thinking tokens on these models, so the ceilings leave room for reasoning plus the answer.
+  extract_small: { model: "claude-haiku-5-5", effort: "low", premium: false, maxTokens: 2000 },
+  brief: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 6000 },
+  study_plan: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 8000 },
+  advisor: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 6000 },
+  skill_candidate: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 6000 },
+  essay_review: { model: "claude-sonnet-5-5", effort: "medium", premium: false, maxTokens: 8000 },
+  council_editor: { model: "claude-sonnet-5-5", effort: "high", premium: false, maxTokens: 10000 },
+  deep_review: { model: "claude-fable-5-2", effort: "high", premium: true, maxTokens: 12000 },
 };
 
-/** Placeholder per-million-token rates. These are configuration, not published prices. Override with JARVIS_PRICES_JSON. */
+/** Per-million-token rates used for ESTIMATES only. Copied from the Anthropic API reference table cached 2026-11-03 (Haiku rates are for prompts up to 100K tokens).
+ * Not verified live and not a bill. Override with JARVIS_PRICES_JSON. */
 const DEFAULT_PRICES: Record<string, { in: number; out: number }> = {
-  "claude-haiku-5-5": { in: 1, out: 5 }, "claude-sonnet-5-5": { in: 3, out: 15 }, "claude-fable-5-2": { in: 15, out: 75 },
+  "claude-haiku-5-5": { in: 0.1, out: 0.5 }, "claude-sonnet-5-5": { in: 2, out: 10 }, "claude-fable-5-2": { in: 8, out: 40 },
 };
 const prices = (): Record<string, { in: number; out: number }> => {
   try { return { ...DEFAULT_PRICES, ...(process.env.JARVIS_PRICES_JSON ? JSON.parse(process.env.JARVIS_PRICES_JSON) : {}) }; } catch { return DEFAULT_PRICES; }
@@ -43,10 +45,13 @@ export function anthropicTransport(apiKey: string, baseUrl = "https://api.anthro
     const res = await fetch(`${baseUrl}/v1/messages`, {
       method: "POST", signal: r.signal,
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: r.model, max_tokens: r.maxTokens, system: r.system, messages: [{ role: "user", content: r.user }] }),
+      // Effort goes in output_config. No temperature, no prefill, no forced tool_choice, no thinking budget: current models reject them.
+      body: JSON.stringify({ model: r.model, max_tokens: r.maxTokens, output_config: { effort: r.effort }, system: r.system, messages: [{ role: "user", content: r.user }] }),
     });
     if (!res.ok) { const e: any = new Error(`Claude API ${res.status}`); e.status = res.status; e.retryAfter = Number(res.headers.get("retry-after") ?? 0); throw e; }
     const j: any = await res.json();
+    if (j.stop_reason === "refusal") { const e: any = new Error(`Claude declined this request${j.stop_details?.category ? ` (${j.stop_details.category})` : ""}`); e.nonRetryable = true; throw e; }
+    if (j.stop_reason === "max_tokens") { const e: any = new Error("Claude hit the output limit before finishing (thinking tokens count toward it)"); e.nonRetryable = true; throw e; }
     const text = (j.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
     return { text, usage: j.usage ? { input: j.usage.input_tokens ?? 0, output: j.usage.output_tokens ?? 0 } : null };
   };
@@ -112,7 +117,7 @@ export class Router {
       } catch (e: any) {
         lastErr = e;
         if (req.signal?.aborted) break;
-        const retryable = !e.status || e.status === 429 || e.status >= 500;
+        const retryable = !e.nonRetryable && (!e.status || e.status === 429 || e.status >= 500);
         if (!retryable || attempt === 2) break;
         const wait = (e.retryAfter ? e.retryAfter * 1000 : 400 * 2 ** attempt) + Math.floor(Math.random() * 200);
         await this.sleep(wait);
