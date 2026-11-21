@@ -35,7 +35,7 @@ describe("requested artifact: a handoff table", () => {
     const inez = v.analysis.rows[1].cites.map((c: any) => `${c.role}:${c.title}`); expect(inez).toEqual(expect.arrayContaining(["task and owner:Lantern team handoff", "reassigned:Lantern crew update"]));
     expect(v.analysis.rows[0].cites.map((c: any) => c.title)).toEqual(expect.arrayContaining(["Lantern team handoff", "Lantern crew update"]));
     expect(v.sources.map((s: any) => s.title)).toEqual(expect.arrayContaining(["Lantern team handoff", "Lantern crew update"])); expect(v.sources.every((s: any) => s.live && s.quote)).toBe(true);
-    expect(v.outcomes).toHaveLength(1); expect(v.outcomes[0]).toMatchObject({ kind: "table", status: "done", detail: expect.stringMatching(/Table with 2 rows \(Owner, Next action, Blocker\), every row cited; 1 completed item left out/) });
+    expect(v.outcomes).toHaveLength(1); expect(v.outcomes[0]).toMatchObject({ kind: "table", status: "done", detail: expect.stringMatching(/Table with 2 rows \(Owner, Next action, Blocker\), every row cited; 1 completed or cancelled item left out/) });
     expect(v.completion).toBe("complete"); expect(receipt(ctx, v.request.id).plain).toBe("Finished");
     expect(all(ctx.db, "SELECT model_calls FROM jobs").every((j: any) => j.model_calls === 0)).toBe(true);
   });

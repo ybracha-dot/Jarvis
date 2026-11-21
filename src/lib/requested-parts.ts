@@ -5,7 +5,7 @@ import { wordsOf } from "./plan";
 import { columnMentions, coversMention } from "./ledger";
 
 export type OutcomeKind = "answer" | "report" | "draft" | "table";
-export interface TableWish { columns: string[]; rowUnit: string | null; excludeDone: boolean; form?: "table" | "checklist"; groupByOwner?: boolean; perPerson?: boolean; mentions?: string[] }
+export interface TableWish { columns: string[]; rowUnit: string | null; excludeDone: boolean; form?: "table" | "checklist"; groupByOwner?: boolean; perPerson?: boolean; mentions?: string[]; numbered?: boolean; sortByDue?: boolean; person?: string | null; about?: string | null; autoDue?: boolean }
 export interface Outcome { id: string; kind: OutcomeKind; text: string; recipient: string | null; table?: TableWish }
 export interface OutcomeStatus extends Outcome { status: "done" | "partial" | "missing"; detail: string }
 export type Completion = "complete" | "partial" | "incomplete";
@@ -14,16 +14,16 @@ const WRITE = "(?:draft|write|compose|prepare|put together|make|produce|create|g
 const THING = "(?:reply|replies|note|email|message|follow[- ]?up|response|text|letter|invite|request|booking|confirmation|list|agenda|summary|checklist|schedule|timetable|plan|itinerary|outline|minutes|announcement|handout|table|reminder|update)";
 const DRAFT = new RegExp(`\\b${WRITE}\\b[^.?!]{0,60}?\\b${THING}\\b|\\b(reply to|email|message)\\s+[A-Z]`, "i");
 const ASK = /^(?:and\s+|also\s+|then\s+)?(?:can|could|will|would|is|are|does|do|did|should|which|who|when|where|what|how|why|whether)\b/i;
-const REPORT = /^(?:and\s+|also\s+|then\s+)?(?:show|tell|list|give|work out|figure out|calculate|compute|find|report|explain|summari[sz]e)\b/i;
+const REPORT = /^(?:and\s+|also\s+|then\s+)?(?:show|tell|list|give|work out|figure out|calculate|compute|find|report|explain|summari[sz]e|say|state|include|add)\b/i;
 const NOT_NAMES = new Set("Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March April May June July August September October November December I Jarvis The A An My Our".split(" "));
 
-const TABLE_ASK = /\b(?:turn|put|convert|make|build|give me|produce|create|draft|write|prepare|show)\b[^.?!]{0,80}?\b(?:table|spreadsheet|grid)\b/i;
+const TABLE_ASK = /^\s*(?:an?\s+|the\s+)?(?:simple\s+|quick\s+)?(?:[a-z]+\s+)?(?:table|spreadsheet)\b|\b(?:turn|put|convert|make|build|give me|produce|create|draft|write|prepare|show)\b[^.?!]{0,80}?\b(?:table|spreadsheet|grid)\b/i;
 const CHECK_ASK = /\b(?:give me|make|turn|show|write|build|create|put|prepare|produce|list)\b[^.?!]{0,60}?\b(?:check-?list|bulleted list|bullet list|to-?do list|bullets)\b[^.?!]{0,80}\b(?:per|for each|by|each)\s+(?:person|owner|people|assignee)\b|\b(?:check-?list|bulleted list|to-?do list)\b[^.?!]{0,40}\b(?:what|who|open|still)\b/i;
 const TABLE_MOD = /\b(?:rows?|columns?)\b|\bleave\b[^.?!]*\bout\b|\bexclude\b|\bonly (?:include|show|list)\b|\bskip\b/i;
 const splitList = (t: string) => t.split(/\s*[,|]\s*(?:and\s+)?|\s+and\s+/i).map((x) => x.replace(/^(?:the|a|an)\s+/i, "").replace(/[.]+$/, "").trim()).filter(Boolean);
 
 /** The parts of a request. A single-part request returns one outcome; the caller decides whether that is worth showing. */
-const WORKSTATE = /\b(?:who(?:'s|\s+is|\s+are)?\s+(?:doing|owns|has|responsible|handling)|who owns what|status board|status of (?:the )?(?:tasks?|work)|action items?|what(?:'s|\s+is|\s+are)?\s+(?:left|remaining|outstanding|still (?:to do|open|needed|need))|what still needs|open (?:items|tasks)|to-?do list|task list)\b/i;
+const WORKSTATE = /\b(?:who(?:'s|\s+is|\s+are)?\s+(?:doing|owns|has|responsible|handling|in charge)|who owns what|who (?:prints|does|handles|makes|books|orders|writes|builds)\b|status board|status of (?:the )?(?:tasks?|work)|(?:status|task|progress|handoff|action)\s+(?:table|board|list|sheet|tracker|summary|items?)|action items?|what(?:'s|\s+is|\s+are)?\s+(?:left|remaining|outstanding|still (?:to do|open|needed|need))|what still needs|open (?:items|tasks)|to-?do list|task list|what (?:does|is|do) [A-ZÀ-ÝĀ-ſ][\wà-ÿĀ-ſ]+ (?:still )?(?:have to|need to|left to|doing|do)\b|what is left for\b|what is each person doing|one-line summary (?:per|for each)|summary (?:per|for each) (?:person|owner)|numbered list (?:by|of)\b|(?:a|an|the)?\s*(?:simple\s+)?(?:status\s+)?table\b)/i;
 const COLNOUNS = /\b(task|owner|person|assignee|status|blocker|blocked by|next action|next step|due date|deadline|budget|cost|priority|phone number|email)\b/gi;
 /** Column nouns in the order the request names them, when it names at least two. */
 const columnNouns = (t: string) => { const out: string[] = []; for (const m of t.matchAll(COLNOUNS)) { const n = m[1].toLowerCase(); if (!out.includes(n)) out.push(n); } return out; };
@@ -35,7 +35,7 @@ export function parseOutcomes(request: string, o: { project?: boolean } = {}): O
   // A table is one outcome. The sentences that describe its rows, columns and exclusions belong to it and are not separate requests.
   let wish: TableWish | null = null; const consumed = new Set<number>();
   if (tableAt >= 0) {
-    wish = { columns: [], rowUnit: null, excludeDone: false, form: (CHECK_ASK.test(clauses[tableAt]) || (workState && /\b(?:bullets?|bulleted|check-?list)\b/i.test(request))) && !/\btable\b/i.test(clauses[tableAt]) ? "checklist" : "table", mentions: columnMentions(request) }; wish.perPerson = /\bone row per (?:person|owner)\b|\b(?:per|by|for each|each) (?:person|owner)\b/i.test(request) && wish.form === "table"; if (workState || !/\b(?:row|column)s?\b/i.test(request)) { const cl = clauses[tableAt]; const tailText = cl.includes(":") ? cl.slice(cl.lastIndexOf(":") + 1) : /\bwith\b/i.test(cl) ? cl.slice(cl.search(/\bwith\b/i)) : cl; const nouns = [...new Set(columnNouns(tailText.replace(/\b(?:one row )?(?:per|by|for each|each)\s+(?:person|owner|people|assignee)\b/gi, "")).map((x) => (x === "person" ? "owner" : x)))]; if (nouns.length >= 2 && nouns.some((x) => ["task","owner","person","assignee","status","blocker","blocked by","next action","next step"].includes(x))) wish.columns = nouns; } wish.groupByOwner = wish.form === "checklist" && /\b(?:per|for each|by|each)\s+(?:person|owner|people|assignee)\b/i.test(request); consumed.add(tableAt);
+    wish = { columns: [], rowUnit: null, excludeDone: false, form: (CHECK_ASK.test(clauses[tableAt]) || (workState && /\b(?:bullets?|bulleted|check-?list)\b/i.test(request))) && !/\btable\b/i.test(clauses[tableAt]) ? "checklist" : "table", mentions: columnMentions(request) }; wish.perPerson = (/\bone row per (?:person|owner)\b|\b(?:per|by|for each|each) (?:person|owner)\b|\bsummary (?:per|for each)\b|\bwhat is each person doing\b/i.test(request)) && wish.form === "table"; if (/\bnumbered list\b/i.test(request)) { wish.form = "checklist"; wish.numbered = true; wish.sortByDue = /\bby (?:deadline|due date|date)\b/i.test(request); } if (/\bone-line summary\b|\bsummary per\b/i.test(request) && !/\btable\b/i.test(request)) wish.perPerson = true; const pm = /\bwhat (?:does|is|do) ([A-ZÀ-ÝĀ-ſ][a-zà-ÿĀ-ſ]+) (?:still )?(?:have to|need to|left to|doing|do)\b|\bwhat(?:'s| is) left for ([A-ZÀ-Ý][a-zà-ÿ]+)\b|\b([A-ZÀ-Ý][a-zà-ÿ]+)['’]s (?:tasks|to-?do|open items)\b/.exec(request); if (pm) { wish.person = pm[1] ?? pm[2] ?? pm[3]; wish.form = "checklist"; wish.perPerson = false; } const am = /\bwho(?:'s| is| are)? (?:responsible|in charge|handling|doing) (?!what\b)(?:for |of )?(?:the )?([^?.]+?)\??$|\bwho (?:prints|does|handles|makes|books|orders|writes|builds) (?:the )?([^?.]+?)\??$/i.exec(request.trim()); if (am) { wish.about = (am[1] ?? am[2]).trim(); wish.form = "table"; } if (!wish.columns.length && /\bstatus (?:table|board|sheet|tracker)\b/i.test(request)) { wish.columns = ["task", "owner", "status"]; (wish as any).autoDue = true; } if (workState || !/\b(?:row|column)s?\b/i.test(request)) { const cl = clauses[tableAt]; const tailText = cl.includes(":") ? cl.slice(cl.lastIndexOf(":") + 1) : /\bwith\b/i.test(cl) ? cl.slice(cl.search(/\bwith\b/i)) : cl; const nouns = [...new Set(columnNouns(tailText.replace(/\b(?:one row )?(?:per|by|for each|each)\s+(?:person|owner|people|assignee)\b/gi, "")).map((x) => (x === "person" ? "owner" : x)))]; if (nouns.length >= 2 && nouns.some((x) => ["task","owner","person","assignee","status","blocker","blocked by","next action","next step"].includes(x))) wish.columns = nouns; } wish.groupByOwner = wish.form === "checklist" && /\b(?:per|for each|by|each)\s+(?:person|owner|people|assignee)\b/i.test(request); consumed.add(tableAt);
     clauses.forEach((c, i) => {
       if (i !== tableAt && !TABLE_MOD.test(c)) return; if (i !== tableAt) consumed.add(i);
       const cols = /\b(?:with|columns?(?:\s+for)?:?|showing|listing|including)\s+(.+?)[.?!]*$/i.exec(c); if (cols && (/\b(?:row|column)s?\b/i.test(c) || (i === tableAt && /\btable\b/i.test(c) && /\bwith\b/i.test(c) && !wish!.columns.length))) wish!.columns = splitList(cols[1].replace(/^columns?:?\s+/i, "").replace(/\s+for\s+(?:this|the|each|every)\s+[a-z ]+$/i, ""));
@@ -74,6 +74,7 @@ export function scoreOutcomes(outcomes: Outcome[], c: Content): OutcomeStatus[] 
       return { ...o, status: "missing", detail: `Not answered: ${short(gap ?? rec?.headline ?? "the inputs were not found in the sources")}` };
     }
     if (o.kind === "report") {
+      if (a?.type === "table") return { ...o, status: "missing", detail: "This is not part of the table and no note states it, so it was not made up." };
       const figs: { label: string; value: string }[] = a?.figures ?? [];
       const want = wordsOf(o.text.replace(/-/g, " ")); const hit = figs.map((f) => ({ f, n: wordsOf(f.label).filter((w) => want.includes(w)).length })).sort((x, y) => y.n - x.n)[0];
       if (hit && hit.n >= 2) return { ...o, status: "done", detail: `${hit.f.label}: ${short(hit.f.value, 120)}` };
@@ -104,6 +105,7 @@ function scoreTable(o: Outcome, c: Content): OutcomeStatus {
   const probs: string[] = [];
   if (t.unparsed?.length) probs.push(`${t.unparsed.length} sentence${t.unparsed.length === 1 ? "" : "s"} naming a person or task could not be read and ${t.unparsed.length === 1 ? "was" : "were"} not applied`);
   if (!t.rows.length) {
+    if (t.filtered && !probs.length) return wish?.person ? { ...o, status: "done", detail: `No open task for ${t.filtered} in the notes.` } : { ...o, status: "missing", detail: `No task about “${t.filtered}” could be found in the notes.` };
     if (t.taskCount > 0 && t.openCount === 0 && !probs.length) return { ...o, status: "done", detail: `No open tasks: all ${t.taskCount} task${t.taskCount === 1 ? "" : "s"} in the notes are complete, so the ${what} has no rows.` };
     return { ...o, status: probs.length ? "partial" : "missing", detail: probs.length ? `No ${what} rows: ${probs.join("; ")}.` : `The notes hold no open tasks, so the ${what} has no rows.` };
   }
@@ -114,9 +116,9 @@ function scoreTable(o: Outcome, c: Content): OutcomeStatus {
     for (const m of wish?.mentions ?? []) if (!coversMention(m, t.keys, t.columns)) probs.push(`your request mentions ${m} but no column covers it`);
   }
   const uncited = t.rows.filter((r: any) => !r.cites?.length || r.cites.some((x: any) => !x.quote)); if (uncited.length) probs.push(`${uncited.length} ${what === "table" ? "row" : "item"}${uncited.length === 1 ? "" : "s"} without a cited source`);
-  if (wish?.excludeDone) { const leaked = t.rows.filter((r: any) => (t.leftOut ?? []).some((l: any) => l.reason === "complete" && l.text.toLowerCase() === String(r.task).toLowerCase())); if (leaked.length) probs.push("a completed item is in a row"); if (t.rows.length !== t.openCount) probs.push(`${t.rows.length} rows for ${t.openCount} open items`); }
+  if (wish?.excludeDone) { const leaked = t.rows.filter((r: any) => (t.leftOut ?? []).some((l: any) => (l.reason === "complete" || l.reason === "cancelled") && l.text.toLowerCase() === String(r.task).toLowerCase())); if (leaked.length) probs.push("a completed item is in a row"); if (t.rows.length !== t.openCount) probs.push(`${t.rows.length} rows for ${t.openCount} open items`); }
   if (t.missingColumns?.length) probs.push(`no source states ${t.missingColumns.join(", ")}, so those cells say “Not stated”`);
   if (probs.length) return { ...o, status: "partial", detail: `A ${what} was built, but ${probs.join("; ")}.` };
-  const left = (t.leftOut ?? []).filter((l: any) => l.reason === "complete").length;
-  return { ...o, status: "done", detail: `${what === "table" ? `Table with ${t.rows.length} row${t.rows.length === 1 ? "" : "s"} (${t.columns.join(", ")})` : `Checklist with ${t.rows.length} open item${t.rows.length === 1 ? "" : "s"}${wish?.groupByOwner ? " grouped by person" : ""}`}, every ${what === "table" ? "row" : "item"} cited${left ? `; ${left} completed item${left === 1 ? "" : "s"} left out` : ""}.` };
+  const left = (t.leftOut ?? []).filter((l: any) => l.reason === "complete" || l.reason === "cancelled").length;
+  return { ...o, status: "done", detail: `${what === "table" ? `Table with ${t.rows.length} row${t.rows.length === 1 ? "" : "s"} (${t.columns.join(", ")})` : `Checklist with ${t.rows.length} open item${t.rows.length === 1 ? "" : "s"}${wish?.groupByOwner ? " grouped by person" : ""}`}, every ${what === "table" ? "row" : "item"} cited${left ? `; ${left} completed or cancelled item${left === 1 ? "" : "s"} left out` : ""}.` };
 }

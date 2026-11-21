@@ -183,7 +183,7 @@ function buildPlanDraft(p: PlanAnalysis, request: string, me: string, items: Ite
 // ---------- a table of open work, built from the notes ----------
 const citeJson = (c: Cite) => ({ itemId: c.src.itemId, title: c.src.title, at: c.src.at, quote: c.quote, role: c.role });
 function tableJson(t: TableAnalysis, itemIds: string[], headline: string) {
-  return { version: 1, type: "table" as const, form: t.form, itemIds, columns: t.columns, keys: t.keys, rows: t.rows.map((r) => ({ cells: r.cells, task: r.task, owner: r.owner, cites: r.cites.map(citeJson) })), leftOut: t.leftOut.map((l) => ({ text: l.text, reason: l.reason, cites: l.cites.map(citeJson) })), notes: t.notes, unparsed: t.unparsed.map((u) => ({ text: u.text, title: u.src.title })), missingColumns: t.missingColumns, openCount: t.openCount, taskCount: t.taskCount, addedTaskColumn: t.addedTaskColumn, markdown: t.form === "checklist" ? checklistMarkdown(t) : tableMarkdown(t), tsv: tableTsv(t),
+  return { version: 1, type: "table" as const, form: t.form, itemIds, columns: t.columns, keys: t.keys, rows: t.rows.map((r) => ({ cells: r.cells, task: r.task, owner: r.owner, cites: r.cites.map(citeJson) })), leftOut: t.leftOut.map((l) => ({ text: l.text, reason: l.reason, cites: l.cites.map(citeJson) })), notes: t.notes, unparsed: t.unparsed.map((u) => ({ text: u.text, title: u.src.title })), missingColumns: t.missingColumns, openCount: t.openCount, taskCount: t.taskCount, addedTaskColumn: t.addedTaskColumn, numbered: t.numbered, filtered: t.filtered, markdown: t.form === "checklist" ? checklistMarkdown(t) : tableMarkdown(t), tsv: tableTsv(t),
     recommendation: { kind: "recommend" as const, option: null, label: null, headline, tradeoff: [] as string[], question: null, nextAction: { kind: "none", text: "Paste it where you need it." }, basis: [] as string[], qualifiers: [] as string[] } };
 }
 export type TableJson = ReturnType<typeof tableJson>;
@@ -197,11 +197,12 @@ export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?:
   for (const l of t.leftOut) for (const c of l.cites.slice(-1)) addSrc(c, `left out: ${l.text}`);
   for (const u of t.unparsed) addSrc({ src: items.find((i) => i.itemId === u.src.itemId) ?? (u.src as any), quote: u.text, role: "not applied" }, "not applied");
   const lines: string[] = [];
-  if (!t.rows.length) lines.push(`**No open tasks**`, "", `All ${t.taskCount} task${t.taskCount === 1 ? "" : "s"} in the notes are complete, so there is nothing to hand off.`, "");
+  if (!t.rows.length && t.filtered) lines.push(`**Nothing found for “${t.filtered}”**`, "", `No open task in the notes matches “${t.filtered}”.`, "");
+  else if (!t.rows.length) lines.push(`**No open tasks**`, "", `All ${t.taskCount} task${t.taskCount === 1 ? "" : "s"} in the notes are complete or cancelled, so there is nothing left to hand off.`, "");
   else if (t.form === "checklist") lines.push(`**Checklist**`, "", checklistMarkdown(t), "");
   else lines.push(`**Handoff table**`, "", tableMarkdown(t), "");
-  const ch = t.leftOut.filter((l) => l.reason.startsWith("handed over")); const done = t.leftOut.filter((l) => l.reason === "complete");
-  if (done.length || ch.length) { lines.push("**Left out or changed**", ""); for (const l of done) lines.push(`- ${l.text}: complete, so it has no ${t.form === "checklist" ? "item" : "row"}.`); for (const l of ch) lines.push(`- ${l.text}.`); lines.push(""); }
+  const ch = t.leftOut.filter((l) => l.reason.startsWith("handed over")); const done = t.leftOut.filter((l) => l.reason === "complete" || l.reason === "cancelled");
+  if (done.length || ch.length) { lines.push("**Left out or changed**", ""); for (const l of done) lines.push(`- ${l.text}: ${l.reason === "cancelled" ? "cancelled" : "complete"}, so it has no ${t.form === "checklist" ? "item" : "row"}.`); for (const l of ch) lines.push(`- ${l.text}.`); lines.push(""); }
   if (t.notes.length) lines.push("**Check these**", "", ...t.notes.map((n) => `- ${n}`));
   for (const u of t.unparsed) flags.push({ kind: "not_applied", text: `Not applied, because I could not read it as a task, a handover or a status: “${u.text}” (${u.src.title}).`, itemId: u.src.itemId });
   if (t.missingColumns.length) flags.push({ kind: "unfilled_column", text: `No note states ${t.missingColumns.join(", ")}, so those cells say “Not stated”.` });

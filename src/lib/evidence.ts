@@ -69,7 +69,7 @@ export function extractFacts(body: string, at: string, author: string | null, ow
       if (!dates.length && (CONFIRM.test(sent) || PROPOSE.test(sent))) { const f: RawFact = { kind: cue === "confirmed" ? "decision" : "proposal", subject: sub, text: sent, value: null, who, quote: sent, start, end, stamp, status: cue, why: reasonHere }; out.push(f); prevDecision = f; }
       if (!reasonHere && prevDecision && /^(?:the reason|that way|this way|reason is|it'?s because)/i.test(sent)) prevDecision.why = prevDecision.why ?? sent;
       // commitments: "I'll send", "Dana will", "I owe"
-      const cm = /\b(?:(I)'?(?:ll| will)|I'?m going to|((?:[A-Z][\w'-]*(?:\s&)?\s){0,2}[A-Z][\w'-]*)\s+(?:will|to)\b|I owe)\s+([^.!?]{3,120})/.exec(sent);
+      const cm = /\b(?:(I)'?(?:ll| will)|I'?m going to|((?:[A-ZÀ-Ý][\wÀ-ÿ'-]*(?:\s(?:de|van|der|den|von|di|da|al|el|le|la|du|bin))*(?:\s&)?\s){0,2}[A-ZÀ-Ý][\wÀ-ÿ'-]*)\s+(?:will|to)\b|I owe)\s+([^.!?]{3,120})/.exec(sent);
       if (cm && !/^(be|have|see|think|say|try|go with|let)\b/i.test(cm[3].trim())) {
         const PRON = /^(We|They|You|It|He|She|This|That|There|Who|What)$/i;
         const named = cm[2] && !PRON.test(cm[2].trim()) ? cm[2].trim() : null;
