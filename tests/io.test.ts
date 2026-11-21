@@ -279,3 +279,20 @@ describe("connections and advisors", () => {
     expect(advise(ctx, "offer", "q").segments.some((s) => s.label === "Direct quotation")).toBe(false);
   });
 });
+
+describe("disconnect", () => {
+  it("a disconnected watched folder is not read and keeps its last verified time", async () => {
+    tmpDataDir();
+    const ctx = memCtx("2026-11-16T10:00:00-05:00"); seedDemo(ctx); at(ctx, "2026-11-16T10:00:00-05:00");
+    fs.mkdirSync(inboxDir(ctx), { recursive: true });
+    await runNow(ctx);
+    const before = get(ctx.db, "SELECT last_success_at FROM source_status WHERE provider='inbox-folder'")!.last_success_at;
+    setSetting(ctx.db, "disabled_sources", ["inbox-folder"]);
+    fs.writeFileSync(path.join(inboxDir(ctx), "b.json"), JSON.stringify(BUNDLE));
+    at(ctx, "2026-11-16T11:00:00-05:00");
+    const r = await runNow(ctx);
+    expect(r.scan.status).toBe("disconnected");
+    expect(count(ctx, "decisions")).toBe(0);
+    expect(get(ctx.db, "SELECT last_success_at FROM source_status WHERE provider='inbox-folder'")!.last_success_at).toBe(before);
+  });
+});

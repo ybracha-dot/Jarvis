@@ -98,7 +98,7 @@ export default function TodayPage() {
         <SectionTitle><span id="src">Sources</span></SectionTitle>
         <Card className="p-3">
           <ul className="flex flex-wrap gap-x-5 gap-y-1.5 text-[13px]" data-testid="source-health">{t.sources.length === 0 ? <li className="text-muted">No sources connected yet.</li> : t.sources.map((s: any) => (
-            <li key={s.provider} className="flex items-center gap-1.5"><span className={cx("size-2 rounded-full", s.state === "ok" ? "bg-accent" : s.state === "partial" ? "bg-amber" : s.state === "failed" ? "bg-danger" : "bg-muted")} aria-hidden />
+            <li key={s.provider} className="flex items-center gap-1.5"><span className={cx("size-2 rounded-full", s.state === "ok" ? "bg-accent" : s.state === "partial" || s.state === "unverified" ? "bg-amber" : s.state === "failed" ? "bg-danger" : "bg-muted")} aria-hidden />
               <span>{s.label}</span><span className="text-muted">{s.lastSuccessAt ? `verified ${fmtDateTime(s.lastSuccessAt)}` : "never verified"}{s.state !== "ok" ? ` · ${s.state}` : ""}</span></li>))}</ul>
           {t.sources.some((s: any) => s.message) && <p className="text-[12px] text-muted mt-2 break-words">{t.sources.filter((s: any) => s.message).map((s: any) => `${s.label}: ${s.message}`).join(" · ")}</p>}
           <div className="mt-3 pt-3 border-t border-line flex items-center gap-2 flex-wrap">

@@ -219,7 +219,7 @@ function Palette({ onClose }: { onClose: () => void }) {
     { label: "Bring in the council", run: () => router.push("/council") }, { label: "Connections and health", run: () => open("connections") },
   ], [router, open]);
   const filtered = items.filter((i) => i.label.toLowerCase().includes(q.toLowerCase()));
-  const ask = useAction(async () => { const r = await api("/command", { body: { text: q } }); setReply(r); if (r.navigate && !r.confirm) { if (r.navigate.startsWith("?")) open("capture"); else router.push(r.navigate); } });
+  const ask = useAction(async () => { const r = await api("/command", { body: { text: q } }); setReply(r); if (r.navigate && !r.confirm) { if (r.navigate.startsWith("?")) open("capture"); else router.push(r.navigate); onClose(); } });
   const confirmForget = useAction(async (id: string) => { await api(`/memory/notes/${id}`, { method: "DELETE" }); setReply({ reply: "Forgotten. Removed from search, vault and exports." }); });
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center pt-[12vh] px-3" role="dialog" aria-modal="true" aria-label="Command palette">

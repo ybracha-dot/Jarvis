@@ -6,7 +6,7 @@ export class ApiError extends Error { constructor(msg: string, public status: nu
 const listeners = new Set<() => void>();
 export const invalidate = () => listeners.forEach((l) => l());
 
-export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; noInvalidate?: boolean } = {}): Promise<T> {
   const method = opts.method ?? (opts.body !== undefined ? "POST" : "GET");
   let res: Response;
   try {
@@ -16,7 +16,7 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   }
   const j = await res.json().catch(() => ({ error: `Unexpected response (${res.status})` }));
   if (!res.ok) throw new ApiError(j.error ?? res.statusText, res.status, j);
-  if (method !== "GET") invalidate();
+  if (method !== "GET" && !opts.noInvalidate) invalidate();
   return j as T;
 }
 

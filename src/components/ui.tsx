@@ -26,11 +26,11 @@ export function Card({ className, children, ...p }: React.HTMLAttributes<HTMLDiv
 export function SectionTitle({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
   return <div className="flex items-center justify-between mb-2"><h2 className="text-[11px] uppercase tracking-[0.12em] text-muted font-medium">{children}</h2>{right}</div>;
 }
-export function Badge({ tone = "neutral", children, className }: { tone?: "neutral" | "accent" | "amber" | "danger"; children: React.ReactNode; className?: string }) {
-  return <span className={clsx("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium border", className,
+export function Badge({ tone = "neutral", children, className, ...rest }: { tone?: "neutral" | "accent" | "amber" | "danger"; children: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLSpanElement>) {
+  return <span {...rest} className={clsx("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium border", className,
     tone === "neutral" && "border-line text-muted", tone === "accent" && "border-accent-dim text-accent bg-[#0f2420]", tone === "amber" && "border-amber-dim text-amber bg-[#1f180a]", tone === "danger" && "border-[#4a2723] text-danger bg-[#241211]")}>{children}</span>;
 }
-export const Mono = ({ children, className }: { children: React.ReactNode; className?: string }) => <span className={clsx("mono", className)}>{children}</span>;
+export const Mono = ({ children, className, ...rest }: { children?: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLSpanElement>) => <span {...rest} className={clsx("mono", className)}>{children}</span>;
 
 export function Spinner({ label = "Loading" }: { label?: string }) {
   return <div role="status" className="flex items-center gap-2 text-muted text-sm py-6"><Loader2 className="size-4 animate-spin" aria-hidden />{label}</div>;

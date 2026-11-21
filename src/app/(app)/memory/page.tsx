@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Plus, Trash2, GitBranchPlus, Search, FolderDown, FolderUp, Lock } from "lucide-react";
-import { api, useQuery, useAction } from "@/components/api";
+import { api, useQuery, useAction, invalidate } from "@/components/api";
 import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Empty, Notice, Field, inputCls, cx } from "@/components/ui";
 import { fmtDateTime } from "@/lib/time";
 
@@ -58,7 +58,7 @@ function Editor({ id, onGone, onPick }: { id: string; onGone: () => void; onPick
   useEffect(() => { if (n) { setF({ title: n.title, body: n.body, scope: n.scope, confidence: n.confidence, effectiveTo: n.effective_to?.slice(0, 10) ?? "" }); setConfirm(false); setMsg(null); } }, [n?.id, n?.updated_at]);
   const save = useAction(async () => { await api(`/memory/notes/${id}`, { method: "PATCH", body: { title: f.title, body: f.body, scope: f.scope, confidence: Number(f.confidence), effectiveTo: f.effectiveTo ? new Date(f.effectiveTo).toISOString() : null } }); setMsg("Saved."); });
   const supersede = useAction(async () => { const r = await api(`/memory/notes/${id}/supersede`, { body: { body: f.body } }); setMsg("Superseded. The old version is kept for history."); onPick(r.id); });
-  const del = useAction(async () => { await api(`/memory/notes/${id}`, { method: "DELETE" }); onGone(); });
+  const del = useAction(async () => { await api(`/memory/notes/${id}`, { method: "DELETE", noInvalidate: true }); onGone(); setTimeout(invalidate, 100); });
   const autolearn = useAction(async (v: boolean) => { await api(`/memory/notes/${id}`, { method: "PATCH", body: { autoLearn: v } }); });
   if (q.loading && !q.data) return <Spinner />;
   if (q.error && !q.data) return <ErrorBox error={q.error} onRetry={q.reload} />;

@@ -3,7 +3,7 @@ import { z, ZodError } from "zod";
 import { makeCtx, Ctx, Mode, getDb, all, get, run, getSetting, setSetting, modeDir } from "./db";
 import { HttpError, ConflictError, ReserveInput, DeferInput, listDecisions, decisionDetail, reserve, defer, markHandled, resolveConflict, acceptNewTask, acceptPromise } from "./decisions";
 import { seedDemo, replay, resetDemo, setClock, wipe, FIXTURES, FixtureName, isSeeded } from "./demo";
-import { today } from "./today";
+import { today, sourceHealth } from "./today";
 import { listTasks, taskDetail, setStatus, StatusInput, recordCompletion, CompleteInput, reopenTask, logTime, TimeLogInput, completedTasks, weeklyReview } from "./tasks";
 import { listGoals, observeGoal, upsertGoal, GoalInput } from "./goals";
 import { listCommitments, createCommitment, prepareFollowUp, simulateEvent, resolveCommitment, reopenCommitment, studentRecord } from "./commitments";
@@ -162,6 +162,18 @@ on("POST", "/import/preview", (c, r) => previewImport(c, r.json(ImportRequest)))
 on("POST", "/import/commit", (c, r) => { const b = r.json(z.object({ token: z.string(), courseExternalId: z.string().optional() })); return commitImport(c, b.token, { courseExternalId: b.courseExternalId }); });
 on("GET", "/sources", (c) => ({ sources: all(c.db, `SELECT s.id,s.provider,s.title,s.kind,co.code course, (SELECT COUNT(*) FROM source_revisions r WHERE r.source_id=s.id) revisions, (SELECT MAX(published_at) FROM source_revisions r WHERE r.source_id=s.id) latest FROM sources s LEFT JOIN courses co ON co.id=s.course_id WHERE s.owner_id=? ORDER BY latest DESC`, c.owner) }));
 on("GET", "/sources/:id", (c, r) => ({ source: get(c.db, "SELECT * FROM sources WHERE id=? AND owner_id=?", r.params.id, c.owner), revisions: all(c.db, "SELECT id,published_at,observed_at,duplicate_of,stale,substr(text,1,600) text FROM source_revisions WHERE source_id=? ORDER BY published_at", r.params.id) }));
+on("GET", "/sources-health", (c) => ({ sources: sourceHealth(c), disabled: getSetting<string[]>(c.db, "disabled_sources", []) }));
+on("POST", "/sources-health/disconnect", (c, r) => {
+  const b = r.json(z.object({ provider: z.string().min(1).max(60), disconnected: z.boolean() }));
+  const row = get(c.db, "SELECT * FROM source_status WHERE owner_id=? AND provider=?", c.owner, b.provider);
+  if (!row) throw new HttpError(404, "Unknown source");
+  const cur = getSetting<string[]>(c.db, "disabled_sources", []).filter((x) => x !== b.provider);
+  setSetting(c.db, "disabled_sources", b.disconnected ? [...cur, b.provider] : cur);
+  // The last successful verification time is kept either way. Data already imported stays.
+  run(c.db, "UPDATE source_status SET state=?, message=? WHERE owner_id=? AND provider=?", b.disconnected ? "disconnected" : "unverified",
+    b.disconnected ? "Disconnected by you. Nothing is read. Imported data and the last verified time are kept." : "Reconnected. Run a check to verify it again.", c.owner, b.provider);
+  return { ok: true };
+});
 on("GET", "/connections", (c) => connections(c).then((list) => ({ connections: list })));
 on("POST", "/connections/check", (c) => connections(c, { check: true }).then((list) => ({ connections: list, checkedAt: c.now().toISOString(), note: "Local checks only. Nothing here verifies a live account." })));
 on("POST", "/connections/claude-test", async (c) => {

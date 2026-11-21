@@ -18,6 +18,7 @@ export const realFeed: CalendarFeed = { async fetchText(url, signal) { const r =
 export async function scanCalendarFeed(ctx: Ctx, feed: CalendarFeed = realFeed) {
   const url = process.env.JARVIS_ICS_URL;
   if (!url) return { ok: false as const, message: "JARVIS_ICS_URL is not set" };
+  if (getSetting<string[]>(ctx.db, "disabled_sources", []).includes("ics-feed")) return { ok: false as const, message: "Disconnected by you" };
   const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 10_000);
   try {
     const parsed = parseIcs(await feed.fetchText(url, ac.signal));

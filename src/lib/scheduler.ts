@@ -38,6 +38,7 @@ export interface ScanResult { files: number; applied: number; unchanged: number;
 export function scanInbox(ctx: Ctx): ScanResult {
   const dir = inboxDir(ctx);
   const res: ScanResult = { files: 0, applied: 0, unchanged: 0, needsCourse: [], failed: [], status: "ok" };
+  if (getSetting<string[]>(ctx.db, "disabled_sources", []).includes("inbox-folder")) { res.status = "disconnected"; return res; }
   if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
   const real = fs.realpathSync(dir);
   for (const name of fs.readdirSync(dir).sort()) {
