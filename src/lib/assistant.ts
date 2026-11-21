@@ -9,11 +9,11 @@ import { enqueueJob, cancelJob, getJob, Handler, JobApi, jobEvent } from "./jobs
 import { addMessage, answerJob } from "./study-guide";
 import { importText } from "./evidence";
 import { enqueue as notify } from "./notify";
-import { searchEvidence, getItem, listItems, listSources, tokens, ownerName, factOut, Hit, SourceMode } from "./evidence";
+import { searchEvidence, getItem, listItems, linkedCorrections, listSources, tokens, ownerName, factOut, Hit, SourceMode } from "./evidence";
 import { addDays, localDate, fmtDateTime, DEFAULT_TZ, localHM, parseLocal } from "./time";
 import { deepLinkBase } from "./capture";
 import { findProject } from "./projects";
-import { composeDecision, composePlan, synthesizeJudgment, recheckAnalysis, shortTitle, DECISION_Q, DRAFT_CUE, AnalysisJson, PlanJson } from "./decision-run";
+import { composeDecision, composePlan, composeTable, synthesizeJudgment, recheckAnalysis, shortTitle, DECISION_Q, DRAFT_CUE, AnalysisJson, PlanJson, TableJson } from "./decision-run";
 import { PLAN_Q } from "./plan";
 import { parseOutcomes, scoreOutcomes, completionOf, completionLine, OutcomeStatus } from "./requested-parts";
 
@@ -229,9 +229,10 @@ const unitOf = (v: string) => v.replace(/[\d.,]/g, "").trim().toLowerCase();
 /** The general answer path: search every authorized source, keep what matches the question, show what changed and what is still open. Extractive, not invented. */
 function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
   const hits = searchEvidence(ctx, intent.terms, { projectId: intent.projectId, limit: 12 });
-  if (!hits.length) return { mode: "digest", gap: `Nothing saved matches “${intent.terms.join(" ")}”. Share the conversation, forward the email or import the note, then ask again.`, items: [] as any[], terms: intent.terms, reads: 0 };
+  const tableOfProject = !!intent.projectId && parseOutcomes(String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? "")).some((o) => o.kind === "table");   // "turn these notes into a table": the project's notes are the material, whatever words they share with the question
+  if (!hits.length && !tableOfProject) return { mode: "digest", gap: `Nothing saved matches “${intent.terms.join(" ")}”. Share the conversation, forward the email or import the note, then ask again.`, items: [] as any[], terms: intent.terms, reads: 0 };
   const scored = hits.map((h) => ({ h, m: matchedTerms(intent.terms, `${h.title} ${authorizedItem(ctx, h.itemId)?.body ?? ""}`) }));
-  const top = Math.max(...scored.map((x) => x.m.length)); const need = Math.max(1, Math.ceil(top / 2));
+  const top = Math.max(0, ...scored.map((x) => x.m.length)); const need = Math.max(1, Math.ceil(top / 2));
   // A term that most of the strongest matches share is what the question is about. An item that has it belongs, even if it matches little else.
   const strong = scored.filter((x) => x.m.length >= need); const subject = intent.terms.filter((t) => strong.length >= 2 && strong.filter((x) => x.m.includes(t)).length >= Math.ceil(strong.length * 0.6));
   const keep = (x: (typeof scored)[number]) => x.m.length >= need || x.m.some((t) => subject.includes(t));
@@ -247,12 +248,22 @@ function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string
     const best = [...sizes].sort((a, b) => b[1] - a[1])[0]; if (best && best[1] >= 2) for (let i = use.length - 1; i >= 0; i--) if (find(i) !== best[0] && !OWN.has(use[i].h.kind)) { aside.push({ ...use[i], m: use[i].m.slice(0, 2) }); use.splice(i, 1); ctxToks.splice(i, 1); }
   }
   for (const x of aside) recordRead(ctx, requestId, revision, { kind: "search", ref: x.h.itemId, source: x.h.sourceLabel, label: `${x.h.title} (${x.h.kind}, not used: matched only “${x.m.join(", ")}” and shares nothing else with the other matches)`, used: false });
-  const items = use.map(({ h, m }) => { const it = authorizedItem(ctx, h.itemId)!; recordRead(ctx, requestId, revision, { kind: "thread", ref: it.id, source: it.sourceLabel, itemRevision: it.revision, label: `${it.title} (${it.kind}, ${fmtDay(localDate(it.at))})`, excerpt: h.excerpt });
+  const shapeItem = (it: NonNullable<ReturnType<typeof authorizedItem>>, m: string[], excerpt: string | null, note = "") => { recordRead(ctx, requestId, revision, { kind: "thread", ref: it.id, source: it.sourceLabel, itemRevision: it.revision, label: `${it.title} (${it.kind}, ${fmtDay(localDate(it.at))}${note})`, excerpt });
     const sents = sentencesOf(it.body); const SALIENT = /\b(not included|excluding|extra|additional|replaces|replaced|revised|instead|cap|budget|deadline|must|total|only|need(?:s|ed)?)\b|[$€£]\s?\d|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b/i;
     const relevant = [...new Set([...sents.filter((s2) => matchedTerms(intent.terms, s2).length > 0).slice(0, 2), ...sents.filter((s2) => SALIENT.test(s2)).slice(0, 3)])].slice(0, 4);
     return { id: it.id, title: it.title, kind: it.kind, at: it.at, revision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode, author: it.author, participants: it.participants, corrects: (it as any).corrects ?? null, matched: m, say: relevant.length ? relevant : sents.slice(0, 1), todo: sents.filter((s2) => TODO.test(s2)), unknown: sents.filter((s2) => UNKNOWN.test(s2) && !TODO.test(s2)),
-      facts: it.facts.map((f) => ({ ...f, itemTitle: it.title, itemKind: it.kind, itemAt: it.at, itemRevision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode })) }; });
+      facts: it.facts.map((f) => ({ ...f, itemTitle: it.title, itemKind: it.kind, itemAt: it.at, itemRevision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode })) }; };
   const question = String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? "");
+  const items: ReturnType<typeof shapeItem>[] = use.map(({ h, m }) => shapeItem(authorizedItem(ctx, h.itemId)!, m, h.excerpt));
+  // A correction you linked to a selected note belongs with it even when it shares no search words with the question, and so does the note it corrects.
+  // For "turn these notes into a table", the notes of the selected project are the material.
+  const wantTable = parseOutcomes(question).some((o) => o.kind === "table");
+  const have = new Set(items.map((i) => i.id));
+  const extra: { id: string; why: string }[] = linkedCorrections(ctx, [...have]).map((x) => ({ id: x.id, why: `, added: ${x.why}` }));
+  if (wantTable && intent.projectId) for (const row of all(ctx.db, "SELECT i.id FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.project_id=? AND i.tombstone=0 AND s.revoked_at IS NULL ORDER BY i.at DESC LIMIT 30", ctx.owner, intent.projectId)) extra.push({ id: row.id as string, why: ", added: a note of the selected project" });
+  for (const x of extra) { if (have.has(x.id)) continue; const it = authorizedItem(ctx, x.id); if (!it || !["email", "transcript", "claude", "note", "slack", "export"].includes(it.kind)) continue; have.add(x.id); items.push(shapeItem(it, [], null, x.why)); }
+  for (const x of linkedCorrections(ctx, [...have])) { if (have.has(x.id)) continue; const it = authorizedItem(ctx, x.id); if (!it) continue; have.add(x.id); items.push(shapeItem(it, [], null, `, added: ${x.why}`)); }
+  items.sort((a, b) => String(b.at).localeCompare(String(a.at)));
   const localOnly = items.some((it) => !!get(ctx.db, "SELECT 1 x FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.id=? AND s.local_only=1", it.id));
   // A time, capacity or duration question needs the limits and windows, which rarely share words with the question. Read the owner's authorized notes that state numbers, windows or dates, and say which were read.
   let planIds: string[] = [];
@@ -260,7 +271,7 @@ function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string
     const have = new Set(items.map((i) => i.id));
     for (const row of listItems(ctx)) { const it = authorizedItem(ctx, row.id as string); if (!it || have.has(it.id) || !["email", "transcript", "claude", "note", "slack", "export"].includes(it.kind)) continue; if (!/\b\d{1,2}:\d{2}\b|\b\d+\s*(?:minutes?|hours?|people|persons|attendees|pieces|seats|per)\b|\b(?:holds|max|limit|booked|free|available)\b/i.test(it.body)) continue; planIds.push(it.id); recordRead(ctx, requestId, revision, { kind: "thread", ref: it.id, source: it.sourceLabel, itemRevision: it.revision, label: `${it.title} (${it.kind}, ${fmtDay(localDate(it.at))}, read for limits, windows and dates)`, excerpt: it.body.slice(0, 160) }); }
   }
-  return { mode: "digest", decide: DECISION_Q.test(question), plan: PLAN_Q.test(question) && !DECISION_Q.test(question), planIds, localOnly, question, items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
+  return { mode: "digest", decide: DECISION_Q.test(question), table: wantTable, plan: PLAN_Q.test(question) && !DECISION_Q.test(question), planIds, localOnly, question, items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
 }
 
 function researchBrief(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
@@ -382,6 +393,12 @@ function composeBrief(ctx: Ctx, b: any, intent: Intent) {
 
 function composeAnswer(ctx: Ctx, b: any, instr?: ReturnType<typeof parseInstructions>) {
   if (b.mode !== "digest") return composeMeeting(ctx, b);
+  if (b.table) {
+    const wish = parseOutcomes(String(b.question ?? "")).find((o) => o.kind === "table")?.table;
+    const tb = wish ? composeTable(ctx, b, String(b.question ?? ""), wish, { applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] }) : null;
+    if (tb) return tb;
+    const dg: any = composeDigest(ctx, b); dg.tableReason = "No table could be built: the notes name no open task with an owner. Here is what the sources say."; dg.flags.unshift({ kind: "no_table", text: dg.tableReason }); return dg;
+  }
   if (b.plan) {
     const pl = composePlan(ctx, b, String(b.question ?? ""), { wantDraft: !!instr?.wantDraft || DRAFT_CUE.test(String(b.question ?? "")), applied: instr?.applied ?? [], unapplied: instr?.unapplied ?? [] });
     if (pl) return pl;
@@ -583,7 +600,7 @@ const goal_writer: Handler = async (api) => {
     return { kind: intent.deliverable, projectId: bundle.projectId ?? intent.projectId ?? null, unavailable: bundle.unavailable ?? [], mode: "rules", ...c };
   });
   // Every requested part gets a status, checked against what was actually produced. A part with no matching result is reported, not papered over.
-  { const asked = parseOutcomes(String(bundle.question ?? "")); out.needsCalc = !!bundle.plan; out.outcomes = asked.length >= 2 ? scoreOutcomes(asked, out) : []; }
+  { const asked = parseOutcomes(String(bundle.question ?? "")); out.needsCalc = !!bundle.plan; out.outcomes = asked.length >= 2 || asked.some((a) => a.kind === "table" || a.kind === "draft") ? scoreOutcomes(asked, out) : []; }
   // Only what the rules could not settle may go to a model, and only if it is on, authorized and allowed for these sources.
   if (out.analysis && out.needsJudgment) {
     const j = await api.step("judgment", "Asking for an evidence-bounded judgment, if allowed", async () => {
@@ -609,7 +626,7 @@ const goal_reviewer: Handler = async (api) => {
       if (drift.length) { base.problems.push(`The status of a requested part does not match the saved result: ${drift.map((x) => x.text).join("; ")}.`); base.ok = false; }
     }
     if (content.analysis) {
-      const pr = recheckAnalysis(api.ctx, content.analysis as AnalysisJson | PlanJson, request);
+      const pr = recheckAnalysis(api.ctx, content.analysis as AnalysisJson | PlanJson | TableJson, request, parseOutcomes(request).find((o) => o.kind === "table")?.table);
       base.checks.push({ name: "Totals recomputed from the sources as they are now", ok: pr.length === 0, detail: pr.length ? pr.join(" ") : "Every total and the recommendation reproduce." });
       if (pr.length) { base.problems.push(...pr); base.ok = false; }
     }

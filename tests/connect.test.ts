@@ -179,3 +179,24 @@ describe("a calculation plus a draft, from ordinary Claude (local test client, n
     expect(all(ctx.db, "SELECT model_calls FROM jobs").every((j: any) => j.model_calls === 0)).toBe(true);
   });
 });
+
+// Field test 3 from ordinary Claude's local test path: the handoff table, in a fresh chat, in two projects with the same words.
+describe("a handoff table from ordinary Claude (local test client, not a real account)", () => {
+  it("the same request text in two projects returns two different results, each with its own table, per-row sources and requested-part status", async () => {
+    const ctx = fresh(); const t = createToken(ctx, { label: "Claude" });
+    const mk = (name: string, a: string, b: string, titles: [string, string]) => { const proj = createProject(ctx, { name, kind: "project" }); const n1 = importText(ctx, { kind: "note", title: titles[0], text: a, at: "2026-11-10T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", localOnly: true }); importText(ctx, { kind: "note", title: titles[1], text: b, at: "2026-11-14T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", localOnly: true, corrects: n1.id }); };
+    mk("Lantern exhibit", "Lantern exhibit handoff. Mara owns caption proofing and needs the final photo credits before she can send the proof. Theo was assigned to book the label printer. The wall measurements are finished.", "Update for the Lantern exhibit: Inez has taken over the printer booking from Theo and can book it now. Mara is still waiting for the final photo credits. The wall measurements are complete.", ["Lantern team handoff", "Lantern crew update"]);
+    mk("Maple exhibit", "Maple exhibit handoff. Suri owns the venue agreement and needs the insurance certificate before she can sign it. Bo was assigned to book the projector. The floor plan is finished.", "Update for the Maple exhibit: Ravi has taken over the projector booking from Bo and can book it now. Suri is still waiting for the insurance certificate. The floor plan is complete.", ["Maple team handoff", "Maple crew update"]);
+    const ASK = "Turn these notes into a handoff table I can paste into our shared doc. Give each open task one row with the owner, next action, and blocker. Leave completed work out.";
+    const s = await connect(t.token);
+    const a = (await s.call("submit_goal", { text: ASK, project: "Lantern exhibit" })).json; const b = (await s.call("submit_goal", { text: ASK, project: "Maple exhibit" })).json;
+    expect(a.resultId).not.toBe(b.resultId); expect((await s.call("submit_goal", { text: ASK, project: "No such project" })).isError).toBe(true);
+    let tick = 1_000_000; await processQueue(ctx, { workerId: "w", handlers: HANDLERS, clock: () => new Date(tick), leaseMs: 1000 });
+    await s.client.close(); const chat2 = await connect(t.token);
+    const ra = (await chat2.call("get_result", { id: a.resultId })).json, rb = (await chat2.call("get_result", { id: b.resultId })).json;
+    expect(ra.table.rows.map((r: any) => r.cells.join(" | "))).toEqual(["Mara | Send the proof | Waiting for the final photo credits", "Inez | Book the label printer | None reported"]);
+    expect(rb.table.rows.map((r: any) => r.cells.join(" | "))).toEqual(["Suri | Sign the venue agreement | Waiting for the insurance certificate", "Ravi | Book the projector | None reported"]);
+    expect(ra.table.rows[1].sources).toEqual(expect.arrayContaining(["Lantern team handoff", "Lantern crew update"])); expect(JSON.stringify(rb)).not.toMatch(/Lantern/);
+    expect(ra.completion).toBe("complete"); expect(ra.requestedParts).toEqual([expect.objectContaining({ kind: "table", status: "done" })]); expect(ra.table.markdown).toMatch(/^\| Owner \| Next action \| Blocker \|/);
+  });
+});

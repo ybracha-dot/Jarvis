@@ -235,3 +235,18 @@ export function importText(ctx: Ctx, o: { kind: string; title: string; text: str
   return { ...r, sourceId: src.id };
 }
 export const hash8 = (s: string) => crypto.createHash("sha1").update(s).digest("hex").slice(0, 8);
+
+/** Authorized items linked to the given ones by a correction, in either direction, followed until nothing new turns up. */
+export function linkedCorrections(ctx: Ctx, ids: string[]): { id: string; why: string }[] {
+  const out: { id: string; why: string }[] = []; const seen = new Set(ids); let frontier = [...ids];
+  for (let round = 0; round < 6 && frontier.length; round++) {
+    const next: string[] = [];
+    for (const id of frontier) {
+      for (const r of all(ctx.db, "SELECT i.id, i.title FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.corrects=? AND i.tombstone=0 AND s.revoked_at IS NULL", ctx.owner, id)) if (!seen.has(r.id as string)) { seen.add(r.id as string); next.push(r.id as string); out.push({ id: r.id as string, why: `your later correction “${r.title}”` }); }
+      const me = get(ctx.db, "SELECT corrects FROM evidence_items WHERE id=? AND owner_id=?", id, ctx.owner);
+      if (me?.corrects) { const o = get(ctx.db, "SELECT i.id, i.title FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.id=? AND i.owner_id=? AND i.tombstone=0 AND s.revoked_at IS NULL", me.corrects, ctx.owner); if (o && !seen.has(o.id as string)) { seen.add(o.id as string); next.push(o.id as string); out.push({ id: o.id as string, why: `the note “${o.title}” that this corrects` }); } }
+    }
+    frontier = next;
+  }
+  return out;
+}

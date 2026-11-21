@@ -7,6 +7,7 @@ import { Router, RouterError, Transport, defaultTransport } from "./router";
 import { analyze, itemInFrom, ItemIn, Analysis, fmtMoney, fmtDate, Term, OptionResult } from "./decision";
 import { getItem, ownerName } from "./evidence";
 import { analyzePlan, PlanAnalysis, PlanRow } from "./plan";
+import { buildTaskTable, tableMarkdown, tableTsv, TableAnalysis, Cite, TableSpec } from "./ledger";
 
 export interface SrcRef { itemId: string; revision: number; title: string; kind: string; at: string; sourceLabel: string; mode: string; role: string; quote: string }
 export const DECISION_Q = /\b(which|who)\b[^.?!]*\b(should|go with|choose|pick|hire|book|take|best)\b|\bshould i (go with|choose|pick|take|hire|book|buy|use)\b|\b(compare|recommend|recommendation|decide|decision|cheapest|best option|better option|trade-?offs?|worth it|which one|which of)\b/i;
@@ -77,7 +78,7 @@ export function toItems(ctx: Ctx, ids: string[]): ItemIn[] {
 }
 export const fxRates = (ctx: Ctx) => getSetting<Record<string, number>>(ctx.db, "fx_rates", {});
 
-export interface DecisionOut { title: string; body: string; summary: string; sources: SrcRef[]; flags: any[]; applied: string[]; unapplied: string[]; analysis: AnalysisJson | PlanJson; draft: { to: string | null; subject: string; body: string; purpose: string } | null; needsJudgment: boolean; localOnly: boolean }
+export interface DecisionOut { title: string; body: string; summary: string; sources: SrcRef[]; flags: any[]; applied: string[]; unapplied: string[]; analysis: AnalysisJson | PlanJson | TableJson; draft: { to: string | null; subject: string; body: string; purpose: string } | null; needsJudgment: boolean; localOnly: boolean }
 
 export function composeDecision(ctx: Ctx, b: { items: { id: string }[]; localOnly?: boolean }, request: string, o: { wantDraft: boolean; applied: string[]; unapplied: string[] }): DecisionOut | null {
   const ids = b.items.map((i) => i.id); const items = toItems(ctx, ids);
@@ -125,8 +126,9 @@ function buildDraft(a: Analysis, rec: Analysis["recommendation"], me: string, re
 const rowJson = (r: PlanRow) => ({ label: r.label, value: r.value, note: r.note ?? null, itemId: r.src?.itemId ?? null, title: r.srcTitle, at: r.src?.at ?? null, quote: r.quote });
 function planJson(p: PlanAnalysis, itemIds: string[]) { return { version: 1, type: "plan" as const, kind: p.kind, itemIds, recommendation: p.recommendation, inputs: p.inputs.map(rowJson), computation: p.computation, options: p.options, setAside: p.setAside.map(rowJson), notes: p.notes, figures: p.figures ?? [], keyFigures: p.keyFigures ?? [] }; }
 export type PlanJson = ReturnType<typeof planJson>;
+const isTable = (a: unknown): a is TableJson => !!a && (a as any).type === "table";
 const isPlan = (a: unknown): a is PlanJson => !!a && (a as any).type === "plan";
-export { isPlan };
+export { isPlan, isTable };
 
 /** Answer a time, capacity or duration question: a recommendation first, the calculation behind it, and a draft of the next step when asked. */
 export function composePlan(ctx: Ctx, b: { items: { id: string }[]; planIds?: string[]; localOnly?: boolean }, request: string, o: { wantDraft: boolean; applied: string[]; unapplied: string[] }): DecisionOut | null {
@@ -177,10 +179,39 @@ function buildPlanDraft(p: PlanAnalysis, request: string, me: string, items: Ite
   return { to, subject: `Booking ${room ?? "a room"}`, purpose: "follow-up", body: body.join("\n") };
 }
 
+
+// ---------- a table of open work, built from the notes ----------
+const citeJson = (c: Cite) => ({ itemId: c.src.itemId, title: c.src.title, at: c.src.at, quote: c.quote, role: c.role });
+function tableJson(t: TableAnalysis, itemIds: string[], headline: string) {
+  return { version: 1, type: "table" as const, itemIds, columns: t.columns, keys: t.keys, rows: t.rows.map((r) => ({ cells: r.cells, task: r.task, cites: r.cites.map(citeJson) })), leftOut: t.leftOut.map((l) => ({ text: l.text, reason: l.reason, cites: l.cites.map(citeJson) })), notes: t.notes, missingColumns: t.missingColumns, openCount: t.openCount, markdown: tableMarkdown(t), tsv: tableTsv(t),
+    recommendation: { kind: "recommend" as const, option: null, label: null, headline, tradeoff: [] as string[], question: null, nextAction: { kind: "none", text: "Paste the table where you need it." }, basis: [] as string[], qualifiers: [] as string[] } };
+}
+export type TableJson = ReturnType<typeof tableJson>;
+export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?: boolean }, request: string, wish: TableSpec, o: { applied: string[]; unapplied: string[] }): DecisionOut | null {
+  const ids = [...new Set(b.items.map((i) => i.id))]; const items = toItems(ctx, ids);
+  const t = buildTaskTable(items, wish); if (!t.rows.length) return null;
+  const sources: SrcRef[] = []; const flags: any[] = [];
+  const addSrc = (c: Cite, role: string) => { if (!sources.some((x) => x.itemId === c.src.itemId && x.quote === c.quote && x.role === role)) sources.push({ itemId: c.src.itemId, revision: c.src.revision, title: c.src.title, kind: c.src.kind, at: c.src.at, sourceLabel: c.src.sourceLabel, mode: c.src.mode, role, quote: c.quote }); };
+  for (const r of t.rows) for (const c of r.cites) addSrc(c, `${r.cells[0] && t.keys[0] === "owner" ? r.cells[0] + ": " : ""}${r.task} (${c.role})`);
+  for (const l of t.leftOut) for (const c of l.cites.slice(-1)) addSrc(c, `left out: ${l.text}`);
+  const lines = [`**Handoff table**`, "", tableMarkdown(t), ""];
+  const ch = t.leftOut.filter((l) => l.reason.startsWith("handed over")); const done = t.leftOut.filter((l) => l.reason === "complete");
+  if (done.length || ch.length) { lines.push("**Left out or changed**", ""); for (const l of done) lines.push(`- ${l.text}: complete, so it has no row.`); for (const l of ch) lines.push(`- ${l.text}.`); lines.push(""); }
+  if (t.notes.length) lines.push("**Check these**", "", ...t.notes.map((n) => `- ${n}`));
+  for (const n of t.notes) flags.push({ kind: "inferred", text: n });
+  if (t.missingColumns.length) flags.push({ kind: "unfilled_column", text: `No note states ${t.missingColumns.join(", ")}, so those cells say “Not stated”.` });
+  const headline = `${t.rows.length} open task${t.rows.length === 1 ? "" : "s"}: ${t.rows.map((r) => `${r.cells[0]}`).join(", ")}`;
+  return { title: "Handoff table", body: lines.join("\n"), summary: headline, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: tableJson(t, ids, headline), draft: null, needsJudgment: false, localOnly: !!b.localOnly };
+}
+
 export function optionsOf(a: AnalysisJson): OptionResult[] { return a.options as unknown as OptionResult[]; }
 
 /** Recompute from the sources as they are now and compare with what was written down. */
-export function recheckAnalysis(ctx: Ctx, stored: AnalysisJson | PlanJson, request: string): string[] {
+export function recheckAnalysis(ctx: Ctx, stored: AnalysisJson | PlanJson | TableJson, request: string, wish?: TableSpec): string[] {
+  if (isTable(stored)) {
+    const items = toItems(ctx, stored.itemIds); const problems: string[] = []; if (items.length < stored.itemIds.length) problems.push("A source behind the table is no longer available.");
+    const now = buildTaskTable(items, wish ?? { columns: stored.columns, rowUnit: null, excludeDone: stored.leftOut.some((l) => l.reason === "complete") }); if (tableMarkdown(now) !== stored.markdown) problems.push("Rebuilding the table from the sources as they are now gives a different table."); return problems;
+  }
   if (isPlan(stored)) {
     const items = toItems(ctx, stored.itemIds); const now = analyzePlan(items, request); const problems: string[] = [];
     if (items.length < stored.itemIds.length) problems.push("A source behind the plan is no longer available.");

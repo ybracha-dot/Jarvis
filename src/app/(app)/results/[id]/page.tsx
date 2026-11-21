@@ -50,8 +50,8 @@ function Result({ id }: { id: string }) {
       {d.stale && <Notice>This version is out of date: {d.stale} Ask again to rebuild it from what is still authorized.</Notice>}
       {d.body && <section aria-label={KIND[d.kind]} className="rounded-2xl border border-line bg-surface metal p-5 md:p-6 space-y-1" data-testid="result-body">
         <div className="flex items-center gap-2 mb-2"><h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium flex-1">{KIND[d.kind]}. Nothing has been sent.</h2><Button size="sm" onClick={copy}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />}{copied ? "Copied" : "Copy"}</Button></div>
-        {render(d.body)}</section>}
-      {d.analysis && <Calculation a={d.analysis} />}
+        {d.analysis?.type === "table" ? <><TableView a={d.analysis} />{render(d.body.split("\n").filter((l: string) => !/^\|/.test(l) && l !== "**Handoff table**").join("\n").trim())}</> : render(d.body)}</section>}
+      {d.analysis && d.analysis.type !== "table" && <Calculation a={d.analysis} />}
       {d.analysis && !d.draft && d.analysis.recommendation.nextAction && d.analysis.recommendation.nextAction.kind !== "none" && d.analysis.recommendation.kind !== "insufficient" && !(d.analysis.type === "plan" && d.analysis.recommendation.nextAction.kind === "ask_missing") && <div><Button busy={revise.busy} onClick={() => { setInstr("Draft it please."); revise.run(); }} data-testid="prepare-draft">Prepare the draft for that next step</Button></div>}
       {d.draft && <DraftEditor id={d.id} draft={d.draft} version={d.version} />}
       {d.flags.length > 0 && <section aria-label="Things to check"><SectionTitle>Check these</SectionTitle><ul className="space-y-2" data-testid="result-flags">{d.flags.map((f: any, i: number) => <li key={i} className="rounded-lg border border-amber-dim bg-[#1a1508] px-3.5 py-2.5 text-[15px] text-[#f6d7a1]" data-flag={f.kind}>{f.text}{f.itemId && <> <Link className="underline underline-offset-2" href={`/evidence/${f.itemId}`}>Open the source</Link></>}</li>)}</ul></section>}
@@ -82,6 +82,18 @@ export { ExternalLink, FileText };
 
 const STATUS: Record<string, { tone: "accent" | "amber" | "danger" | "neutral"; label: string }> = { ok: { tone: "accent", label: "meets it" }, violated: { tone: "danger", label: "does not meet it" }, unknown: { tone: "amber", label: "cannot tell yet" }, unconfirmed: { tone: "amber", label: "unconfirmed" } };
 const VERDICT: Record<string, { tone: "accent" | "amber" | "danger" | "neutral"; label: string }> = { works: { tone: "accent", label: "works" }, fails: { tone: "danger", label: "does not work" }, depends: { tone: "amber", label: "depends on something unconfirmed" } };
+function TableView({ a }: { a: any }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = async (kind: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(kind); setTimeout(() => setCopied(null), 1500); } catch { /* blocked */ } };
+  const srcs = (r: any) => [...new Map(r.cites.map((c: any) => [c.itemId + c.title, c])).values()] as any[];
+  return (
+    <div className="space-y-2" data-testid="handoff-table">
+      <div className="overflow-x-auto rounded-xl border border-line"><table className="w-full text-[15px] min-w-[32rem]"><thead><tr className="text-left text-[13px] uppercase tracking-wider text-muted">{a.columns.map((c: string) => <th key={c} className="px-3 py-2 font-medium">{c}</th>)}<th className="px-3 py-2 font-medium">Source</th></tr></thead>
+        <tbody>{a.rows.map((r: any, i: number) => <tr key={i} className="border-t border-line align-top" data-testid="table-row">{r.cells.map((x: string, j: number) => <td key={j} className="px-3 py-2 break-words">{x}</td>)}<td className="px-3 py-2 text-[13px]">{srcs(r).map((c: any) => <div key={c.itemId + c.title}><Link className="underline underline-offset-2" href={`/evidence/${c.itemId}?q=${encodeURIComponent((c.quote ?? "").slice(0, 80))}`}>{c.title}</Link></div>)}</td></tr>)}</tbody></table></div>
+      <div className="flex gap-2 flex-wrap"><Button size="sm" onClick={() => copy("tsv", a.tsv)} data-testid="table-copy-tsv">{copied === "tsv" ? "Copied" : "Copy for a doc or sheet"}</Button><Button size="sm" onClick={() => copy("md", a.markdown)} data-testid="table-copy-md">{copied === "md" ? "Copied" : "Copy as Markdown"}</Button></div>
+    </div>
+  );
+}
 function PlanCalculation({ a }: { a: any }) {
   const link = (r: any) => r.itemId ? <Link className="underline underline-offset-2" href={`/evidence/${r.itemId}?q=${encodeURIComponent((r.quote ?? "").slice(0, 80))}`}>{r.title}</Link> : <span>{r.title}</span>;
   return (

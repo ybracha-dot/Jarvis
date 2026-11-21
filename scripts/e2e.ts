@@ -727,6 +727,40 @@ async function journeyShuttle(browser: Browser) {
   await ctx.close();
 }
 
+async function journeyHandoff(browser: Browser) {
+  step("Field test 3: a handoff table from linked notes, the same words asked in two projects, both results opened");
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
+  const p = await ctx.newPage(); watch(p, "handoff"); startWorker(300);
+  const ASK = "Turn these notes into a handoff table I can paste into our shared doc. Give each open task one row with the owner, next action, and blocker. Leave completed work out.";
+  const flow = async (project: string, title: string, note: string, update: string) => {
+    await p.goto(base + "/try"); await p.getByTestId("try-privacy").waitFor();
+    await p.getByTestId("try-project").fill(project); await p.getByTestId("try-title").fill(title); await p.getByTestId("try-text").fill(note); await p.getByTestId("try-save1").click(); await p.getByTestId("try-step1").getByText(/Saved\./).waitFor();
+    await p.getByTestId("try-correction").fill(update); await p.getByTestId("try-save2").click(); await p.getByText(/Saved as a correction/).waitFor();
+    await p.getByTestId("try-question").fill(ASK); await p.getByTestId("try-ask").click(); await p.getByTestId("try-done").waitFor({ timeout: 40000 }); await p.getByTestId("try-open-result").click(); await p.getByTestId("handoff-table").waitFor({ timeout: 20000 });
+    return p.url();
+  };
+  const rows = async () => p.getByTestId("table-row").evaluateAll((els) => els.map((e) => Array.from(e.querySelectorAll("td")).slice(0, 3).map((t) => t.textContent).join(" | ")));
+  const lantern = await flow("Lantern exhibit", "Lantern team handoff", "Lantern exhibit handoff. Mara owns caption proofing and needs the final photo credits before she can send the proof. Theo was assigned to book the label printer. The wall measurements are finished.", "Update for the Lantern exhibit: Inez has taken over the printer booking from Theo and can book it now. Mara is still waiting for the final photo credits. The wall measurements are complete.");
+  const r1 = await rows(); ok(r1.length === 2 && r1[0] === "Mara | Send the proof | Waiting for the final photo credits" && r1[1] === "Inez | Book the label printer | None reported", `Lantern: the table has Mara's open row and Inez's reassigned row (${r1.join(" ; ")})`);
+  const t1 = await p.getByTestId("result-body").innerText(); ok(!/Theo \|/.test(t1) && /Wall measurements: complete, so it has no row/.test(t1) && /Reassigned from Theo to Inez/.test(t1), "Lantern: finished work and the handed-off booking are left out, and the reassignment is stated");
+  const links = await p.getByTestId("table-row").nth(1).locator("a").allInnerTexts(); ok(links.includes("Lantern team handoff") && links.some((x) => /Correction to Lantern team handoff/.test(x)), "Lantern: the Inez row cites both the original note and the correction");
+  const reads = await p.getByTestId("result-reads").innerText(); ok(/Lantern team handoff/.test(reads) && /Correction to Lantern team handoff/.test(reads), "Lantern: What Jarvis read lists both notes");
+  const part = await p.getByTestId("requested-part").evaluateAll((els) => els.map((e) => e.getAttribute("data-status"))); ok(part.join() === "done" && /Table with 2 rows/.test(await p.getByTestId("requested-parts").innerText()), "Lantern: the requested table is checked and marked done");
+  ok((await p.getByTestId("result-status").innerText()).trim() === "Finished", "Lantern: the status says Finished only after the check");
+  await shot(p, "48-handoff-lantern-desktop.png");
+  // The same words in a second project with a different owner assignment.
+  const maple = await flow("Maple exhibit", "Maple team handoff", "Maple exhibit handoff. Suri owns the venue agreement and needs the insurance certificate before she can sign it. Bo was assigned to book the projector. The floor plan is finished.", "Update for the Maple exhibit: Ravi has taken over the projector booking from Bo and can book it now. Suri is still waiting for the insurance certificate. The floor plan is complete.");
+  ok(maple !== lantern, "Maple: a different result link, not the first project's");
+  const r2 = await rows(); ok(r2.length === 2 && r2[0] === "Suri | Sign the venue agreement | Waiting for the insurance certificate" && r2[1] === "Ravi | Book the projector | None reported", `Maple: its own table (${r2.join(" ; ")})`);
+  const reads2 = await p.getByTestId("result-reads").innerText(); const src2 = await p.getByTestId("result-sources").innerText(); ok(/Maple team handoff/.test(reads2) && !/Lantern/.test(reads2 + src2 + (await p.getByTestId("result-body").innerText())), "Maple: its read log, table and sources never mention the Lantern notes");
+  await shot(p, "49-handoff-maple-desktop.png");
+  await p.reload(); await p.getByTestId("handoff-table").waitFor(); ok((await rows()).join(";") === r2.join(";"), "Maple: the table survives a reload");
+  await p.goto(lantern); await p.getByTestId("handoff-table").waitFor(); ok((await rows()).join(";") === r1.join(";"), "Lantern: reopening the first result still shows its own table");
+  const link = p.getByTestId("table-row").first().locator("a").first(); await link.click(); await p.getByTestId("evidence-body").waitFor(); ok(/Mara owns caption proofing/.test(await p.getByTestId("evidence-body").innerText()), "a row's source link opens the original note");
+  ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole run made zero model calls");
+  await ctx.close();
+}
+
 async function journeyPrivate(browser: Browser) {
   step("Private run: one note, one correction, one question (invented material)");
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
@@ -1213,6 +1247,7 @@ async function main() {
     else if (only === "decision") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "decision"); await journeyDecision(p, browser); await c.close(); }
     else if (only === "plan") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "plan"); await journeyPlan(p, browser); await c.close(); }
     else if (only === "shuttle") { await journeyShuttle(browser); }
+    else if (only === "handoff") { await journeyHandoff(browser); }
     else if (only === "private") { await journeyPrivate(browser); }
     else if (only === "blackboard") { await journeyBlackboard(browser); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
@@ -1234,6 +1269,7 @@ async function main() {
     await journeyPlan(page, browser);
     await journeyPrivate(browser);
     await journeyShuttle(browser);
+    await journeyHandoff(browser);
     await journeyBlackboard(browser);
     await journeyRoundTrip(browser);
     await desktop.close();
