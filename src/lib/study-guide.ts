@@ -70,7 +70,7 @@ export function requestStudyGuide(ctx: Ctx, raw: z.input<typeof StudyRequest>) {
 export function answerJob(ctx: Ctx, jobId: string, answer: { guideId?: string; importText?: string; importTitle?: string }) {
   const j = getJob(ctx, jobId); if (!j) throw new HttpError(404, "Job not found");
   if (j.status !== "blocked") throw new HttpError(409, `That job is ${j.status}, not waiting for an answer.`);
-  tx(ctx.db, () => { run(ctx.db, "UPDATE jobs SET input=?, status='queued', error=NULL WHERE id=?", JSON.stringify({ ...j.input, answers: { ...(j.input.answers ?? {}), ...answer } }), jobId); jobEvent(ctx, jobId, "answered", "You answered. Resuming."); });
+  tx(ctx.db, () => { run(ctx.db, "UPDATE messages SET data=json_set(data,'$.answered',1) WHERE job_id=? AND kind='question'", jobId); run(ctx.db, "UPDATE jobs SET input=?, status='queued', error=NULL WHERE id=?", JSON.stringify({ ...j.input, answers: { ...(j.input.answers ?? {}), ...answer } }), jobId); jobEvent(ctx, jobId, "answered", "You answered. Resuming."); });
   return { ok: true };
 }
 export function retryJob(ctx: Ctx, jobId: string) {
@@ -78,7 +78,14 @@ export function retryJob(ctx: Ctx, jobId: string) {
   if (j.status !== "blocked") throw new HttpError(409, `That job is ${j.status}.`);
   run(ctx.db, "UPDATE jobs SET status='queued', error=NULL WHERE id=?", jobId); jobEvent(ctx, jobId, "retry", "Retrying after you changed something."); return { ok: true };
 }
-const block = (api: JobApi, message: string, ask?: unknown) => { run(api.ctx.db, "UPDATE jobs SET result=? WHERE id=?", JSON.stringify({ ask: ask ?? null }), api.job.id); throw Object.assign(new Error(message), { blocked: true }); };
+const block = (api: JobApi, message: string, ask?: unknown) => {
+  run(api.ctx.db, "UPDATE jobs SET result=? WHERE id=?", JSON.stringify({ ask: ask ?? null }), api.job.id);
+  // Put the question in the conversation too, so it can be answered (and heard) without opening the Office. Once per blocked job.
+  const conv = (api.input as any).conversationId as string | undefined;
+  if (conv && !get(api.ctx.db, "SELECT 1 x FROM messages WHERE job_id=? AND kind='question' AND json_extract(data,'$.answered') IS NULL", api.job.id))
+    addMessage(api.ctx, conv, { role: "jarvis", kind: "question", jobId: api.job.id, text: ((ask as any)?.question as string) ?? message, data: { ask, spoken: ((ask as any)?.question as string) ?? message, jobId: api.job.id } });
+  throw Object.assign(new Error(message), { blocked: true });
+};
 
 // ---------- handlers ----------
 const supervise_study: Handler = async (api) => {
@@ -167,7 +174,7 @@ const study_writer: Handler = async (api) => {
   });
   api.assertNotCancelled();
   const saved = await api.step("save", "Saving the guide as a new version", () => {
-    const photoStatus = inp.photos.map((p: any) => ({ name: p.name, status: p.status === "read" ? "read" : p.status === "partial" ? `partly unclear: ${p.detail}` : p.status === "unreadable" ? "unreadable, retake" : "not read (needs a Claude provider)" }));
+    const photoStatus = inp.photos.map((p: any) => ({ name: p.name, status: p.status === "read" ? "read" : p.status === "partial" ? p.detail.replace(/^Partly unclear:\s*/i, "partly unclear: ") : p.status === "unreadable" ? "unreadable, retake" : "not read (needs a Claude provider)" }));
     const content: GuideContent = { title: `${inp.course} Final study guide`, course: inp.course, kind: "final", format: { ...inp.format, source: inp.guide.title }, coverage: { topics, provisional: inp.coverage.provisional, basis: inp.coverage.basis },
       sources: { format: `${inp.guide.title} (v${inp.guide.version})`, photos: photoStatus, coverage: [inp.coverage.basis] }, keyCheck: { checked: check.checked, supported: check.supported, removed: check.removed, unverified: check.unverified },
       generator: { name: writer.name, live: writer.live, note: writer.note }, questions: check.questions };

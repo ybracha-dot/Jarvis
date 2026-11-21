@@ -6,6 +6,7 @@ import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Empty, Noti
 import { useDrawerParams } from "@/components/Shell";
 import { fmtDateTime, localHM } from "@/lib/time";
 import Link from "next/link";
+import { VoiceDock } from "@/components/VoiceDock";
 
 const CHANGE_LABEL: Record<string, string> = { due_moved: "Due date", requirement_added: "Requirement", requirement_waived: "Waived", conflict: "Conflict", stale_source: "Older source", due_established: "Due date" };
 function groupChanges(rows: any[]) {
@@ -67,6 +68,8 @@ export default function TodayPage() {
           </div>
         </Card>
       </section>
+
+      <VoiceDock />
 
       {empty && <Card className="p-5"><Empty title="This private workspace is empty" hint="Nothing is connected yet. Import a syllabus or follow the connection checklist." ><div className="flex gap-2 justify-center"><Link href="/sources" className="inline-flex rounded-lg px-3.5 py-2 text-sm bg-accent text-[#06201b] font-medium">Import a syllabus</Link><Button onClick={() => open("connections")}>Open checklist</Button></div></Empty></Card>}
 

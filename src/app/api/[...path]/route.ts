@@ -12,4 +12,4 @@ async function run(req: Request, ctx: { params: Promise<{ path: string[] }> }) {
   if (res.binary) return new Response(new Uint8Array(res.binary.data), { headers: { "content-type": res.binary.contentType, "cache-control": "private, no-store", ...(res.binary.filename ? { "content-disposition": `inline; filename="${res.binary.filename}"` } : {}) } });
   return Response.json(res.body, { status: res.status ?? 200, headers: { "cache-control": "no-store", ...(res.headers ?? {}) } });
 }
-export { run as GET, run as POST, run as PATCH, run as DELETE };
+export { run as GET, run as POST, run as PUT, run as PATCH, run as DELETE };

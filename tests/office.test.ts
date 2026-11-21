@@ -183,3 +183,19 @@ describe("authenticated MCP connector (real SDK client over Streamable HTTP, in 
     delete process.env.JARVIS_MCP_TOKEN;
   });
 });
+
+describe("cancel that lands while a supervisor is running", () => {
+  it("does not leave a waiting supervisor or a stray blocked helper", async () => {
+    const { ctx, clock } = fresh();
+    let release: () => void = () => {}; const gate = new Promise<void>((r) => (release = r));
+    const handlers = { sup: async (api: any) => { await api.step("a", "Thinking", () => gate.then(() => true)); const kid = api.spawn("k", { kind: "kid", role: "Helper", area: "research", title: "kid" }); api.waitFor([kid]); return {}; }, kid: async () => { const e: any = new Error("needs you"); e.blocked = true; throw e; } };
+    const root = enqueueJob(ctx, { dedupKey: "r", kind: "sup", role: "Supervisor", area: "supervisor", title: "root" }, clock);
+    const j = claimNext(ctx, "w", 5000, clock)!;
+    const running = runClaimed(ctx, j, { workerId: "w", handlers, clock, leaseMs: 5000 });
+    cancelJob(ctx, root.id, clock);                 // the user cancels while the supervisor is mid-step
+    release();
+    expect(await running).toBe("cancelled");
+    expect(all(ctx.db, "SELECT status FROM jobs").every((r) => r.status === "cancelled")).toBe(true);
+    expect(count(ctx, "jobs", "kind='kid'")).toBe(0);
+  });
+});

@@ -6,6 +6,7 @@ import { RotateCw, Undo2, Square, Radio, Cpu, FileText, ExternalLink } from "luc
 import { api, useQuery, useAction } from "@/components/api";
 import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Notice, Field, inputCls, cx } from "@/components/ui";
 import { OfficeScene, OfficeJob } from "@/components/OfficeScene";
+import { AskPanel } from "@/components/AskPanel";
 import { useDrawerParams } from "@/components/Shell";
 import { fmtDateTime } from "@/lib/time";
 
@@ -77,7 +78,8 @@ function Office() {
                 <dt className="text-muted">Budget</dt><dd>{selected.budget.modelCalls != null ? `${selected.budget.modelCalls} model calls` : "unset"}{selected.budget.maxMinutes ? `, ${selected.budget.maxMinutes} min` : ""}</dd>
                 <dt className="text-muted">Done when</dt><dd><ul className="list-disc pl-4">{selected.criteria.map((c: string, i: number) => <li key={i}>{c}</li>)}</ul></dd>
               </dl>
-              {selected.error && <ErrorBox error={selected.error} />}
+              {selected.status === "blocked" && <div className="rounded-lg border border-amber-dim bg-[#1a1508] p-3 space-y-2" data-testid="blocked-ask"><div className="text-sm font-medium text-amber">Waiting for you</div>{selected.result?.ask ? <AskPanel jobId={selected.id} ask={selected.result.ask} /> : <><p className="text-[13px]">{selected.error}</p><Button size="sm" onClick={() => api(`/office/jobs/${selected.id}/retry`, { body: {} })}>Retry now</Button></>}</div>}
+              {selected.error && selected.status !== "blocked" && <ErrorBox error={selected.error} />}
               {selected.steps.length > 0 && <div><div className="text-[11px] uppercase tracking-wider text-muted mb-1">Finished steps</div><ol className="list-decimal pl-5 text-[13px] space-y-0.5">{selected.steps.map((s: string, i: number) => <li key={i}>{s}</li>)}</ol></div>}
               <div><div className="text-[11px] uppercase tracking-wider text-muted mb-1">Events</div><ol className="space-y-1 text-[12px]">{selected.events.map((e: any, i: number) => <li key={i} className="text-muted"><Mono>{e.kind}</Mono> {e.summary}</li>)}</ol></div>
               <div className="flex gap-2 flex-wrap">

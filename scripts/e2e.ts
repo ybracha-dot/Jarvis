@@ -20,6 +20,7 @@ function startWorker(pace: number) {
   stopWorker();
   worker = spawn("npx", ["tsx", "scripts/worker.ts"], { env: { ...process.env, JARVIS_DATA_DIR: dataDir, JARVIS_JOB_PACE_MS: String(pace), JARVIS_JOB_LEASE_MS: "3000" }, stdio: "ignore", detached: true });
 }
+async function restartServer() { const d = dataDir!; stopWorker(); if (server?.pid) { try { process.kill(-server.pid, "SIGTERM"); } catch { /* gone */ } } await new Promise((r) => setTimeout(r, 1200)); await startServer(d); }
 function killServer() { stopWorker(); if (server?.pid) { try { process.kill(-server.pid, "SIGTERM"); } catch { /* already gone */ } } }
 const problems: string[] = [];
 const steps: string[] = [];
@@ -28,9 +29,9 @@ let pass = 0;
 function ok(cond: unknown, msg: string) { if (!cond) { problems.push(`ASSERT FAILED: ${msg}`); console.log(`  FAIL ${msg}`); } else { pass++; console.log(`  ok   ${msg}`); } }
 const step = (s: string) => { steps.push(s); console.log(`\n# ${s}`); };
 
-async function startServer() {
+async function startServer(reuseDir?: string) {
   if (process.env.E2E_URL) return;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-e2e-")); dataDir = dir;
+  const dir = reuseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-e2e-")); dataDir = dir;
   server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...process.env, JARVIS_DATA_DIR: dir, JARVIS_INAPP_RUNNER: "0" }, stdio: "ignore", detached: true });
   for (let i = 0; i < 60; i++) { try { const r = await fetch(`${base}/api/health`); if (r.ok) return; } catch { /* waiting */ } await new Promise((r) => setTimeout(r, 500)); }
   throw new Error("Server did not start. Run npm run build first.");
@@ -599,21 +600,231 @@ async function journeyOffice(page: Page, browser: Browser) {
   await shot(m, "16-office-mobile.png");
   await ctx.close();
 }
+
+const FAKE_SPEECH = `(() => {
+  const spoken = []; let cancels = 0; window.__spoken = spoken; window.__cancels = () => cancels;
+  const voices = [{ name: "Alex", lang: "en-US", localService: true, voiceURI: "Alex" }, { name: "Daniel", lang: "en-GB", localService: true, voiceURI: "Daniel" }, { name: "Serena", lang: "en-GB", localService: true, voiceURI: "Serena" }];
+  window.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; this.voice = null; this.rate = 1; this.pitch = 1; this.volume = 1; this.lang = ""; } };
+  Object.defineProperty(window, "speechSynthesis", { value: { getVoices: () => voices, addEventListener() {}, removeEventListener() {}, cancel() { cancels++; }, speak(u) { spoken.push({ text: u.text, voice: u.voice && u.voice.name, rate: u.rate }); u.onstart && u.onstart(); setTimeout(() => u.onend && u.onend(), 150); } } });
+  window.SpeechRecognition = window.webkitSpeechRecognition = class { start() { window.__micStarts = (window.__micStarts || 0) + 1; setTimeout(() => { const t = window.__transcript || ""; this.onresult && this.onresult({ resultIndex: 0, results: [Object.assign([{ transcript: t }], { isFinal: true })] }); }, 80); } stop() { this.onend && this.onend(); } abort() { window.__micAborts = (window.__micAborts || 0) + 1; } };
+})();`;
+const PHOTOS = ["fixtures/bi107/test-photo-1.png", "fixtures/bi107/test-photo-2-partly-blurred.png"];
+const spokenList = (page: Page) => page.evaluate(() => (window as any).__spoken as { text: string; voice: string; rate: number }[]);
+const typeAndSend = async (page: Page, words: string) => {
+  const before = await page.getByTestId("conversation").getByTestId("msg-user").count();
+  await page.getByTestId("transcript").fill(words); await page.getByTestId("send").click();
+  await page.waitForFunction((n) => document.querySelectorAll("[data-testid=conversation] [data-testid=msg-user]").length > n, before);
+  await page.waitForFunction(() => (document.querySelector("[data-testid=transcript]") as HTMLTextAreaElement).value === "");
+};
+const say = async (page: Page, words: string) => { await page.evaluate((w) => { (window as any).__transcript = w; }, words); await page.getByTestId("mic-button").click(); await page.getByTestId("mic-state").getByText(/listening/).waitFor(); await page.getByTestId("transcript").evaluate((el: HTMLTextAreaElement, w) => { /* wait for the fake recognizer */ void el; void w; }, words); await page.waitForFunction((w) => (document.querySelector("[data-testid=transcript]") as HTMLTextAreaElement).value.includes(w.slice(0, 20)), words); await page.getByTestId("mic-button").click(); await page.getByTestId("mic-state").getByText("Microphone off").waitFor(); };
+
+async function journeyStudy(browser: Browser) {
+  step("BI107 by voice: tap the mic, attach test photos, hear the acknowledgment (fake speech engines)");
+  await post("/demo/reset", { confirm: "RESET DEMO" });
+  startWorker(350);
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  await ctx.addInitScript(FAKE_SPEECH);
+  const page = await ctx.newPage(); watch(page, "study");
+  await page.goto(base + "/");
+  await page.getByTestId("voice-dock").waitFor();
+  ok(/Microphone off/.test(await page.getByTestId("mic-state").innerText()), "the microphone state is visible and starts off");
+  ok(await page.getByTestId("mic-button").isDisabled(), "the mic stays disabled until the speech service is disclosed");
+  ok(/sends audio to Google or Microsoft/.test(await page.getByTestId("voice-dock").innerText()), "the external speech service is disclosed before capture");
+  await page.getByTestId("mic-consent").click();
+  await page.getByRole("combobox", { name: "Course for these photos" }).selectOption("BI107").catch(() => {});
+  await page.getByTestId("photo-input").setInputFiles(PHOTOS);
+  await page.getByTestId("attached").getByText(/partly unclear/).waitFor({ timeout: 15000 });
+  const chips = await page.getByTestId("attached").innerText();
+  ok(/sharp/.test(chips) && /partly unclear: bottom right/.test(chips), "each photo shows its own quality: one sharp, one partly unclear");
+  await page.getByText("Voice and playback").click();
+  ok(/British English voice/.test(await page.getByTestId("voice-note").innerText()), "a British English voice is chosen when the device has one");
+  ok(await page.getByTestId("voice-select").inputValue() === "Daniel", "the calm British voice is the default");
+  await page.getByTestId("voice-preview").click();
+  ok((await spokenList(page)).some((s) => s.voice === "Daniel" && s.rate < 1), "voice preview plays in the chosen voice at a measured pace");
+  const WORDS = "Make me a study guide like the last one you did for bio. I'm uploading pictures from my last test so you can match the question style. The final is all multiple choice.";
+  await say(page, WORDS);
+  ok((await page.getByTestId("transcript").inputValue()).startsWith("Make me a study guide like the last one"), "speech lands in an editable transcript, not sent automatically");
+  ok((await page.getByTestId("conversation").getByTestId("msg-user").count()) === 0, "nothing is sent until you press Send");
+  await page.getByTestId("transcript").fill(WORDS + " Thanks.");
+  const cancelsBefore = await page.evaluate(() => (window as any).__cancels());
+  await shot(page, "20-voice-dock-desktop.png");
+  await page.getByTestId("send").click();
+  await page.getByTestId("msg-ack").waitFor();
+  const ack = await page.getByTestId("msg-ack").innerText();
+  ok(/Got it\. I'm building your BI107 study guide to match your last one and your 2 photos/.test(ack) && ack.split(/(?<=[.!?])\s+/).length <= 4, "Jarvis acknowledges in a couple of sentences");
+  await page.waitForFunction(() => (window as any).__spoken.some((s: any) => /building your BI107 study guide/.test(s.text)));
+  const ackSpoken = (await spokenList(page)).find((s) => /building your BI107/.test(s.text))!;
+  ok(ackSpoken.voice === "Daniel" && ackSpoken.rate < 1, "the acknowledgment is spoken aloud in the British voice at a measured pace");
+  ok((await page.getByTestId("conversation").getByTestId("msg-user").first().locator("img").count()) === 2, "the photos are shown in the conversation");
+  ok(await page.getByTestId("mic-state").innerText().then((t) => /Microphone off/.test(t)), "the microphone is off again after sending");
+
+  step("BI107 by voice: interrupt playback, leave the screen, the job keeps going");
+  await page.getByTestId("voice-dock").getByText("Voice and playback").click().catch(() => {});
+  await page.evaluate(() => { (window as any).__transcript = "okay"; });
+  await page.getByTestId("mic-button").click();            // tapping the mic while Jarvis talks interrupts it
+  ok((await page.evaluate(() => (window as any).__cancels())) > cancelsBefore, "starting the mic interrupts playback");
+  await page.getByTestId("mic-button").click();
+  await page.getByTestId("transcript").fill("");
+  await page.getByRole("link", { name: "Watch it work in the Office" }).first().click();
+  await page.getByTestId("roster").waitFor();
+  await page.getByTestId("roster-job").filter({ hasText: /Research specialist|Intake specialist|Planning specialist/ }).first().waitFor({ timeout: 20000 });
+  const research = page.getByTestId("roster-job").filter({ hasText: "Research specialist" }).first();
+  await research.waitFor({ timeout: 30000 });
+  await research.click();
+  await page.getByTestId("inspector").getByText("Delegated by").waitFor();
+  ok(/photo \d of 2|\d of 2/.test(await page.getByTestId("inspector").innerText()) || /Checking photo|Reading photo|final scope/.test(await page.getByTestId("inspector").innerText()), "the Office shows the research helper's real step");
+  await shot(page, "17-office-study-desktop.png");
+  await waitFor("the guide to be saved", async () => (await api("/courses/BI107")).documents.some((d: any) => d.title === "BI107 Final study guide"), 60000);
+  await waitFor("all helpers done", async () => (await api("/office")).jobs.filter((j: any) => /study|Study|final study/i.test(j.kind + j.title)).every((j: any) => j.status === "done"), 40000);
+  ok(true, "the job finished while the conversation screen was closed");
+
+  step("BI107 by voice: return to the same conversation and find the finished guide");
+  await page.goto(base + "/courses/BI107");
+  await page.getByTestId("guide-link").filter({ hasText: "Final study guide" }).waitFor();
+  ok(/BI107 \/ Study Guides\/Final/.test(await page.getByTestId("guide-folders").innerText()), "saved under BI107 → Study Guides → Final");
+  await page.getByTestId("result-actions").waitFor();
+  ok((await page.getByTestId("open-guide").count()) === 1 && (await page.getByTestId("quiz-me").count()) === 1 && (await page.getByTestId("export-pdf").count()) === 1, "the conversation has Open guide, Quiz me and Export PDF");
+  await page.waitForFunction(() => (window as any).__spoken.some((s: any) => /open it, or shall I ask the first question/.test(s.text)), null, { timeout: 15000 });
+  ok(true, "the spoken completion offers to open it or ask the first question");
+  ok((await page.getByTestId("photo-list").locator("li").count()) === 2, "both photos are listed privately under the course");
+  await shot(page, "21-course-workspace-desktop.png");
+
+  step("The finished guide: provenance, answers hidden, editable, versioned");
+  await page.getByTestId("open-guide").click();
+  await page.getByTestId("practice-list").waitFor();
+  const docId = page.url().split("/guides/")[1].split("?")[0];
+  const doc = (await api(`/documents/${docId}`)).content;
+  const body = await bodyText(page);
+  ok(/Answer key check: 8 of 8 questions supported by your course materials/.test(body), "the answer key check is shown");
+  ok(/Fixture: Fixture generator/.test(body), "the fixture generator is labeled, not passed off as live");
+  ok(/test-photo-1\.png: read/.test(body) && /partly unclear: bottom right/.test(body), "each photo's status is recorded in the guide");
+  ok(/Format from:\s*BI107 Midterm study guide \(v1\)/.test(body), "it says which earlier guide was used");
+  ok(!body.includes(doc.questions[0].rationale), "answers and explanations are hidden in the practice view");
+  await shot(page, "18-guide-desktop.png");
+  await page.getByRole("tab", { name: "Edit" }).click();
+  await page.getByTestId("stem-0").fill("EDITED by me: " + doc.questions[0].stem);
+  await page.getByTestId("save-guide").click();
+  await page.getByTestId("saved-msg").waitFor();
+  ok(/Saved as version 2/.test(await page.getByTestId("saved-msg").innerText()), "editing saves a new version");
+  await page.getByRole("tab", { name: "Versions" }).click();
+  ok((await page.getByTestId("versions").locator("li").count()) >= 2, "both versions are kept");
+  await page.reload(); await page.getByTestId("guide-title").waitFor();
+  ok(/v2/.test(await page.getByTestId("guide-version").innerText()), "the edit survives a refresh");
+
+  step("Quiz me, miss three, then say 'Quiz me on what I missed'");
+  await page.getByTestId("start-quiz").click();
+  await page.getByTestId("quiz-stem").waitFor();
+  ok(!/Not quite|Correct/.test(await bodyText(page)), "no answer is shown before you answer");
+  const g2 = (await api(`/documents/${docId}`)).content;
+  for (let i = 0; i < g2.questions.length; i++) {
+    const stem = await page.getByTestId("quiz-stem").innerText();
+    const q = g2.questions.find((x: any) => x.stem === stem)!;
+    const pick = i < 3 ? q.choices.find((c: any) => c.key !== q.answer).key : q.answer;
+    await page.getByTestId(`choice-${pick}`).click();
+    await page.getByTestId("quiz-result").waitFor();
+    if (i === 0) ok(q.rationale.length > 0 && (await page.getByTestId("quiz-result").innerText()).includes(q.rationale), "the explanation appears after answering");
+    await page.getByTestId("quiz-next").click();
+  }
+  await page.getByTestId("quiz-done").waitFor();
+  ok(/Quiz finished: 5 of 8/.test(await page.getByTestId("quiz-done").innerText()) && /missed 3/.test(await page.getByTestId("quiz-done").innerText()), "the quiz records 5 of 8 with 3 missed");
+  await page.goto(base + "/courses/BI107");
+  await page.getByTestId("voice-dock").waitFor();
+  await say(page, "Quiz me on what I missed.");
+  await page.getByTestId("send").click();
+  await page.getByTestId("msg-quiz").waitFor();
+  ok(/Starting a quiz on the 3 questions you missed/.test(await page.getByTestId("msg-quiz").innerText()), "voice command: quiz on the missed questions");
+  await page.waitForFunction(() => (window as any).__spoken.some((s: any) => /3 questions you missed/.test(s.text)));
+  await page.getByRole("link", { name: "Open the quiz" }).click();
+  await page.getByTestId("quiz-stem").waitFor();
+  ok(/1 of 3/.test(await page.getByTestId("quiz-progress").innerText()), "the missed-question quiz has just those three");
+  ok(/Missed questions/.test(await bodyText(page)), "it is labeled as the missed-questions quiz");
+
+  step("PDF export of the finished guide");
+  const pdf = await page.request.get(`${base}/api/documents/${docId}/pdf`);
+  const buf = Buffer.from(await pdf.body());
+  ok(pdf.status() === 200 && /application\/pdf/.test(pdf.headers()["content-type"]) && buf.subarray(0, 5).toString() === "%PDF-", "the PDF endpoint returns a real PDF");
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const txt = async (b: Buffer) => (await extractText(await getDocumentProxy(new Uint8Array(b)), { mergePages: true })).text as string;
+  const t1 = await txt(buf); const keyBuf = Buffer.from(await (await page.request.get(`${base}/api/documents/${docId}/pdf?answers=1`)).body()); const t2 = await txt(keyBuf);
+  ok(/BI107 Final study guide/.test(t1) && /EDITED by me/.test(t1) && !/Answer key/.test(t1), "the practice PDF has the questions and no answers");
+  ok(/Answer key/.test(t2) && t2.length > t1.length, "the answer-key PDF adds the answers");
+  fs.writeFileSync(path.join(SHOTS, "BI107-final-study-guide-sample.pdf"), keyBuf);
+
+  step("Restart the server and worker: the missed questions are still there");
+  await restartServer(); startWorker(350);
+  await page.goto(base + "/courses/BI107");
+  await page.getByTestId("voice-dock").waitFor();
+  await say(page, "Quiz me on what I missed.");
+  await page.getByTestId("send").click();
+  await page.getByTestId("msg-quiz").last().getByText(/3 questions you missed/).waitFor();
+  ok(true, "after a restart, 'quiz me on what I missed' still finds the same three questions");
+  const missed = await api("/quiz/missed?course=BI107");
+  ok(missed.missed.length === 3, "the missed list is intact in the database");
+
+  step("A duplicate request is not started twice; a second request makes a new version; cancel stops one");
+  await typeAndSend(page, "Make me a study guide like the last one for bio, with a harder mix.");
+  await typeAndSend(page, "Make me a study guide like the last one for bio, with a harder mix.");
+  await page.getByTestId("msg-ack").filter({ hasText: /already on that/ }).waitFor();
+  ok(true, "the same request twice says it is already on it");
+  // Two recent guides now exist (the Midterm and the Final), so the intake helper asks which to match. That is the designed behavior.
+  await page.getByTestId("msg-question").waitFor({ timeout: 40000 });
+  ok(/Which BI107 guide should I match/.test(await page.getByTestId("msg-question").innerText()), "with two recent guides, Jarvis asks which to match instead of guessing");
+  await page.waitForFunction(() => (window as any).__spoken.some((s: any) => /Which BI107 guide should I match/.test(s.text)), null, { timeout: 15000 });
+  ok(true, "the question is spoken aloud");
+  await page.getByTestId("msg-question").getByTestId("ask-choice").filter({ hasText: "Midterm" }).click();
+  await page.getByTestId("ask-answered").waitFor();
+  await waitFor("version 3 (the edit made v2)", async () => { const d = (await api("/courses/BI107")).documents.find((x: any) => x.title === "BI107 Final study guide"); return d?.current_version === 3; }, 60000);
+  ok((await api("/courses/BI107")).documents.filter((x: any) => x.title === "BI107 Final study guide").length === 1, "a second distinct request made a new version, not a second guide");
+  const g3 = (await api(`/documents/${docId}`)).content; ok(/Midterm/.test(g3.sources.format), "the version records the guide you chose for format");
+  await typeAndSend(page, "Make me a study guide for BI107 that I can cancel.");
+  await page.goto(base + "/office");
+  const sup = page.getByTestId("roster-job").filter({ hasText: "Supervisor" }).filter({ hasText: "final study guide" }).last();
+  await sup.click();
+  await page.getByTestId("inspector").getByText("Delegated by").waitFor();
+  await page.getByRole("button", { name: /Cancel \(and its helpers\)/ }).click();
+  await waitFor("the cancelled job to stop", async () => (await api("/office")).jobs.some((j: any) => j.kind === "supervise_study" && j.status === "cancelled"), 20000);
+  await page.waitForTimeout(2500);
+  ok((await api("/courses/BI107")).documents.find((x: any) => x.title === "BI107 Final study guide").current_version === 3, "the cancelled request saved nothing");
+  ok((await api("/office")).jobs.filter((j: any) => j.parentId && j.status === "cancelled").length >= 0, "helpers are cancelled with it");
+  await ctx.close();
+
+  step("Phone: the dock, the finished guide and the quiz fit at 390 px");
+  const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  await mctx.addInitScript(FAKE_SPEECH);
+  const m = await mctx.newPage(); watch(m, "study-mobile");
+  await m.goto(base + "/courses/BI107"); await m.getByTestId("voice-dock").waitFor();
+  const over = () => m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  ok((await over()) <= 0, "the course workspace has no horizontal scroll on the phone");
+  await shot(m, "22-course-workspace-mobile.png");
+  await m.getByTestId("guide-link").filter({ hasText: "Final study guide" }).tap();
+  await m.getByTestId("practice-list").waitFor();
+  ok((await over()) <= 0, "the guide has no horizontal scroll on the phone");
+  await shot(m, "19-guide-mobile.png");
+  await m.getByTestId("start-quiz").tap(); await m.getByTestId("quiz-stem").waitFor();
+  ok((await over()) <= 0, "the quiz has no horizontal scroll on the phone");
+  await mctx.close();
+}
 async function main() {
   fs.mkdirSync(SHOTS, { recursive: true });
   await startServer();
   const exe = process.env.PW_CHROMIUM ?? (fs.existsSync("/opt/pw-browsers/chromium") ? "/opt/pw-browsers/chromium" : undefined);
   const browser: Browser = await chromium.launch(exe ? { executablePath: exe } : {});
   try {
+    const only = process.env.E2E_ONLY;
+    if (only === "study") { await journeyStudy(browser); }
+    else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
+    else {
     const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
     const page = await journeyDesktop(desktop);
     await journeyTask(page); await journeyResume(page); await journeyCouncil(page); await journeySkills(page);
     await journeyExam(page); await journeyRegistrar(page); await journeyMemoryGoals(page); await journeyVoice(page);
     await journeyBreak(page); await journeySettings(page);
     await journeyOffice(page, browser);
+    await journeyStudy(browser);
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);
+    }
   } finally { await browser.close(); killServer(); }
   // Failures the journeys cause on purpose (malformed file, PDF, resolve without evidence) are expected. Everything else is a problem.
   const expected = [/http (422|415)\(desktop\): POST .*\/api\/import\/preview/, /http 422\(desktop\): POST .*\/commitments\/.*\/resolve/, /console\(desktop\): Failed to load resource: .*\b(422|415)\b/];

@@ -2,7 +2,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarClock, ListChecks, Target, CheckCheck, Brain, Sparkles, Users, MoreHorizontal, Search, Plus, Inbox, Settings, Plug, Mic, FolderInput, Activity, Bell, Command as CmdIcon, WifiOff, GitCompareArrows, Building2 } from "lucide-react";
+import { CalendarClock, ListChecks, Target, CheckCheck, Brain, Sparkles, Users, MoreHorizontal, Search, Plus, Inbox, Settings, Plug, Mic, FolderInput, Activity, Bell, Command as CmdIcon, WifiOff, GitCompareArrows, Building2, GraduationCap } from "lucide-react";
 import { api, useQuery, useAction, ApiError } from "./api";
 import { Button, Badge, Drawer, Field, inputCls, cx, Mono, Notice, ErrorBox, Spinner, Empty } from "./ui";
 import { DecisionDrawer, DecisionList } from "./DecisionDrawer";
@@ -21,6 +21,7 @@ const NAV = [
   { href: "/office", label: "Office", icon: Building2 },
 ];
 const MORE = [
+  { href: "/courses", label: "Courses", icon: GraduationCap },
   { href: "/sources", label: "Sources and import", icon: FolderInput },
   { href: "/voice", label: "Advisor room", icon: Mic },
   { href: "/activity", label: "Activity", icon: Activity },

@@ -146,6 +146,7 @@ export async function runClaimed(ctx: Ctx, job0: JobRow, o: RunOpts): Promise<"d
       return out as never;
     },
     spawn(childKey, spec) {
+      api.assertNotCancelled();                 // a cancelled supervisor must not start new helpers
       const kid = enqueueJob(ctx, { ...spec, dedupKey: `${job.id}:${childKey}`, parentId: job.id, delegatedBy: job.title, synthetic: spec.synthetic ?? !!job.synthetic }, clock);
       if (kid.created) jobEvent(ctx, job.id, "delegated", `Assigned: ${spec.title}`, { childId: kid.id }, clock);
       return kid.id;
@@ -166,6 +167,7 @@ export async function runClaimed(ctx: Ctx, job0: JobRow, o: RunOpts): Promise<"d
   } catch (e: any) {
     if (e instanceof CrashSignal) return "crashed";           // lease stays held; a later worker recovers it
     if (e instanceof WaitSignal) {
+      if (refresh().cancel_requested) { cancelJob(ctx, job.id, clock); terminal(ctx, job.id, "cancelled", {}, clock); return "cancelled"; }
       run(ctx.db, "UPDATE jobs SET status='waiting', waiting_on=?, lease_owner=NULL, lease_until=NULL WHERE id=?", J(e.ids), job.id);
       jobEvent(ctx, job.id, "waiting", `Waiting on ${e.ids.length} helper${e.ids.length > 1 ? "s" : ""}`, {}, clock);
       // A child may have finished between the check and now.
