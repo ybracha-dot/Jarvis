@@ -1,4 +1,5 @@
 // Plain-language commands. With no model this is a small deterministic matcher, and the UI labels it that way.
+import { searchEvidence, tokens } from "./evidence";
 import { Ctx, get, all } from "./db";
 import { today } from "./today";
 import { forMinutes } from "./resume";
@@ -27,7 +28,7 @@ export function runCommand(ctx: Ctx, text: string): CommandResult {
   if (/what changed|changes|new\b/i.test(t)) { const c = recentChanges(ctx, 5); return done("what changed", c.length ? c.map((x: any) => `${fmtDateTime(x.at)}: ${x.summary}`).join("\n") : "Nothing changed this week."); }
   if (/\b(pace|goal|progress)\b/i.test(t)) return done("show pace", listGoals(ctx).map((g) => `${g.name}: ${g.line} (${g.paceLabel})`).join("\n") || "No goals yet.", "/goals");
   if (/\b(owe|promise|waiting on|who owes)\b/i.test(t) && !/^capture/i.test(t)) { const c = (listCommitments(ctx) as any[]).filter((x) => x.status !== "resolved"); return done("who owes me what", c.length ? c.map((x) => `${x.who}: ${x.action}${x.due_date ? ` (by ${x.due_date})` : ""} · ${x.status.replace("_", " ")}`).join("\n") : "Nobody owes you anything open.", "/tasks?tab=followups"); }
-  if ((m = /^(?:recall|find|search)\s+(.+)/i.exec(t))) { const h = searchNotes(ctx, m[1], { limit: 5 }); return done("recall source", h.length ? h.map((n: any) => `${n.title} (${n.kind}, ${n.scope})`).join("\n") : "No matching notes.", "/memory"); }
+  if ((m = /^(?:recall|find|search)\s+(.+)/i.exec(t))) { const h = searchNotes(ctx, m[1], { limit: 5 }); const ev = searchEvidence(ctx, tokens(m[1]), { limit: 4 }); if (ev.length) return done("recall source", [...h.map((n: any) => `${n.title} (note)`), ...ev.map((e) => `${e.title} (${e.kind}, ${e.sourceLabel}): ${e.excerpt.slice(0, 120)}`)].join("\n")); return done("recall source", h.length ? h.map((n: any) => `${n.title} (${n.kind}, ${n.scope})`).join("\n") : "No matching notes.", "/memory"); }
   if ((m = /^forget\s+(.+)/i.exec(t))) { const h = searchNotes(ctx, m[1], { limit: 1 }); if (!h.length) return done("forget", "No matching note to forget."); return { mode, intent: "forget", reply: `Found "${h[0].title}". Forgetting removes it from search, the vault and exports.`, confirm: { action: "delete-note", noteId: h[0].id, label: `Forget "${h[0].title}"` } }; }
   if (/\b(council|review)\b/i.test(t)) return done("review with council", "Opening the council.", "/council");
   if (/\b(advisor|offer|lens)\b/i.test(t)) return done("discuss with advisors", "Opening the advisor room.", "/voice");

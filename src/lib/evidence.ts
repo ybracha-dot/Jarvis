@@ -35,9 +35,9 @@ const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "frida
 const CONFIRM = /\b(confirm(?:ed|ing|s)|agreed?|decided|we'?ll go with|locked in|settled|final(?:ly)?|moved to|changed to|moving (?:it )?to|instead|works for (?:me|us|everyone)|see you|sounds good|let'?s do|go(?:ing)? with|booked)\b/i;
 const PROPOSE = /\b(propos\w*|suggest\w*|how about|what about|could we|maybe|perhaps|tentativ\w*|i'?d say|thinking|let'?s|would .* work)\b/i;
 const REASON = /\b(because|since|so that|in order to|due to|as the|given that|that way|the reason)\b/i;
-const MONEY = /\$\s?\d[\d,]*(?:\.\d+)?(?:\s?[kKmM]\b)?/g;
+const MONEY = /(?:[$€£]\s?\d[\d,]*(?:\.\d+)?(?:\s?[kKmM]\b)?)|(?:\b(?:EUR|USD|GBP|CAD|AUD)\s?\d[\d,]*(?:\.\d+)?)|(?:\b\d[\d,]*(?:\.\d+)?\s?(?:EUR|USD|GBP|CAD|AUD)\b)/g;
 const PCT = /\b\d+(?:\.\d+)?\s?%/g;
-const COUNT = /\b\d+\s+(?:pilots?|customers?|users?|students?|people|clubs?|seats?|weeks?|hours?|slides?|sponsors?|members?|teams?)\b/gi;
+const COUNT = /\b\d+\s+(?:pilots?|customers?|users?|students?|people|clubs?|seats?|weeks?|hours?|slides?|sponsors?|members?|teams?|nights?|days?|months?|guests?|rooms?|tickets?|units?|pages?|miles?|attendees?)\b/gi;
 
 export interface RawFact { kind: string; subject: string; text: string; value: string | null; who: string | null; quote: string; start: number; end: number; stamp: string | null; status: "confirmed" | "proposed"; why: string | null }
 
@@ -70,11 +70,11 @@ export function extractFacts(body: string, at: string, author: string | null, ow
       if (!reasonHere && prevDecision && /^(?:the reason|that way|this way|reason is|it'?s because)/i.test(sent)) prevDecision.why = prevDecision.why ?? sent;
       // commitments: "I'll send", "Dana will", "I owe"
       const cm = /\b(?:(I)'?(?:ll| will| can)|I'?m going to|(?:([A-Z][a-z]+) (?:will|to|can))|I owe)\s+([^.!?]{3,120})/.exec(sent);
-      if (cm && /\b(send|draft|share|prepare|write|book|follow|email|call|review|finish|schedule|bring|check|confirm|update|submit|get|circulate|reach)\b/i.test(cm[3] + sent)) {
+      if (cm && !/^(be|have|see|think|say|try|go with|let)\b/i.test(cm[3].trim())) {
         const owner = cm[1] || /^I owe/.test(cm[0]) ? who : (cm[2] ?? who);
         out.push({ kind: "commitment", subject: sub, text: sent, value: dates[0]?.v ?? null, who: owner === who && speaker && new RegExp(`^${ownerName}\\b`, "i").test(speaker) ? ownerName : owner, quote: sent, start, end, stamp, status: "confirmed", why: null });
       }
-      for (const re of [MONEY, PCT, COUNT]) { re.lastIndex = 0; let fm: RegExpExecArray | null; while ((fm = re.exec(sent))) out.push({ kind: "figure", subject: sub, text: sent, value: fm[0].replace(/\s+/g, "").toLowerCase(), who, quote: sent, start, end, stamp, status: "confirmed", why: null }); }
+      for (const re of [MONEY, PCT, COUNT]) { re.lastIndex = 0; let fm: RegExpExecArray | null; while ((fm = re.exec(sent))) out.push({ kind: "figure", subject: sub, text: sent, value: fm[0].trim(), who, quote: sent, start, end, stamp, status: "confirmed", why: null }); }
       const cmd = /`([^`]{3,200})`/.exec(sent); if (cmd) out.push({ kind: "command", subject: sub, text: sent, value: cmd[1], who, quote: sent, start, end, stamp, status: "confirmed", why: null });
       if (/\b(error|exception|failed|failure|traceback)\b[: ]/i.test(sent)) out.push({ kind: "error", subject: sub, text: sent, value: null, who, quote: sent, start, end, stamp, status: "confirmed", why: null });
     }

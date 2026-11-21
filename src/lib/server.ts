@@ -141,6 +141,8 @@ on("POST", "/projects/facts/:id/forget", (c, r) => { r.json(z.object({ confirm: 
 on("POST", "/projects/facts/:id/pin", (c, r) => pinFact(c, r.params.id, r.json(z.object({ pinned: z.boolean() })).pinned));
 on("POST", "/projects/facts/:id/resolve", (c, r) => resolveSuggestion(c, r.params.id, r.json(z.object({ accept: z.boolean() })).accept));
 on("POST", "/projects/events/:id/undo", (c, r) => undoEvent(c, r.params.id));
+on("GET", "/profile", (c) => ({ ownerName: getSetting<string>(c.db, "owner_name", "Yonathan") }));
+on("POST", "/profile", (c, r) => { const n = r.json(z.object({ ownerName: z.string().trim().min(1).max(60) })).ownerName; setSetting(c.db, "owner_name", n); return { ownerName: n }; });
 on("GET", "/connector", (c) => ({ tokens: listTokens(c), probe: probeState(c), envToken: !!process.env.JARVIS_MCP_TOKEN, publicUrl: process.env.JARVIS_PUBLIC_URL ?? null, ingress: process.env.JARVIS_PUBLIC_MODE === "mcp-only" ? "mcp-only" : "full", mode: c.mode }));
 on("POST", "/connector/tokens", (c, r) => createToken(c, r.json(NewToken)));
 on("POST", "/connector/tokens/:id/revoke", (c, r) => revokeToken(c, r.params.id));

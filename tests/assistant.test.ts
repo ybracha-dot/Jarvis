@@ -162,3 +162,60 @@ describe("the morning brief is a scheduled goal on the same executor", () => {
     expect(count(q, "requests")).toBe(0);                                                                             // nothing connected: no job, no cost
   });
 });
+
+
+// Regression: an independent QA agent chose these two requests after implementation. Both FAILED on the first attempt
+// ("No meeting transcript is saved yet": the answer path was a meeting-promises pipeline). They are kept verbatim.
+import { importText as imp } from "@/lib/evidence";
+describe("QA regression: unseen requests over emails and notes (first attempt failed)", () => {
+  const seedTrip = (ctx: any) => {
+    const at = (d: string) => `2026-11-${d}T14:00:00.000Z`;
+    imp(ctx, { kind: "email", title: "TAP booking XK7Q2L", text: "Your outbound flight to Lisbon departs Thursday December 3 at 9:40 pm and arrives December 4. Return flight not booked.", at: at("10"), author: "TAP" });
+    imp(ctx, { kind: "email", title: "Hotel Alfama reservation", text: "Hotel Alfama reservation for Lisbon: December 4 to 8, 4 nights at EUR 140 per night.", at: at("12"), author: "Hotel Alfama" });
+    imp(ctx, { kind: "email", title: "Hotel Alfama reservation changed", text: "Hotel Alfama has changed your Lisbon reservation: December 4 to 7, 3 nights at EUR 150 per night. This replaces the earlier booking.", at: at("14"), author: "Hotel Alfama" });
+    imp(ctx, { kind: "note", title: "Lisbon trip to do", text: "Web Summit registration paid, EUR 490, December 5 to 6. TODO: airport transfer and travel insurance are not sorted yet.", at: at("13") });
+    imp(ctx, { kind: "email", title: "Lisbon Falls Dental appointment", text: "Reminder: your cleaning at Lisbon Falls Dental in Maine is December 4 at 2 pm.", at: at("11"), author: "Lisbon Falls Dental" });
+  };
+  it("what is confirmed and what is still unbooked for a trip, from emails and a note", async () => {
+    const { ctx, clock } = fresh(); seedTrip(ctx);
+    const r: any = await ask(ctx, clock, "What's confirmed and what's still unbooked for my Lisbon trip in December?");
+    expect(r.jobId).toBeTruthy();                                                                       // it became a job (before the fix: "I did not recognize that")
+    const v = resultView(ctx, r.reply.data.resultId);
+    expect(v.body).not.toMatch(/No meeting transcript/); expect(v.sources.length).toBeGreaterThanOrEqual(3);
+    expect(v.body).toMatch(/EUR 150/); expect(v.body).toMatch(/EUR 140[^.]*replaced|replaced[^.]*EUR 140/i);                // the later hotel change wins and the old figure is marked replaced
+    expect(v.body).toMatch(/airport transfer and travel insurance are not sorted/i); expect(v.body).toMatch(/Return flight not booked/i);
+    expect(v.sources.some((s: any) => /Dental/.test(s.title))).toBe(false);                             // the same-word distractor is not part of the trip
+    expect(v.reads.some((x: any) => /Dental/.test(x.label) && !x.used)).toBe(true);                     // and the read log says it was set aside
+  });
+  it("where did we land and what is left to do, with a revised figure and a same-name coworker", async () => {
+    const { ctx, clock } = fresh();
+    imp(ctx, { kind: "email", title: "Lease renewal offer", text: "Maple Court offers a 12 month renewal at $2,400 per month. Sign by November 30.", at: "2026-11-09T15:00:00.000Z", author: "Dana Whitfield" });
+    imp(ctx, { kind: "email", title: "Lease renewal revised", text: "Maple Court revised the lease renewal rent to $2,350 per month. A renter-insurance certificate is needed before signing.", at: "2026-11-12T15:00:00.000Z", author: "Dana Whitfield" });
+    imp(ctx, { kind: "note", title: "Lease decision", text: "Decided to renew the lease. Still to do: the insurance certificate and the signature. Parking price not asked yet.", at: "2026-11-13T15:00:00.000Z" });
+    imp(ctx, { kind: "email", title: "Lunch and budget deck", text: "Dana Whitfield from Acme: lunch Thursday, and the budget deck is due November 20.", at: "2026-11-12T16:00:00.000Z", author: "Dana Whitfield" });
+    const r: any = await ask(ctx, clock, "Where did we land on the apartment lease renewal and what do I still have to do?");
+    const v = resultView(ctx, r.reply.data.resultId);
+    expect(v.body).toMatch(/\$2,350/); expect(v.body).toMatch(/\$2,400[^.]*replaced|replaced[^.]*\$2,400/i);
+    expect(v.body).toMatch(/insurance certificate and the signature/i); expect(v.body).toMatch(/Parking price not asked/i);
+    expect(v.sources.some((s: any) => /Lunch/.test(s.title))).toBe(false);
+  });
+  it("a question about what someone said is answered from the email, not turned into 'promises after a meeting'", async () => {
+    const { ctx, clock } = fresh();
+    imp(ctx, { kind: "email", title: "Q4 estimated tax", text: "Hi Alex, your Q4 estimated tax payment is $3,200, due January 15. Priya", at: "2026-11-12T15:00:00.000Z", author: "Priya Shah" });
+    imp(ctx, { kind: "transcript", title: "Call with Priya (accountant)", text: "[00:00:10] Priya Shah: I will send you the 1099 by Friday.\n[00:00:40] Alex: I will pay it from the savings account.", at: "2026-11-13T15:00:00.000Z", author: "Priya Shah", participants: ["Priya Shah", "Alex"] });
+    const r: any = await ask(ctx, clock, "What did my accountant say about my Q4 estimated tax payment?");
+    const v = resultView(ctx, r.reply.data.resultId);
+    expect(v.title).not.toMatch(/^Promises after/); expect(v.body).toMatch(/\$3,200/); expect(v.body).toMatch(/January 15/);
+  });
+  it("with no matching material it says what is missing, naming what was asked about", async () => {
+    const { ctx, clock } = fresh();
+    const r: any = await ask(ctx, clock, "What did my accountant say about my Q4 estimated tax payment?"); const v = resultView(ctx, r.reply.data.resultId);
+    expect(v.body).toMatch(/Nothing saved matches/); expect(v.body).toMatch(/accountant|estimated|payment/i); expect(v.body).not.toMatch(/meeting transcript/i);
+  });
+  it("does not assume whose promises are 'yours' when the speaker names do not include the owner", async () => {
+    const ctx = memCtx("2026-11-16T10:00:00-05:00"); const clock = () => new Date(1_000_000);
+    imp(ctx, { kind: "transcript", title: "Call with Priya", text: "[00:00:10] Priya Shah: I will send you the 1099 by Friday.\n[00:00:40] Alex: I will pay it from the savings account.", at: "2026-11-13T15:00:00.000Z", participants: ["Priya Shah", "Alex"] });
+    const r: any = await ask(ctx, clock, "What did I promise after that call?"); const v = resultView(ctx, r.reply.data.resultId);
+    expect(v.body).toMatch(/Alex: I will pay it/); expect(v.body).toMatch(/Priya Shah: I will send you the 1099/); expect(v.flags.some((f: any) => f.kind === "owner_unknown")).toBe(true);
+  });
+});

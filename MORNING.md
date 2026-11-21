@@ -1,6 +1,78 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. This file has three parts: **Redesign build** (this round), **Addendum build**, then **Overnight build** (both unchanged, further down).
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. This file has four parts: **Next build: a general assistant** (this round), then **Redesign build**, **Addendum build** and **Overnight build** (unchanged, further down).
+
+# Next build: a general assistant, not a school app
+
+## Try it now (the first three clicks, one spoken test, one Claude prompt)
+```bash
+git fetch origin claude/upbeat-cannon-wf5kxf && git checkout claude/upbeat-cannon-wf5kxf
+npm install
+npm run dev        # http://127.0.0.1:3000
+npm run worker     # second terminal. Background work runs here. Today shows when it is not running.
+```
+1. **Connections** → **Load the sample workspace** (a synthetic club, meetings, emails, a calendar and a changed notice; every item is labelled *fixture*).
+2. **Today** → **Ask Jarvis** → type, or tap the mic and say: **“Pick up where we left off on the pitch and draft my follow-up.”** A result link appears at once. Open it.
+3. On the result page: the **draft**, **Check these**, **Where each claim came from** (click a source: the original opens with the quote highlighted) and **What Jarvis read for this**. Then ask **“Get me ready for tomorrow.”**
+
+From ordinary Claude (after the connector is set up): *“Use Jarvis to get me ready for tomorrow.”* Then, in a **new** chat: *“Show me my latest Jarvis result.”* (`submit_goal`, `get_goal`, `get_result`.) To change it from Claude: *“Use the Wednesday decision and keep it to three sentences.”* (`revise_goal`).
+
+**Does the worker have to be running?** Yes for anything that takes more than a moment. Today shows the last worker check-in and says so plainly when work is waiting and no worker has picked it up. Closing the tab does not stop a job; closing the worker does until you start it again, and nothing is lost.
+
+## What I traced first (the first deliverable)
+Typing the pitch request into the normal Ask Jarvis box did **not** create a job: it matched only the remember, quiz and study-guide patterns, then fell through to a local command matcher that answered “I did not recognize that”. No job, no retrieval, no draft. The first missing link was a general intake, so I built one path for every request:
+
+**Ask Jarvis / voice / connector → one durable request and job → understand (time, project, deliverable) → Research reads only what is connected and authorized → Writer composes → Reviewer checks every cited source and quote → versioned result with a stable link and a log of what was read.**
+
+It routes on verbs, time words and what the sources contain, not on example names. Tests run the same code against a different invented project to prove it.
+
+## Results, separated: fixture, locally tested, live
+
+| Behavior | Fixture or local test (what ran) | Live account |
+|---|---|---|
+| Pitch request: finds the later Wednesday decision, marks Monday as the older proposal, quotes the reason from the transcript, flags the `$12,000` figure that only one email states, links the confirming email, uses no other owner's look-alike | **Passes** in unit tests, through the authenticated MCP route, and in a real browser (`npm run e2e`) | **Not run.** No live mail, transcript or Claude account was used |
+| “Get me ready for tomorrow”: calendar, a changed notice, a prior Claude outline, ranked to at most three things, an unverified rubric reported not invented, Blackboard listed as unread; changing the calendar changes the brief | **Passes** (same three layers) | **Not run** |
+| Third request chosen by an independent QA agent | See “QA” below | Not run |
+| Same work from ordinary Claude: submit, receipt at once, fresh chat retrieves the result, revise, cancel | **Passes** with the official MCP client over the authenticated route (this simulates Claude) | **Pending: your account.** Needs the connector activated (below) |
+| Start by voice, close the tab, change it from Claude, one job and one current draft, a late result from the old instruction refused | **Passes** with a *simulated microphone* and a *simulated Claude client* | Pending |
+| Revoked source drops out; a result that cited it is flagged out of date; forgetting erases text, facts, search entries | **Passes** | n/a |
+| Worker killed after saving, before returning its receipt: one version, one message | **Passes** (crash injected after the save step) | n/a |
+| Morning brief as a scheduled goal; a day with nothing to say stays quiet (no notification) | **Passes** in a test | Not run on a real schedule |
+| Model calls | **Zero.** All of the above is deterministic. No key, no budget used | n/a |
+
+### Source status
+| Source | Status |
+|---|---|
+| Meeting transcripts, mail, course notices, Claude excerpts in the sample workspace | **Fixture** (synthetic). Imports you paste are labelled **imported by you** |
+| Calendar events in the brief | **Fixture** in the sample workspace; in your private workspace they come from the calendar feed you already import |
+| Excerpts handed over by Claude (`share_excerpt`) | **Locally tested**; live use pending |
+| Blackboard portal | **Awaiting sign-in / unavailable.** Reading the portal needs a signed-in session with Duo that only you can start, and that reader is not built. Today it works through notification emails, the course calendar file or an export you paste |
+| Gmail, Slack, CRM, Notion | **Not built.** Import is by paste or file; there are no live adapters yet |
+
+### A run where a source was unavailable and Jarvis still delivered
+“Get me ready for tomorrow” with Blackboard needing sign-in: the brief still lists the calendar, the changed notice (from the notification email), and the earlier outline; names Blackboard under *What Jarvis could not read* with the reason; says the rubric is mentioned but its contents are unavailable, so the requirements are **unverified**; and offers **Check again** once you import something. (`tests/assistant.test.ts`, `scripts/e2e.ts`.)
+
+## What it read, what it produced, where to open each
+- **Result page** `/results/<id>` is the stable link (also what Claude returns). It shows the deliverable, flags, sources with role and fixture label, **What Jarvis read** (including what was skipped and why), your instruction history and earlier versions.
+- **Evidence page** `/evidence/<id>` opens the original with the quote highlighted, the extracted facts, and a Forget button.
+- **Office**: select the Jarvis desk (or any worker) → **Open what it produced**.
+- **Projects** → a project lists its drafts, briefs and answers. **Today** → *Where the output went* lists finished results. **Connections** shows every source, how it got here, and revoke/authorize.
+
+## Needs Yonathan
+1. **Activate the connector in your Claude account.** In Claude → Settings → Connectors → add custom connector (`https://<host>/mcp`). If the dialog shows **Request headers**, add `Authorization` = `Bearer <token>` (token from Connections; keep it out of chat and screenshots). If it does not, use Claude Desktop with `npm run mcp` today; regular Claude on the web would need OAuth in Jarvis, which is **not built**. Then run **Connections → two-way check**. Details: `docs/CAPTURE-SETUP.md`.
+2. **Blackboard sign-in** (Duo) is yours; there is no reader to hand it to yet. Paste notification emails or import the calendar file meanwhile.
+3. **Pixel Agents smoke test** stays pending until it can run on your Mac (see the redesign section).
+4. Publishing, hosting and any paid model use remain off until you say.
+
+## What I did not build this round (honest list)
+Slack / Gmail / Notion / CRM live adapters and cursors; the overnight consolidation job and Obsidian vault mapping (`People/`, `Decisions/`, `user.md`…); learned-skill staging, evaluation and rollback for the follow-up procedure; plain-language routines beyond the morning brief; a Blackboard portal reader; Claude Code mods. The evidence store, retrieval, the shared executor, revisions, the connector tools and the interface are in place for those to build on.
+
+## Office compared with your reference image
+The reference is open floor with large characters, floating all-caps name tags, cyan double-headed assignment arrows, speech bubbles that name the action ("SEARCH WEB"), a "NEW HIRE!" tag and "?" bubbles. Mismatches I found against my first version and fixed: characters were about 40% too small; the assignment line had a dot instead of an arrow; nothing said what a worker was doing; the arrival cue had no label; the floor was a duller brown. Now: larger characters, an arrowhead on the trace, an action bubble taken from the worker's real current step, a **NEW HIRE** tag on arrival, a more saturated plank floor. Not matched: the reference has no zone labels or aisle rug and groups desks in back-to-back pairs with partitions; I kept labelled rooms and a center aisle because the aisle is what carries the delegation line.
+
+---
+
+# Redesign build (previous round)
 
 # Redesign build: Claude and Jarvis share projects, and the Office shows the handoff
 

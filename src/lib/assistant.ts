@@ -57,14 +57,19 @@ export function capabilities(ctx: Ctx): string[] {
 }
 export const unavailableSources = (ctx: Ctx) => listSources(ctx).filter((s) => s.revokedAt || ["needs_signin", "failed", "stale"].includes(s.state) || s.mode === "unavailable").map((s) => ({ id: s.id, label: s.label, state: s.revokedAt ? "revoked" : s.state, message: s.message ?? "Not available." }));
 
-/** Does this sound like an outcome to deliver (as opposed to a quick command like "what changed")? Decided from verbs and time words, not from names. */
+/** Is this a quick command the local matcher handles ("what changed", "I have 20 minutes", "recall x"), or an outcome to deliver?
+ *  Anything that is not clearly a short command is treated as an outcome: the assistant should not depend on a lucky phrasing. */
 export function looksLikeGoal(text: string): boolean {
-  const words = text.trim().split(/\s+/).length;
+  const t = text.trim(); const words = t.split(/\s+/).length;
   if (words < 3) return false;
-  if (/^(what changed|resume|show pace|who owes me|today|help)\??$/i.test(text.trim())) return false;
-  if (DRAFT_STRONG.test(text) || BRIEF.test(text) || PRIOR.test(text)) return words >= 4 || BRIEF.test(text);
-  return words >= 4 && /\b(what did|when did|why did|did we|what do i owe|promised|committed|who agreed|what was decided)\b/i.test(text);
+  if (/^(recall|find|search|forget|capture|show|go to|open|add a promise)\b/i.test(t) && words <= 8) return false;
+  if (/^(what changed|show pace|who owes me|help|what do i have today)\??$/i.test(t)) return false;
+  if (/\b\d{1,3}\s*(?:min|minutes)\b/i.test(t) && words <= 7) return false;
+  if (/^resume\b/i.test(t) && words <= 3) return false;
+  if (DRAFT_STRONG.test(t) || BRIEF.test(t) || PRIOR.test(t)) return true;
+  return words >= 4;
 }
+const PROMISE_Q = /\b(promis\w*|committed|commitments?|i owe|did i agree|i said i would|i told .* i would)\b/i;
 
 // ---------- requests ----------
 export const Origins = ["ask-text", "ask-voice", "claude", "schedule", "api"] as const;
@@ -193,6 +198,37 @@ function researchDraft(ctx: Ctx, api: JobApi, intent: Intent, requestId: string,
   return { projectId, projectName: (proj?.name as string) ?? null, items: items.map((i) => ({ id: i.id, title: i.title, kind: i.kind, at: i.at, revision: i.revision, sourceLabel: i.sourceLabel, mode: i.mode, author: i.author, participants: i.participants })), facts, reads: items.length + Math.min(5, hits.length) };
 }
 
+const stem = (t: string) => t.replace(/(ing|ed|es|s)$/, "");
+const matchedTerms = (terms: string[], text: string) => { const toks = new Set(tokens(text).map(stem)); return terms.filter((t) => toks.has(stem(t)) || text.toLowerCase().includes(t)); };
+const sentencesOf = (body: string) => body.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])|\n+/).map((x) => x.trim()).filter(Boolean);
+const TODO = /\b(todo|to-do|to do|need(?:s|ed)? to|must|still to|not (?:yet )?(?:sorted|booked|confirmed|done|decided|paid|signed)|haven'?t|unbooked|pending|waiting (?:on|for)|remember to|don'?t forget|is needed|are needed|required)\b/i;
+const UNKNOWN = /\b(not asked|unknown|tbd|to be decided|not (?:yet )?(?:known|decided)|\?)/i;
+const unitOf = (v: string) => v.replace(/[\d.,]/g, "").trim().toLowerCase();
+
+/** The general answer path: search every authorized source, keep what matches the question, show what changed and what is still open. Extractive, not invented. */
+function researchDigest(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
+  const hits = searchEvidence(ctx, intent.terms, { projectId: intent.projectId, limit: 12 });
+  if (!hits.length) return { mode: "digest", gap: `Nothing saved matches “${intent.terms.join(" ")}”. Share the conversation, forward the email or import the note, then ask again.`, items: [] as any[], terms: intent.terms, reads: 0 };
+  const scored = hits.map((h) => ({ h, m: matchedTerms(intent.terms, `${h.title} ${authorizedItem(ctx, h.itemId)?.body ?? ""}`) }));
+  const top = Math.max(...scored.map((x) => x.m.length)); const need = Math.max(1, Math.ceil(top / 2));
+  const use = scored.filter((x) => x.m.length >= need).sort((a, b) => String(b.h.at).localeCompare(String(a.h.at)));
+  const aside = scored.filter((x) => x.m.length < need);
+  // Coherence: sources that share no subject matter with the rest of the matches (beyond the words you asked with) are probably a different thing that happens to use the same word.
+  if (use.length >= 3) {
+    const qs = new Set(intent.terms.map(stem)); const ctxToks = use.map((x) => new Set(tokens(`${x.h.title} ${authorizedItem(ctx, x.h.itemId)?.body ?? ""}`).map(stem).filter((t) => !qs.has(t) && t.length > 2)));
+    const comp = use.map((_, i) => i); const find = (i: number): number => (comp[i] === i ? i : (comp[i] = find(comp[i])));
+    for (let i = 0; i < use.length; i++) for (let j = i + 1; j < use.length; j++) if ([...ctxToks[i]].some((t) => ctxToks[j].has(t))) comp[find(i)] = find(j);
+    const sizes = new Map<number, number>(); for (let i = 0; i < use.length; i++) sizes.set(find(i), (sizes.get(find(i)) ?? 0) + 1);
+    const best = [...sizes].sort((a, b) => b[1] - a[1])[0]; if (best && best[1] >= 2) for (let i = use.length - 1; i >= 0; i--) if (find(i) !== best[0]) { aside.push({ ...use[i], m: use[i].m.slice(0, 2) }); use.splice(i, 1); ctxToks.splice(i, 1); }
+  }
+  for (const x of aside) recordRead(ctx, requestId, revision, { kind: "search", ref: x.h.itemId, source: x.h.sourceLabel, label: `${x.h.title} (${x.h.kind}, not used: matched only “${x.m.join(", ")}” and shares nothing else with the other matches)`, used: false });
+  const items = use.map(({ h, m }) => { const it = authorizedItem(ctx, h.itemId)!; recordRead(ctx, requestId, revision, { kind: "thread", ref: it.id, source: it.sourceLabel, itemRevision: it.revision, label: `${it.title} (${it.kind}, ${fmtDay(localDate(it.at))})`, excerpt: h.excerpt });
+    const sents = sentencesOf(it.body); const relevant = sents.filter((s2) => matchedTerms(intent.terms, s2).length > 0).slice(0, 2);
+    return { id: it.id, title: it.title, kind: it.kind, at: it.at, revision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode, author: it.author, participants: it.participants, matched: m, say: relevant.length ? relevant : sents.slice(0, 1), todo: sents.filter((s2) => TODO.test(s2)), unknown: sents.filter((s2) => UNKNOWN.test(s2) && !TODO.test(s2)),
+      facts: it.facts.map((f) => ({ ...f, itemTitle: it.title, itemKind: it.kind, itemAt: it.at, itemRevision: it.revision, sourceLabel: it.sourceLabel, mode: it.mode })) }; });
+  return { mode: "digest", items, terms: intent.terms, setAside: aside.map((x) => x.h.title), reads: items.length };
+}
+
 function researchBrief(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number) {
   const date = intent.when && intent.when.kind === "day" ? intent.when.date : addDays(localDate(ctx.now()), 1);
   const events = all(ctx.db, "SELECT * FROM blocks WHERE owner_id=? AND kind='calendar' AND state='active' ORDER BY start_at", ctx.owner).filter((b) => localDate(b.start_at as string) === date).map((b) => ({ title: b.title as string, start: b.start_at as string, end: b.end_at as string, source: b.source as string }));
@@ -216,7 +252,7 @@ function researchBrief(ctx: Ctx, api: JobApi, intent: Intent, requestId: string,
   return { date, events, tasks, commitments: cms, items: items.filter((i) => !["claude", "note"].includes(i.kind)), outlines, reads: events.length + tasks.length + cms.length + items.length };
 }
 
-function researchAnswer(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number, choice: string | null) {
+function researchMeeting(ctx: Ctx, api: JobApi, intent: Intent, requestId: string, revision: number, choice: string | null) {
   const terms = intent.terms;
   const transcripts = (terms.length ? searchEvidence(ctx, terms, { kinds: ["transcript"], limit: 6 }) : []).map((h) => h.itemId);
   const pool = all(ctx.db, "SELECT i.id FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.kind='transcript' AND i.tombstone=0 AND s.revoked_at IS NULL ORDER BY i.at DESC", ctx.owner).map((r) => r.id as string);
@@ -262,7 +298,7 @@ function composeDraft(ctx: Ctx, b: any, instr: ReturnType<typeof parseInstructio
   const reason = facts.filter((f) => f.why && f.itemKind === "transcript" && f.kind !== "date").sort((a, c) => String(c.itemAt).localeCompare(String(a.itemAt)))[0] ?? facts.filter((f) => f.why && (!current || f.itemId === current.itemId || f.kind !== "date")).find((f) => f.value !== undefined && !(current && f.kind === "date" && f.value !== current.value));
   const mine = facts.filter((f) => f.kind === "commitment" && f.who === me && !(intent.terms.some((t) => String(f.text).toLowerCase().includes(t)) && /\b(draft|send|write)\b/i.test(f.text)));
   const theirs = facts.filter((f) => f.kind === "commitment" && f.who && f.who !== me && (!recipient || f.who === recipient));
-  const byVal = new Map<string, any[]>(); for (const f of facts.filter((x) => x.kind === "figure")) byVal.set(f.value, [...(byVal.get(f.value) ?? []), f]);
+  const norm = (v: string) => v.replace(/\s+/g, "").toLowerCase(); const byVal = new Map<string, any[]>(); for (const f of facts.filter((x) => x.kind === "figure")) byVal.set(norm(f.value), [...(byVal.get(norm(f.value)) ?? []), f]);
   const supportedFigs: any[] = [];
   for (const [v, fs] of byVal) { const srcs = new Set(fs.map((f) => f.itemId)); const inDecision = current && fs.some((f) => f.itemId === current.itemId && f.quote === current.quote); if (srcs.size >= 2 || inDecision) supportedFigs.push(fs[0]); else flags.push({ kind: "unsupported_figure", value: v, text: `${fs[0].value} appears only once, in “${fs[0].itemTitle}” (${fmtDay(localDate(fs[0].itemAt))}). I left it out of the draft. Confirm it or point me to a second source.`, itemId: fs[0].itemId }); }
   const s: { text: string; pri: number; src?: any; role?: string }[] = [];
@@ -310,16 +346,45 @@ function composeBrief(ctx: Ctx, b: any, intent: Intent) {
   return { title: `Ready for ${fmtDay(b.date)}`, body: lines.join("\n"), summary, sources, flags, applied: [] as string[], unapplied: [] as string[], unavailable, actions: top.map((t) => t.action) };
 }
 
-function composeAnswer(ctx: Ctx, b: any) {
+function composeAnswer(ctx: Ctx, b: any) { return b.mode === "digest" ? composeDigest(ctx, b) : composeMeeting(ctx, b); }
+
+function composeDigest(ctx: Ctx, b: any) {
+  const sources: SrcRef[] = []; const flags: any[] = []; const items: any[] = b.items ?? [];
+  const src = (it: any, role: string, quote: string) => { if (!sources.some((s) => s.itemId === it.id && s.role === role && s.quote === quote)) sources.push({ itemId: it.id, revision: it.revision, title: it.title, kind: it.kind, at: it.at, sourceLabel: it.sourceLabel, mode: it.mode, role, quote }); };
+  const lines: string[] = [`**What the sources say** (newest first)`, ""];
+  for (const it of items) { const q = it.say[0] ?? ""; lines.push(`- **${it.title}** (${it.kind}, ${fmtDay(localDate(it.at))}): “${q}”`); if (q) src(it, "says", q); }
+  // What changed: the same kind of figure stated twice by related items; the later one stands and the earlier is marked replaced.
+  const figs = items.flatMap((it) => it.facts.filter((f: any) => f.kind === "figure").map((f: any) => ({ ...f, it })));
+  const changed: string[] = [];
+  for (const f of figs) { const later = figs.find((g: any) => g.it.id !== f.it.id && unitOf(g.value) === unitOf(f.value) && g.value.replace(/\s+/g, "").toLowerCase() !== f.value.replace(/\s+/g, "").toLowerCase() && String(g.it.at) > String(f.it.at) && tokens(g.it.title).filter((t) => tokens(f.it.title).includes(t)).length >= 1); if (later) { changed.push(`- ${f.value} (${fmtDay(localDate(f.it.at))}, “${f.it.title}”) was replaced by ${later.value} (${fmtDay(localDate(later.it.at))}, “${later.it.title}”).`); src(later.it, "changed value", later.quote); src(f.it, "older value, replaced", f.quote); } }
+  if (changed.length) lines.push("", "**What changed**", "", ...[...new Set(changed)]);
+  const todo = items.flatMap((it) => it.todo.map((t: string) => ({ it, t })));
+  if (todo.length) { lines.push("", "**Still to do or not settled**", ""); for (const x of todo) { lines.push(`- ${x.t} (${x.it.title})`); src(x.it, "still to do", x.t); } }
+  const unk = items.flatMap((it) => it.unknown.map((t: string) => ({ it, t })));
+  if (unk.length) { lines.push("", "**Open questions in the sources**", ""); for (const x of unk) { lines.push(`- ${x.t} (${x.it.title})`); src(x.it, "open question", x.t); } }
+  const commits = items.flatMap((it) => it.facts.filter((f: any) => f.kind === "commitment").map((f: any) => ({ ...f, it })));
+  if (commits.length) { lines.push("", "**Promises mentioned**", ""); for (const c of commits) { lines.push(`- ${c.who ?? "Someone"}: ${clean(c.quote)}${c.value ? ` (due ${fmtDay(c.value)})` : ""}`); src(c.it, `${firstName(String(c.who ?? "someone"))}'s promise`, c.quote); } }
+  if (b.setAside?.length) flags.push({ kind: "set_aside", text: `Set aside as less related: ${b.setAside.map((t: string) => `“${t}”`).join(", ")}. They matched only part of your question.` });
+  flags.push({ kind: "extractive", text: "This is an extractive answer: passages, changes and open items found by search and rules, each with its source. It does not infer what is not written. A written summary needs a configured Claude model, which is off." });
+  const missing = (b.terms ?? []).filter((t: string) => !items.some((it) => it.matched.includes(t)) && t.length > 3).slice(0, 4);
+  if (missing.length) flags.push({ kind: "not_found", text: `Nothing in the sources mentions: ${missing.join(", ")}.` });
+  const head = items.length ? `Found ${items.length} source${items.length === 1 ? "" : "s"}${changed.length ? `, ${changed.length} changed value${changed.length === 1 ? "" : "s"}` : ""}${todo.length ? `, ${todo.length} open item${todo.length === 1 ? "" : "s"}` : ""}.` : "Nothing found.";
+  return { title: `Answer: ${(b.terms ?? []).slice(0, 4).join(" ")}`.trim(), body: lines.join("\n"), summary: head, sources, flags, applied: [] as string[], unapplied: [] as string[] };
+}
+
+function composeMeeting(ctx: Ctx, b: any) {
   const me = ownerName(ctx); const facts: any[] = (b.facts ?? []).filter((f: any) => f.kind === "commitment");
   const it = b.items[0]; const sources: SrcRef[] = []; const flags: any[] = [];
-  const mine = facts.filter((f) => f.who === me), theirs = facts.filter((f) => f.who !== me);
+  const speakers = [...new Set(facts.map((f) => String(f.who)))]; const iAmThere = speakers.some((s2) => new RegExp(`^${me}\\b`, "i").test(s2)) || (it.participants ?? []).some((p: string) => new RegExp(`^${me}\\b`, "i").test(p));
+  const mine = iAmThere ? facts.filter((f) => f.who === me) : [], theirs = iAmThere ? facts.filter((f) => f.who !== me) : facts;
   const line = (f: any) => `- ${clean(f.quote)}${f.value ? ` (due ${fmtDay(f.value)})` : ""} — ${f.stamp ? `at ${f.stamp}` : "in the transcript"}`;
-  for (const f of facts) sources.push({ itemId: f.itemId, revision: f.itemRevision, title: f.itemTitle, kind: f.itemKind, at: f.itemAt, sourceLabel: f.sourceLabel, mode: f.mode, role: f.who === me ? "your promise" : `${firstName(String(f.who))}'s promise`, quote: f.quote });
+  for (const f of facts) sources.push({ itemId: f.itemId, revision: f.itemRevision, title: f.itemTitle, kind: f.itemKind, at: f.itemAt, sourceLabel: f.sourceLabel, mode: f.mode, role: iAmThere ? (f.who === me ? "your promise" : `${firstName(String(f.who))}'s promise`) : `${firstName(String(f.who))}'s promise`, quote: f.quote });
   if (!sources.length && it) sources.push({ itemId: it.id, revision: it.revision, title: it.title, kind: it.kind, at: it.at, sourceLabel: it.sourceLabel, mode: it.mode, role: "meeting read", quote: "" });
-  if (!mine.length) flags.push({ kind: "none_found", text: `No promise by ${me} was found in “${it?.title}”.` });
-  const body = [`**What you promised in “${it.title}”** (${fmtDay(localDate(it.at))})`, "", mine.length ? mine.map(line).join("\n") : "- Nothing found.", "", "**What others promised**", "", theirs.length ? theirs.map((f) => `- **${firstName(String(f.who))}:** ${clean(f.quote)}${f.value ? ` (due ${fmtDay(f.value)})` : ""}`).join("\n") : "- Nothing found."].join("\n");
-  return { title: `Promises after ${it.title}`, body, summary: `${mine.length} promise${mine.length === 1 ? "" : "s"} by you, ${theirs.length} by others, from “${it.title}”.`, sources, flags, applied: [] as string[], unapplied: [] as string[] };
+  if (!iAmThere) flags.push({ kind: "owner_unknown", text: `I could not tell which speaker is you (your name is set to “${me}”). Promises are listed by speaker. Set your name in Settings and ask again to split yours from theirs.` });
+  else if (!mine.length) flags.push({ kind: "none_found", text: `No promise by ${me} was found in “${it?.title}”.` });
+  const body = iAmThere ? [`**What you promised in “${it.title}”** (${fmtDay(localDate(it.at))})`, "", mine.length ? mine.map(line).join("\n") : "- Nothing found.", "", "**What others promised**", "", theirs.length ? theirs.map((f) => `- **${firstName(String(f.who))}:** ${clean(f.quote)}${f.value ? ` (due ${fmtDay(f.value)})` : ""}`).join("\n") : "- Nothing found."].join("\n")
+    : [`**Promises in “${it.title}”** (${fmtDay(localDate(it.at))}), by speaker`, "", facts.length ? facts.map((f) => `- ${f.who}: ${clean(f.quote)}${f.value ? ` (due ${fmtDay(f.value)})` : ""}`).join("\n") : "- Nothing found."].join("\n");
+  return { title: `Promises after ${it.title}`, body, summary: iAmThere ? `${mine.length} promise${mine.length === 1 ? "" : "s"} by you, ${theirs.length} by others, from “${it.title}”.` : `${facts.length} promise${facts.length === 1 ? "" : "s"} by speaker, from “${it.title}”.`, sources, flags, applied: [] as string[], unapplied: [] as string[] };
 }
 
 // ---------- verification ----------
@@ -427,7 +492,10 @@ const goal_research: Handler = async (api) => {
   const bundle = await api.step(`read-${answers.choice ?? "auto"}`, "Reading the relevant sources", () => {
     if (intent.deliverable === "draft") return researchDraft(ctx, api, intent, requestId, revision);
     if (intent.deliverable === "brief") return researchBrief(ctx, api, intent, requestId, revision);
-    return researchAnswer(ctx, api, intent, requestId, revision, answers.choice ?? null);
+    const q = String(get(ctx.db, "SELECT text FROM requests WHERE id=?", requestId)?.text ?? "");
+    const hasTranscript = !!get(ctx.db, "SELECT 1 x FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.kind='transcript' AND i.tombstone=0 AND s.revoked_at IS NULL", ctx.owner);
+    if (PROMISE_Q.test(q) && hasTranscript) return { mode: "meeting", ...researchMeeting(ctx, api, intent, requestId, revision, answers.choice ?? null) };
+    return researchDigest(ctx, api, intent, requestId, revision);
   }) as any;
   if (bundle.ambiguous) blockWithAsk(api, bundle.ambiguous.question, { question: bundle.ambiguous.question, choices: bundle.ambiguous.choices.map((c: any) => ({ id: c.id, guideId: c.id, label: c.label })) });
   if (!bundle.gap) run(ctx.db, "INSERT OR REPLACE INTO request_reads(id,request_id,revision,kind,ref,label,excerpt,used,at) VALUES(?,?,?,?,?,?,?,?,?)", `bd_${sha(requestId + intent.signature + revision).slice(0, 12)}`, requestId, revision, "bundle", intent.signature, "research bundle", JSON.stringify(bundle), 0, ctx.now().toISOString());
