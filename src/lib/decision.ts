@@ -250,7 +250,7 @@ function describe(o: OptionResult): string {
   if (c) parts.push(`${o.label}: ${money(c, c.max)}${c.min !== c.max ? ` (range ${fmtMoney(c.min, c.currency)} to ${fmtMoney(c.max, c.currency)})` : ""}${c.unknown.length ? `, plus ${c.unknown.map((u) => u.name).join(" and ")} (amount not stated)` : ""}${c.includedNote.length ? `, with the ${c.includedNote.join(" and ")} included` : ""}`);
   else parts.push(o.label);
   const detail = o.checks.map((k) => cap1(k.detail)).join(". ");
-  return `${parts.join("")}${detail ? `. ${detail}` : ""}`;
+  return `${parts.join("")}${detail ? `. ${detail}` : ""}.`;
 }
 function compareTo(top: OptionResult, o: OptionResult): string {
   if (!top.calc || !o.calc || top.calc.currency !== o.calc.currency) return describe(o);

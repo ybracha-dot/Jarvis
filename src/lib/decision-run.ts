@@ -11,6 +11,8 @@ export interface SrcRef { itemId: string; revision: number; title: string; kind:
 export const DECISION_Q = /\b(which|who)\b[^.?!]*\b(should|go with|choose|pick|hire|book|take|best)\b|\bshould i (go with|choose|pick|take|hire|book|buy|use)\b|\b(compare|recommend|recommendation|decide|decision|cheapest|best option|better option|trade-?offs?|worth it|which one|which of)\b/i;
 export const DRAFT_CUE = /\b(draft|email|write|message|follow[- ]?up|reply|ask them|ask (?:the )?(?:provider|vendor|contractor))\b/i;
 const first = (n: string) => n.split(/\s+/)[0];
+/** Cut at a word boundary, never mid-word. */
+export const shortTitle = (t: string, n = 72) => { const c = t.replace(/[?.!]+$/, "").replace(/\s+/g, " ").trim(); if (c.length <= n) return c; const cut = c.slice(0, n); return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 20))}…`; };
 
 // ---------- model transport (injectable for tests; the real one needs a key and a budget) ----------
 let override: Transport | null | undefined;
@@ -100,7 +102,7 @@ export function composeDecision(ctx: Ctx, b: { items: { id: string }[]; localOnl
   if (!o.wantDraft && rec.nextAction && rec.nextAction.kind !== "none") flags.push({ kind: "draft_available", text: "Say “draft it” to get a ready-to-edit message for that next step. Nothing is sent." });
   const summary = rec.label ? `${rec.kind === "ask" ? "Leaning" : "Recommend"} ${rec.label}. ${rec.headline.split(". ").slice(1, 2).join("") || ""}`.trim() : rec.headline;
   const needsJudgment = rec.kind === "none_fits" || (rec.kind === "insufficient" && a.options.length > 0);
-  return { title: `Decision: ${request.replace(/[?.!]+$/, "").slice(0, 80)}`, body: lines.join("\n"), summary: summary.slice(0, 260), sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: analysisJson(a, ids), draft, needsJudgment, localOnly: !!b.localOnly };
+  return { title: `Decision: ${shortTitle(request.split(/[,.?!]| and /)[0], 72)}`, body: lines.join("\n"), summary: summary.slice(0, 260), sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: analysisJson(a, ids), draft, needsJudgment, localOnly: !!b.localOnly };
 }
 
 /** A ready-to-edit local message for the next step the rules found. Never sent. */

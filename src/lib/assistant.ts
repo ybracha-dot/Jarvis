@@ -12,7 +12,7 @@ import { enqueue as notify } from "./notify";
 import { searchEvidence, getItem, listSources, tokens, ownerName, factOut, Hit, SourceMode } from "./evidence";
 import { addDays, localDate, fmtDateTime, DEFAULT_TZ, localHM, parseLocal } from "./time";
 import { deepLinkBase } from "./capture";
-import { composeDecision, synthesizeJudgment, recheckAnalysis, DECISION_Q, DRAFT_CUE, AnalysisJson } from "./decision-run";
+import { composeDecision, synthesizeJudgment, recheckAnalysis, shortTitle, DECISION_Q, DRAFT_CUE, AnalysisJson } from "./decision-run";
 
 // ---------- understanding ----------
 export type Deliverable = "draft" | "brief" | "answer";
@@ -104,9 +104,9 @@ export function submitGoal(ctx: Ctx, raw: GoalInput) {
     }
     const id = `req_${sha(`${ctx.owner}|${key}`).slice(0, 12)}`; const resultId = `res_${id.slice(4)}`; const now = ctx.now().toISOString();
     const intent = understand(ctx, i.text, { projectHint: i.projectHint });
-    run(ctx.db, "INSERT INTO requests(id,owner_id,dedup_key,title,origin,text,revision,status,project_id,conversation_id,result_id,synthetic,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, ctx.owner, key, i.text.slice(0, 90), i.origin, i.text, 1, "queued", intent.projectId, i.conversationId ?? null, resultId, i.synthetic ? 1 : 0, now, now);
+    run(ctx.db, "INSERT INTO requests(id,owner_id,dedup_key,title,origin,text,revision,status,project_id,conversation_id,result_id,synthetic,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", id, ctx.owner, key, shortTitle(i.text, 84), i.origin, i.text, 1, "queued", intent.projectId, i.conversationId ?? null, resultId, i.synthetic ? 1 : 0, now, now);
     run(ctx.db, "INSERT INTO request_revisions(request_id,revision,text,origin,at) VALUES(?,?,?,?,?)", id, 1, i.text, i.origin, now);
-    run(ctx.db, "INSERT INTO results(id,owner_id,request_id,kind,title,project_id,version,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", resultId, ctx.owner, id, intent.deliverable, i.text.slice(0, 90), intent.projectId, 0, "pending", now, now);
+    run(ctx.db, "INSERT INTO results(id,owner_id,request_id,kind,title,project_id,version,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)", resultId, ctx.owner, id, intent.deliverable, shortTitle(i.text, 84), intent.projectId, 0, "pending", now, now);
     startRun(ctx, id, 1, intent);
     logActivity(ctx, "goal_submitted", id, `Goal (${i.origin}): ${i.text.slice(0, 80)}`);
     return { ...receipt(ctx, id), duplicate: false, refreshed: false };
@@ -405,7 +405,7 @@ function composeDigest(ctx: Ctx, b: any) {
   const used = items.flatMap((it: any) => tokens(`${it.title} ${it.say.join(" ")}`)); const missing = (b.terms ?? []).filter((t: string) => t.length >= 5 && !used.some((u: string) => u.slice(0, 5) === t.slice(0, 5))).slice(0, 4);
   if (missing.length) flags.push({ kind: "not_found", text: `Nothing in the sources mentions: ${missing.join(", ")}.` });
   const head = items.length ? `Found ${items.length} source${items.length === 1 ? "" : "s"}${changed.length ? `, ${changed.length} changed value${changed.length === 1 ? "" : "s"}` : ""}${todo.length ? `, ${todo.length} open item${todo.length === 1 ? "" : "s"}` : ""}.` : "Nothing found.";
-  return { title: `Answer: ${String(b.question ?? (b.terms ?? []).join(" ")).replace(/[?.!]+$/, "").slice(0, 80)}`.trim(), body: lines.join("\n"), summary: head, sources, flags, applied: [] as string[], unapplied: [] as string[] };
+  return { title: `Answer: ${shortTitle(String(b.question ?? (b.terms ?? []).join(" ")), 72)}`.trim(), body: lines.join("\n"), summary: head, sources, flags, applied: [] as string[], unapplied: [] as string[] };
 }
 
 function composeMeeting(ctx: Ctx, b: any) {
