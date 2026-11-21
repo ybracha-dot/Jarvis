@@ -108,7 +108,8 @@ export function applyProjectUpdate(ctx: Ctx, raw: ProjectUpdate): Receipt | { sa
         const status = c.op === "option" ? "option" : tentative ? "suggested" : stale ? "superseded" : "current";
         const id = uid("pf"); let supersedes: string | null = null;
         if (status === "current" && newer && c.op !== "action" && c.op !== "question") { supersedes = newer.id; run(ctx.db, "UPDATE project_facts SET status='superseded', superseded_by=? WHERE id=?", id, newer.id); }
-        if (c.op === "option") { const o = get(ctx.db, "SELECT id FROM project_facts WHERE project_id=? AND key=? AND kind='option' AND status='option'", p.id, k) as any; if (o) { supersedes = o.id; run(ctx.db, "UPDATE project_facts SET status='superseded', superseded_by=? WHERE id=?", id, o.id); } }
+        // Several options can sit under one key; repeating the same one only refreshes it.
+        if (c.op === "option") { const o = get(ctx.db, "SELECT id FROM project_facts WHERE project_id=? AND key=? AND kind='option' AND status='option' AND lower(text)=lower(?)", p.id, k, (c as any).text) as any; if (o) { supersedes = o.id; run(ctx.db, "UPDATE project_facts SET status='superseded', superseded_by=? WHERE id=?", id, o.id); } }
         if (c.op === "decide" && status === "current") {
           // A decision settles the question it answers: options with the same key, or the one it names, move into history.
           for (const sk of [k, (c as any).supersedesKey ? slugify((c as any).supersedesKey) : null].filter(Boolean) as string[])

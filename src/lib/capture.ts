@@ -2,6 +2,7 @@
 // Idempotent by a stable dedup key. Saves the commitment immediately, then wakes the supervisor. Incoming content never authorizes an outbound action.
 import { z } from "zod";
 import { findProject } from "./projects";
+import { noteProbeWrite, noteProbeRead } from "./mcp-auth";
 import { Ctx, all, get, run, tx, uid, sha } from "./db";
 import { HttpError } from "./decisions";
 import { createCommitment } from "./commitments";
@@ -89,6 +90,7 @@ export function captureToJarvis(ctx: Ctx, raw: CaptureInput) {
       if (prj) run(ctx.db, "UPDATE notes SET project_id=? WHERE id=?", prj.id, nid);
       run(ctx.db, "UPDATE captures SET note_id=? WHERE id=?", nid, id);
     }
+    noteProbeWrite(ctx, i.text, (get(ctx.db, "SELECT note_id FROM captures WHERE id=?", id)!.note_id as string) ?? null, id, i.via === "mcp" ? "ordinary Claude (connector)" : i.via);
     recordSourceStatus(ctx, `capture:${i.sourceKind}`, label, true, i.synthetic ? "Synthetic source event (fixture)" : undefined);
     run(ctx.db, "UPDATE source_status SET last_event_at=?, gap_reason=? WHERE owner_id=? AND provider=?", nowIso, i.synthetic ? "Synthetic events only. No live connection." : null, ctx.owner, `capture:${i.sourceKind}`);
     if (parsed.kind === "commitment") {
@@ -120,7 +122,7 @@ export function undoCapture(ctx: Ctx, id: string) {
   });
 }
 
-export function recallFromJarvis(ctx: Ctx, query: string, o: { project?: string } = {}) {
+export function recallFromJarvis(ctx: Ctx, query: string, o: { project?: string; via?: string } = {}) {
   const q = query.trim();
   if (q.length < 2) throw new HttpError(422, "Ask with at least two characters");
   const like = `%${q.replace(/[%_]/g, "")}%`;
@@ -140,6 +142,8 @@ export function recallFromJarvis(ctx: Ctx, query: string, o: { project?: string 
     items.push({ type: "document", id: d.id as string, title: d.title as string, detail: `${d.course} / ${d.folder}`, deepLink: `${deepLinkBase()}/guides/${d.id}` });
   for (const n of all(ctx.db, "SELECT id,title,kind FROM notes WHERE owner_id=? AND tombstone=0 AND project_id IS NULL AND sensitivity='normal' AND (title LIKE ? OR body LIKE ?) LIMIT 5", ctx.owner, like, like))
     items.push({ type: "note", id: n.id as string, title: n.title as string, detail: n.kind as string, deepLink: `${deepLinkBase()}/memory` });
+  const probe = o.via ? noteProbeRead(ctx, q, o.via) : null;
+  if (probe) items.unshift({ type: "connection_check", id: "probe", title: "Connection check", detail: probe.probeNote, deepLink: `${deepLinkBase()}/connections` });
   // Honest about scope: this searches what was saved to Jarvis, not every Claude chat.
   const missing = items.length ? null : `Nothing saved in Jarvis matches "${q}". Jarvis only has what you captured with "Remember for Jarvis", pasted, imported or attached. If it was in a Claude conversation, share that conversation (or export just that one) and import it under Sources, or attach the file here.`;
   return { query: q, count: items.length, items, missing, scope: "Saved Jarvis records only. This is not a feed of your Claude chats." };

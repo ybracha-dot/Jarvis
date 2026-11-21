@@ -34,12 +34,12 @@ const seat = (area: string, i: number) => {
   const dy = z.y + 96 + row * 124;
   return { dx: col, dy, x: col, y: dy + 6 };
 };
-const waitSpot = (k: number) => ({ x: AISLE_X - 40 + (k % 2) * 80, y: YOU.y - 52 - Math.floor(k / 2) * 80 });
+const waitSpot = (k: number) => ({ x: AISLE_X + (k % 2 ? 26 : -26), y: YOU.y - 50 - k * 92 });
 const doorSpot = (k: number) => ({ x: DOOR.x - 52 + (k % 3) * 52, y: DOOR.y - 12 - Math.floor(k / 3) * 30 });
 
 type Pt = { x: number; y: number };
 type Pose = "type" | "read" | "stand" | "ask" | "carry" | "idle";
-export interface Placed { j: OfficeJob; pos: Pt; pose: Pose; seated: boolean; visible: boolean; label: string; sub: string; zone: string; fresh: boolean }
+export interface Placed { waitIndex: number; j: OfficeJob; pos: Pt; pose: Pose; seated: boolean; visible: boolean; label: string; sub: string; zone: string; fresh: boolean }
 
 const READING = /read|scan|search|look|check|find|list/i;
 export function place(jobs: OfficeJob[]): Placed[] {
@@ -50,18 +50,18 @@ export function place(jobs: OfficeJob[]): Placed[] {
     const fresh = (j.createdAgoMs ?? 1e9) < 2600;
     if (j.area === "supervisor") {
       const active = !["done", "cancelled", "failed"].includes(j.status);
-      return { j, pos: { x: SUP.x, y: SUP.y }, pose: (active ? (j.status === "waiting" ? "idle" : "type") : "idle") as Pose, seated: true, visible: active, label: "Jarvis", sub: active ? (j.status === "waiting" ? "waiting on helpers" : (j.stage ?? "working").slice(0, 26)) : "idle", zone: "supervisor", fresh };
+      return { waitIndex: -1, j, pos: { x: SUP.x, y: SUP.y }, pose: (active ? (j.status === "waiting" ? "idle" : "type") : "idle") as Pose, seated: true, visible: active, label: "Jarvis", sub: active ? (j.status === "waiting" ? "waiting on helpers" : (j.stage ?? "working").slice(0, 26)) : "idle", zone: "supervisor", fresh };
     }
-    if (j.needsYou) { const pos = waitSpot(waitK++); return { j, pos, pose: (j.needsYou.kind === "question" ? "ask" : "carry") as Pose, seated: false, visible: true, label: displayName(j.area), sub: j.needsYou.kind === "question" ? "needs your answer" : "needs your decision", zone, fresh }; }
-    if (j.status === "queued") return { j, pos: doorSpot(doorK++), pose: "stand" as Pose, seated: false, visible: true, label: displayName(j.area), sub: "just arrived", zone, fresh };
+    if (j.needsYou) { const wi = waitK++; const pos = waitSpot(wi); return { waitIndex: wi, j, pos, pose: (j.needsYou.kind === "question" ? "ask" : "carry") as Pose, seated: false, visible: true, label: displayName(j.area), sub: j.needsYou.kind === "question" ? "needs your answer" : "needs your decision", zone, fresh }; }
+    if (j.status === "queued") return { waitIndex: -1, j, pos: doorSpot(doorK++), pose: "stand" as Pose, seated: false, visible: true, label: displayName(j.area), sub: "just arrived", zone, fresh };
     if (["done", "cancelled", "failed"].includes(j.status)) {
       const recent = j.status === "done" && (j.finishedAgoMs ?? 1e9) < 4000;
       const s = seat(j.area, next[zone] ?? 0);
-      return { j, pos: recent ? { x: s.x, y: s.y } : doorSpot(doorK), pose: "idle" as Pose, seated: recent, visible: recent, label: displayName(j.area), sub: j.status === "done" ? "finished" : j.status, zone, fresh: false };
+      return { waitIndex: -1, j, pos: recent ? { x: s.x, y: s.y } : doorSpot(doorK), pose: "idle" as Pose, seated: recent, visible: recent, label: displayName(j.area), sub: j.status === "done" ? "finished" : j.status, zone, fresh: false };
     }
     const i = next[zone] ?? 0; next[zone] = i + 1; const s = seat(j.area, i);
     const reading = READING.test(j.stage ?? "") && j.status === "running";
-    return { j, pos: { x: s.x, y: s.y }, pose: (j.status === "running" ? (reading ? "read" : "type") : "idle") as Pose, seated: true, visible: true, label: displayName(j.area),
+    return { waitIndex: -1, j, pos: { x: s.x, y: s.y }, pose: (j.status === "running" ? (reading ? "read" : "type") : "idle") as Pose, seated: true, visible: true, label: displayName(j.area),
       sub: j.status === "waiting" ? "waiting on helpers" : `${reading ? "reading" : "typing"}${progress}`, zone, fresh };
   });
 }
@@ -140,7 +140,8 @@ function Worker({ p, selected, reduce, onSelect }: { p: Placed; selected: boolea
       {selected && <ellipse cx="0" cy="1" rx="30" ry="9" fill="none" stroke="#67d4ff" strokeWidth="3" />}
       <Sprite area={p.zone} pose={p.pose} walking={walking} synthetic={p.j.synthetic} />
       {p.fresh && <g className="oc-pop"><circle cx="0" cy="-34" r="26" fill="none" stroke="#67d4ff" strokeWidth="3" /><circle cx="0" cy="-34" r="14" fill="none" stroke="#bdeaff" strokeWidth="2" /></g>}
-      {p.j.needsYou && (
+      {p.j.needsYou && p.waitIndex > 0 && <g className="oc-ask" data-testid="ask-badge"><circle cx="0" cy="-74" r="13" fill="#fff7e0" stroke="#f3b24b" strokeWidth="3" /><text x="0" y="-67" textAnchor="middle" fill="#8a4a00" fontSize="20" fontWeight="800">?</text></g>}
+      {p.j.needsYou && p.waitIndex === 0 && (
         <g className="oc-ask" data-testid="ask-bubble">
           <g transform={`translate(${AISLE_X - pos.x} 0)`}>
             <rect x="-69" y="-124" width="138" height="48" rx="8" fill="#fff7e0" stroke="#f3b24b" strokeWidth="3" />
@@ -217,7 +218,7 @@ export function OfficeScene({ jobs, pendingDecisions, selected, onSelect, onOpen
         const s = seat(k, i); const occ = placed.find((p) => p.zone === k && p.seated && p.visible && p.pos.x === s.x && p.pos.y === s.y);
         return <DeskFront key={`${k}${i}`} x={s.dx} y={s.dy} label={occ ? occ.label : ZONES[k].label.charAt(0) + ZONES[k].label.slice(1).toLowerCase()} sub={occ ? occ.sub : "free desk"} glow={!!occ && occ.pose !== "idle"} tone={occ ? (occ.j.needsYou ? "#f3b24b" : "#4d6fb8") : "#243a72"} selected={!!occ && occ.j.id === selected} />;
       }))}
-      <DeskFront x={SUP.x} y={SUP.y} label="Jarvis" sub={supJob ? supJob.sub : "idle. no model calls"} glow={!!supJob && supJob.pose !== "idle"} tone="#67d4ff" selected={!!supJob && supJob.j.id === selected} />
+      <DeskFront x={SUP.x} y={SUP.y} label="Jarvis" sub={supJob ? supJob.sub : "idle"} glow={!!supJob && supJob.pose !== "idle"} tone="#67d4ff" selected={!!supJob && supJob.j.id === selected} />
       {supJob && <rect x={SUP.x - 34} y={SUP.y - 60} width="68" height="64" fill="transparent" tabIndex={0} role="button" aria-label="Open the supervisor" data-testid="office-supervisor" style={{ cursor: "pointer" }} onClick={() => onSelect(supJob.j.id)} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onSelect(supJob.j.id))} />}
       {/* your desk */}
       <g data-testid="you-desk">
