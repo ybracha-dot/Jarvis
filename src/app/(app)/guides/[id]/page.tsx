@@ -2,7 +2,7 @@
 import { Suspense, use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { FileDown, ListChecks, Eye, EyeOff, Trash2, Plus, Check, X } from "lucide-react";
+import { Loader2, FileDown, ListChecks, Eye, EyeOff, Trash2, Plus, Check, X } from "lucide-react";
 import { api, useQuery, useAction } from "@/components/api";
 import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Notice, Field, inputCls, cx } from "@/components/ui";
 import { fmtDateTime } from "@/lib/time";
@@ -59,17 +59,21 @@ function Practice({ d }: { d: any }) {
 function Quiz({ attemptId, docId, onDone, onAgain }: { attemptId: string; docId: string; onDone: () => void; onAgain: (m: "all" | "missed") => void }) {
   const q = useQuery<any>(`/quiz/${attemptId}`);
   const [res, setRes] = useState<any>(null);
-  const ans = useAction(async (questionId: string, chosen: string) => { setRes(await api(`/quiz/${attemptId}/answer`, { body: { questionId, chosen } })); });
+  // The question just answered stays out of reach until the server has moved on, so a fast second tap can never answer it twice.
+  const [lastAnswered, setLastAnswered] = useState<string | null>(null);
+  const ans = useAction(async (questionId: string, chosen: string) => { setLastAnswered(questionId); setRes(await api(`/quiz/${attemptId}/answer`, { body: { questionId, chosen } })); });
   const s = q.data;
   if (q.loading && !s) return <Spinner />; if (q.error && !s) return <ErrorBox error={q.error} onRetry={q.reload} />;
   if (s.finished && !res) return <Done s={s} onDone={onDone} onAgain={onAgain} />;
-  const cur = res ? s.question ?? null : s.question;
+  const cur = res ? s.question ?? null : (s.question && s.question.id !== lastAnswered ? s.question : null);
+  const advancing = !res && !!s.question && s.question.id === lastAnswered && !s.finished;
   const showing = res ? { ...(q.data.question ?? {}), id: res.questionId } : null; void showing;
   return <Card className="p-5 space-y-4" data-testid="quiz">
     <div className="flex items-center gap-2 text-[14px] text-muted"><Badge>{s.mode === "missed" ? "Missed questions" : "Full quiz"}</Badge><span>Guide v{s.version}</span><span className="ml-auto mono" data-testid="quiz-progress">{Math.min(s.answered + (res ? 0 : 1), s.total)} of {s.total}</span></div>
     {!res && cur && <>
       <p className="text-[15px] font-medium break-words" data-testid="quiz-stem">{cur.stem}</p>
       <ul className="space-y-2" role="radiogroup" aria-label="Choices">{cur.choices.map((ch: any) => <li key={ch.key}><button role="radio" aria-checked={false} disabled={ans.busy} onClick={() => ans.run(cur.id, ch.key)} data-testid={`choice-${ch.key}`} className="w-full text-left rounded-lg border border-line bg-bg hover:border-accent px-3 py-2.5 text-sm flex gap-3"><Mono className="text-muted">{ch.key}</Mono><span className="break-words">{ch.text}</span></button></li>)}</ul></>}
+    {advancing && <div role="status" className="text-sm text-muted flex items-center gap-2" data-testid="quiz-loading"><Loader2 className="size-4 animate-spin" aria-hidden />Loading the next question</div>}
     {ans.error && <ErrorBox error={ans.error} />}
     {res && <div className="space-y-3" data-testid="quiz-result"><div className={cx("flex items-center gap-2 text-sm font-medium", res.correct ? "text-accent" : "text-amber")}>{res.correct ? <Check className="size-4" /> : <X className="size-4" />}{res.correct ? "Correct" : `Not quite. You chose ${res.chosen}. The answer is ${res.answer}.`}</div><p className="text-sm break-words">{res.rationale}</p>
       <Button variant="primary" onClick={() => { setRes(null); q.reload(); }} data-testid="quiz-next">{res.finished ? "See results" : "Next question"}</Button></div>}

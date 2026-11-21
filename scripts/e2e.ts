@@ -587,6 +587,28 @@ async function journeyAssistant(page: Page, browser: Browser) {
   await shot(m, "36-result-mobile.png"); await ctx.close();
 }
 
+/** Regression for the intermittent "5 of 8 with 3 missed" failure: after "Next", the previous question stayed answerable until the reload returned.
+ *  With a slow network the old build answered one question over and over. Latency is injected so the race is certain, not occasional. */
+async function journeyQuizLatency(page: Page) {
+  step("Quiz under slow network: the answered question cannot be answered again");
+  await post("/demo/reset", { confirm: "RESET DEMO" });
+  const docs = (await api("/courses/BI107")).documents; const docId = docs[0].id; const g = (await api(`/documents/${docId}`)).content;
+  for (const delay of [0, 700]) {
+    await page.unroute(/\/api\/quiz\/[^/]+$/).catch(() => {});
+    await page.route(/\/api\/quiz\/[^/]+$/, async (r) => { await new Promise((x) => setTimeout(x, delay)); await r.continue(); });
+    await page.goto(base + `/guides/${docId}?quiz=all`); await page.getByTestId("quiz-stem").waitFor();
+    const seen: string[] = [];
+    for (let i = 0; i < g.questions.length; i++) {
+      await page.getByTestId("quiz-stem").waitFor(); const stem = await page.getByTestId("quiz-stem").innerText(); seen.push(stem); const q = g.questions.find((x: any) => x.stem === stem);
+      await page.getByTestId(`choice-${i < 3 ? q.choices.find((c: any) => c.key !== q.answer).key : q.answer}`).click(); await page.getByTestId("quiz-result").waitFor(); await page.getByTestId("quiz-next").click();
+    }
+    await page.getByTestId("quiz-done").waitFor({ timeout: 15000 });
+    ok(new Set(seen).size === g.questions.length, `every question was shown once with ${delay} ms of latency`);
+    ok(/Quiz finished: 5 of 8/.test(await page.getByTestId("quiz-done").innerText()), `the score is 5 of 8 with ${delay} ms of latency`);
+  }
+  await page.unroute(/\/api\/quiz\/[^/]+$/).catch(() => {});
+}
+
 async function journeyMobile(browser: Browser) {
   step("Phone width 390x844");
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -1009,6 +1031,7 @@ async function main() {
     else if (only === "study") { await journeyStudy(browser); }
     else if (only === "projects") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "projects"); await journeyProjects(p); await c.close(); }
     else if (only === "assistant") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "assistant"); await journeyAssistant(p, browser); await c.close(); }
+    else if (only === "quizlatency") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "quiz"); startWorker(300); await journeyQuizLatency(p); await c.close(); }
     else if (only === "mcp") { startWorker(300); await journeyMcp(); }
     else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
     else {
@@ -1022,6 +1045,7 @@ async function main() {
     await journeyMcp();
     await journeyProjects(page);
     await journeyAssistant(page, browser);
+    await journeyQuizLatency(page);
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);
