@@ -142,6 +142,51 @@ CREATE TABLE advisor_sources(
   locator TEXT, rights TEXT NOT NULL, excerpt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ok', note TEXT, hash TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL);
 `,
+  /* 3 capture, jobs (office), study */ `
+ALTER TABLE source_status ADD COLUMN last_event_at TEXT;
+ALTER TABLE source_status ADD COLUMN next_check_at TEXT;
+ALTER TABLE source_status ADD COLUMN gap_reason TEXT;
+CREATE TABLE captures(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dedup_key TEXT NOT NULL, source_kind TEXT NOT NULL, source_label TEXT NOT NULL,
+  delivery TEXT NOT NULL, text TEXT NOT NULL, course TEXT, project TEXT, source_ref TEXT, synthetic INTEGER NOT NULL DEFAULT 0,
+  via TEXT NOT NULL, kind TEXT NOT NULL, parsed TEXT NOT NULL DEFAULT '{}', commitment_id TEXT, task_id TEXT, decision_id TEXT, note_id TEXT,
+  created_at TEXT NOT NULL, undone_at TEXT, UNIQUE(owner_id, dedup_key));
+CREATE TABLE jobs(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, dedup_key TEXT NOT NULL, kind TEXT NOT NULL, role TEXT NOT NULL, area TEXT NOT NULL,
+  title TEXT NOT NULL, parent_id TEXT, root_id TEXT, depth INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
+  input TEXT NOT NULL DEFAULT '{}', evidence_ids TEXT NOT NULL DEFAULT '[]', tools TEXT NOT NULL DEFAULT '[]', budget TEXT NOT NULL DEFAULT '{}',
+  criteria TEXT NOT NULL DEFAULT '[]', stage TEXT, progress_done INTEGER, progress_total INTEGER, waiting_on TEXT,
+  lease_owner TEXT, lease_until INTEGER, heartbeat_at INTEGER, attempts INTEGER NOT NULL DEFAULT 0, cancel_requested INTEGER NOT NULL DEFAULT 0,
+  result TEXT, error TEXT, model_calls INTEGER NOT NULL DEFAULT 0, synthetic INTEGER NOT NULL DEFAULT 0, delegated_by TEXT,
+  created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER, UNIQUE(owner_id, dedup_key));
+CREATE INDEX jobs_status ON jobs(status);
+CREATE TABLE job_steps(job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE, step TEXT NOT NULL, label TEXT NOT NULL, result TEXT, done_at INTEGER NOT NULL, PRIMARY KEY(job_id, step));
+CREATE TABLE job_events(id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE, at INTEGER NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL, data TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE specialist_templates(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, tools TEXT NOT NULL, status TEXT NOT NULL,
+  source_job_id TEXT, created_at TEXT NOT NULL, approved_at TEXT, UNIQUE(owner_id, name));
+CREATE TABLE conversations(id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, course TEXT, title TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE messages(
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, role TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text',
+  text TEXT NOT NULL, at TEXT NOT NULL, data TEXT NOT NULL DEFAULT '{}', job_id TEXT);
+CREATE TABLE attachments(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, course TEXT NOT NULL, conversation_id TEXT, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
+  sha TEXT NOT NULL, path TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'unassigned', quality TEXT, reading TEXT, created_at TEXT NOT NULL,
+  UNIQUE(owner_id, course, sha));
+CREATE TABLE documents(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, course TEXT NOT NULL, folder TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL,
+  current_version INTEGER NOT NULL DEFAULT 1, synthetic INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(owner_id, course, folder, title));
+CREATE TABLE document_versions(
+  id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, version INTEGER NOT NULL, content TEXT NOT NULL,
+  created_at TEXT NOT NULL, source_job_id TEXT, note TEXT, UNIQUE(document_id, version));
+CREATE TABLE quiz_attempts(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE, version INTEGER NOT NULL,
+  mode TEXT NOT NULL, question_ids TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT);
+CREATE TABLE quiz_answers(
+  attempt_id TEXT NOT NULL REFERENCES quiz_attempts(id) ON DELETE CASCADE, question_id TEXT NOT NULL, chosen TEXT NOT NULL, correct INTEGER NOT NULL, at TEXT NOT NULL,
+  PRIMARY KEY(attempt_id, question_id));
+`,
 ];
 
 const cache = new Map<string, DB>();

@@ -20,6 +20,9 @@ import { addAdvisorSource, AdvisorSourceInput, listAdvisorSources, deleteAdvisor
 import { applyPractice } from "./study";
 import { runCommand } from "./commands";
 import { ingestRevision } from "./ingest";
+import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJarvis } from "./capture";
+import { officeState, cancelJob, getJob, TERMINAL } from "./jobs";
+import { kick, runnerStatus } from "./runner";
 
 export const MODE_COOKIE = "jarvis_mode";
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
@@ -61,6 +64,31 @@ const idBody = z.object({}).passthrough();
 const demoOnly = (c: Ctx) => { if (c.mode !== "demo") throw new HttpError(403, "Only available in the demo workspace"); };
 
 on("GET", "/health", () => ({ ok: true }));
+
+// ---- Capture and the Live Office ----
+on("POST", "/captures", (c, r) => { const rec = captureToJarvis(c, { ...r.json(CaptureInput), via: "app" }); kick(c.mode); return rec; });
+on("GET", "/captures", (c) => ({ captures: all(c.db, "SELECT id FROM captures WHERE owner_id=? ORDER BY created_at DESC LIMIT 20", c.owner).map((x) => captureReceipt(c, x.id as string)) }));
+on("GET", "/captures/:id", (c, r) => { const x = captureReceipt(c, r.params.id); if (!x) throw new HttpError(404, "Capture not found"); return x; });
+on("POST", "/captures/:id/undo", (c, r) => undoCapture(c, r.params.id));
+on("GET", "/recall", (c, r) => recallFromJarvis(c, r.query.get("q") ?? ""));
+on("GET", "/office", (c) => ({ ...officeState(c), runner: runnerStatus(c.mode), decisions: listDecisions(c).filter((d) => ["commitment_plan"].includes(d.kind)).map((d) => ({ id: d.id, title: d.title, urgency: d.urgency })),
+  captures: all(c.db, "SELECT id FROM captures WHERE owner_id=? ORDER BY created_at DESC LIMIT 5", c.owner).map((x) => captureReceipt(c, x.id as string)), templates: all(c.db, "SELECT id,name,role,status,tools FROM specialist_templates WHERE owner_id=?", c.owner) }));
+on("POST", "/office/run", (c) => { kick(c.mode); return { ok: true }; });
+on("POST", "/office/jobs/:id/cancel", (c, r) => { if (!getJob(c, r.params.id)) throw new HttpError(404, "Job not found"); return { cancelled: cancelJob(c, r.params.id) }; });
+on("POST", "/office/jobs/:id/template", (c, r) => {
+  const j = getJob(c, r.params.id); if (!j) throw new HttpError(404, "Job not found");
+  if (j.status !== "done") throw new HttpError(409, "A specialist becomes a template only after a successful run.");
+  const name = r.json(z.object({ name: z.string().min(2).max(60) })).name;
+  const id = `tpl_${j.id.slice(4)}`;
+  run(c.db, "INSERT OR IGNORE INTO specialist_templates(id,owner_id,name,role,tools,status,source_job_id,created_at) VALUES(?,?,?,?,?,'proposed',?,?)", id, c.owner, name, j.role, JSON.stringify(j.tools), j.id, c.now().toISOString());
+  return { id, status: "proposed", note: "Proposed only. It gets no permanent access and no schedule until you approve it." };
+});
+on("POST", "/office/templates/:id/approve", (c, r) => {
+  r.json(z.object({ confirm: z.literal(true) }));
+  const t = get(c.db, "SELECT * FROM specialist_templates WHERE id=? AND owner_id=?", r.params.id, c.owner); if (!t) throw new HttpError(404, "Template not found");
+  run(c.db, "UPDATE specialist_templates SET status='approved', approved_at=? WHERE id=?", c.now().toISOString(), r.params.id);
+  return { ok: true, note: "Approved as a named template. It keeps only the tools it already had. A recurring schedule still needs a separate approval." };
+});
 on("GET", "/session", (c) => ({ mode: c.mode, now: c.now().toISOString(), seeded: isSeeded(c), fixtures: c.mode === "demo" ? FIXTURES : null, scheduler: schedulerStatus(c), dataDir: modeDir(c.mode), label: c.mode === "demo" ? "Example workspace. Fictional data. Demo clock." : "Private workspace. Your data. Real clock." }));
 on("POST", "/demo/seed", (c) => { demoOnly(c); return seedDemo(c); });
 on("POST", "/demo/reset", (c, r) => { demoOnly(c); r.json(z.object({ confirm: z.literal("RESET DEMO") })); resetDemo(c); return seedDemo(c); });
@@ -162,7 +190,16 @@ on("POST", "/import/preview", (c, r) => previewImport(c, r.json(ImportRequest)))
 on("POST", "/import/commit", (c, r) => { const b = r.json(z.object({ token: z.string(), courseExternalId: z.string().optional() })); return commitImport(c, b.token, { courseExternalId: b.courseExternalId }); });
 on("GET", "/sources", (c) => ({ sources: all(c.db, `SELECT s.id,s.provider,s.title,s.kind,co.code course, (SELECT COUNT(*) FROM source_revisions r WHERE r.source_id=s.id) revisions, (SELECT MAX(published_at) FROM source_revisions r WHERE r.source_id=s.id) latest FROM sources s LEFT JOIN courses co ON co.id=s.course_id WHERE s.owner_id=? ORDER BY latest DESC`, c.owner) }));
 on("GET", "/sources/:id", (c, r) => ({ source: get(c.db, "SELECT * FROM sources WHERE id=? AND owner_id=?", r.params.id, c.owner), revisions: all(c.db, "SELECT id,published_at,observed_at,duplicate_of,stale,substr(text,1,600) text FROM source_revisions WHERE source_id=? ORDER BY published_at", r.params.id) }));
-on("GET", "/sources-health", (c) => ({ sources: sourceHealth(c), disabled: getSetting<string[]>(c.db, "disabled_sources", []) }));
+on("GET", "/sources-health", (c) => {
+  const sch = schedulerStatus(c);
+  const sources = sourceHealth(c).map((s) => {
+    const polled = ["inbox-folder", "ics-feed"].includes(s.provider);
+    if (polled) return { ...s, nextCheckAt: sch.active && sch.nextRun ? sch.nextRun.at : null, gapReason: s.gapReason ?? (sch.active ? null : "No worker is running, so this is only checked when you click Run now.") };
+    if (s.provider.startsWith("capture:")) return { ...s, nextCheckAt: null, gapReason: s.gapReason ?? "Event-driven. It only changes when you save something. There is no polling." };
+    return s;
+  });
+  return { sources, disabled: getSetting<string[]>(c.db, "disabled_sources", []) };
+});
 on("POST", "/sources-health/disconnect", (c, r) => {
   const b = r.json(z.object({ provider: z.string().min(1).max(60), disconnected: z.boolean() }));
   const row = get(c.db, "SELECT * FROM source_status WHERE owner_id=? AND provider=?", c.owner, b.provider);

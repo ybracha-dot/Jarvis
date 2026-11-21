@@ -75,6 +75,7 @@ function Health() {
       <span className={cx("size-2 rounded-full shrink-0", s.state === "ok" ? "bg-accent" : s.state === "partial" || s.state === "unverified" ? "bg-amber" : s.state === "failed" ? "bg-danger" : "bg-muted")} aria-hidden />
       <span className="font-medium">{s.label}</span><Badge tone={s.state === "ok" ? "accent" : s.state === "partial" || s.state === "unverified" ? "amber" : s.state === "failed" ? "danger" : "neutral"}>{s.state}</Badge>
       <span className="text-muted">{s.lastSuccessAt ? `last verified ${fmtDateTime(s.lastSuccessAt)}` : "never verified"}</span>
+      <span className="text-muted basis-full text-[12px] break-words">Last event: {s.lastEventAt ? fmtDateTime(s.lastEventAt) : "none"} · Next check: {s.nextCheckAt ? fmtDateTime(s.nextCheckAt) : "none scheduled"}{s.gapReason ? ` · Gap: ${s.gapReason}` : ""}</span>
       {s.message && <span className="text-muted break-words basis-full sm:basis-auto sm:flex-1 text-[12px]">{s.message}</span>}
       <Button size="sm" variant="ghost" className="ml-auto" busy={toggle.busy} onClick={() => toggle.run(s.provider, s.state !== "disconnected")}>{s.state === "disconnected" ? "Reconnect" : "Disconnect"}</Button></li>)}</ul>
     {toggle.error && <ErrorBox error={toggle.error} />}</Card></section>;

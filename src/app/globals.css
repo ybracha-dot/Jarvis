@@ -36,3 +36,7 @@ body { background: var(--color-bg); color: var(--color-fg); font-family: var(--f
   .orbit::before, .orbit::after, .drawer, .overlay { animation: none; }
   * { scroll-behavior: auto !important; transition: none !important; }
 }
+
+.office-char { transition: transform 900ms ease-in-out, opacity 600ms ease; cursor: pointer; transform-box: fill-box; }
+.office-char:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; }
+@media (prefers-reduced-motion: reduce) { .office-char { transition: none; } }

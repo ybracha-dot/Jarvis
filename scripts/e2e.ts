@@ -13,7 +13,14 @@ const PORT = Number(process.env.E2E_PORT ?? 3101);
 let base = process.env.E2E_URL ?? `http://127.0.0.1:${PORT}`;
 let server: ChildProcess | null = null;
 let dataDir: string | null = null;
-function killServer() { if (server?.pid) { try { process.kill(-server.pid, "SIGTERM"); } catch { /* already gone */ } } }
+let worker: ChildProcess | null = null;
+const stopWorker = (sig: NodeJS.Signals = "SIGKILL") => { if (worker?.pid) { try { process.kill(-worker.pid, sig); } catch { /* gone */ } } worker = null; };
+function startWorker(pace: number) {
+  if (!dataDir) return;
+  stopWorker();
+  worker = spawn("npx", ["tsx", "scripts/worker.ts"], { env: { ...process.env, JARVIS_DATA_DIR: dataDir, JARVIS_JOB_PACE_MS: String(pace), JARVIS_JOB_LEASE_MS: "3000" }, stdio: "ignore", detached: true });
+}
+function killServer() { stopWorker(); if (server?.pid) { try { process.kill(-server.pid, "SIGTERM"); } catch { /* already gone */ } } }
 const problems: string[] = [];
 const steps: string[] = [];
 let pass = 0;
@@ -24,7 +31,7 @@ const step = (s: string) => { steps.push(s); console.log(`\n# ${s}`); };
 async function startServer() {
   if (process.env.E2E_URL) return;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-e2e-")); dataDir = dir;
-  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...process.env, JARVIS_DATA_DIR: dir }, stdio: "ignore", detached: true });
+  server = spawn("npx", ["next", "start", "-H", "127.0.0.1", "-p", String(PORT)], { env: { ...process.env, JARVIS_DATA_DIR: dir, JARVIS_INAPP_RUNNER: "0" }, stdio: "ignore", detached: true });
   for (let i = 0; i < 60; i++) { try { const r = await fetch(`${base}/api/health`); if (r.ok) return; } catch { /* waiting */ } await new Promise((r) => setTimeout(r, 500)); }
   throw new Error("Server did not start. Run npm run build first.");
 }
@@ -515,6 +522,83 @@ async function journeyA11y(browser: Browser) {
     await ctx.close();
   }
 }
+
+const api = async (p: string) => (await fetch(`${base}/api${p}`)).json() as Promise<any>;
+const waitFor = async (what: string, fn: () => Promise<boolean>, ms = 30000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 250)); } ok(false, `timed out waiting for ${what}`); return false; };
+
+async function journeyOffice(page: Page, browser: Browser) {
+  step("Office: capture the TAMID promise, watch the supervisor assign a specialist");
+  await post("/demo/reset", { confirm: "RESET DEMO" });
+  startWorker(900);
+  await page.goto(base + "/office");
+  await page.getByTestId("capture-send").waitFor();
+  ok(/Idle desks make zero model calls/.test(await page.getByTestId("office-runner").innerText()), "idle office says it makes zero model calls");
+  await page.getByTestId("capture-send").click();
+  await page.getByTestId("capture-receipt").waitFor();
+  ok(/SYNTHETIC SOURCE EVENT/.test(await page.getByTestId("capture-receipt").innerText()), "the receipt labels the source event as synthetic");
+  ok(await page.getByTestId("receipt-open").isVisible(), "the receipt opens the saved commitment");
+  ok(/three pitch angles/.test(await page.getByTestId("receipt-message").innerText()), "receipt says what was saved");
+  await page.getByTestId("roster-job").filter({ hasText: "Capacity specialist" }).first().waitFor({ timeout: 20000 });
+  ok(true, "the supervisor assigned a Capacity specialist");
+  const spec = page.getByTestId("roster-job").filter({ hasText: "Capacity specialist" }).first();
+  await spec.click();
+  const insp = page.getByTestId("inspector");
+  await insp.getByText("Delegated by").waitFor();
+  const it = await insp.innerText();
+  ok(/Handle:/.test(it) && /cap_/.test(it) && /No model used/.test(it) && /Last heartbeat/.test(it), "inspector shows who delegated it, evidence, usage and heartbeat");
+  await shot(page, "15-office-desktop.png");
+  await waitFor("the decision to arrive", async () => (await api("/decisions")).decisions.some((d: any) => d.kind === "commitment_plan"));
+  await page.getByTestId("decision-card").filter({ hasText: "TAMID" }).first().waitFor();
+  ok(true, "a decision arrived at the Decisions desk");
+  await waitFor("helpers to finish", async () => (await api("/office")).jobs.every((j: any) => j.status === "done"));
+  const counts = async () => { const o = await api("/office"); const c = await api("/commitments"); const d = await api("/decisions"); return { jobs: o.jobs.length, cmts: c.commitments.filter((x: any) => /pitch angles/.test(x.action)).length, decs: d.decisions.filter((x: any) => x.kind === "commitment_plan").length }; };
+  const c1 = await counts();
+  ok(c1.cmts === 1 && c1.decs === 1 && c1.jobs === 2, `one commitment, one decision, two jobs (${JSON.stringify(c1)})`);
+
+  step("Office: replay the same message");
+  await page.getByTestId("capture-replay").click();
+  await page.getByTestId("capture-receipt").getByText(/duplicate: nothing new/).waitFor();
+  await page.waitForTimeout(2500);
+  const c2 = await counts();
+  ok(JSON.stringify(c1) === JSON.stringify(c2), "replaying created no new commitment, decision or job");
+  ok(/Already saved/.test(await page.getByTestId("receipt-message").innerText()), "the receipt says nothing was duplicated");
+
+  step("Office: reconnect (reload) recovers the view");
+  await page.reload();
+  await page.getByTestId("roster").waitFor();
+  await page.getByTestId("roster-job").first().waitFor();
+  ok((await page.getByTestId("roster-job").count()) === 2, "the roster is rebuilt from saved state after a reload");
+
+  step("Office: kill the worker mid-job, start another, still one commitment and one decision");
+  startWorker(1500);
+  await page.getByTestId("capture-text").fill("Remember for Jarvis: I owe the SM team two slide drafts by Friday.");
+  await page.getByTestId("capture-send").click();
+  await waitFor("the specialist to start a step", async () => { const o = await api("/office"); return o.jobs.some((j: any) => j.kind === "capture_planner" && j.status === "running" && j.steps.length >= 1 && /SM team/.test(j.title)); }, 40000);
+  stopWorker("SIGKILL");                      // the worker process dies without cleanup
+  const mid = await api("/office");
+  const dead = mid.jobs.find((j: any) => /SM team/.test(j.title) && j.kind === "capture_planner");
+  ok(dead.status === "running" && (await api("/decisions")).decisions.filter((d: any) => /SM team/.test(d.title)).length === 0, "the job is stuck mid-run and no decision exists yet");
+  await page.waitForTimeout(3500);            // the lease expires
+  startWorker(300);
+  await waitFor("the replacement worker to finish it", async () => (await api("/office")).jobs.filter((j: any) => /SM team/.test(j.title)).every((j: any) => j.status === "done"), 40000);
+  const fin = await api("/office"); const d2 = await api("/decisions"); const c3 = await api("/commitments");
+  ok(d2.decisions.filter((d: any) => /SM team/.test(d.title)).length === 1, "exactly one decision after the restart");
+  ok(c3.commitments.filter((x: any) => /slide drafts/.test(x.action)).length === 1, "exactly one commitment after the restart");
+  const recovered = fin.jobs.find((j: any) => /SM team/.test(j.title) && j.kind === "capture_planner");
+  ok(recovered.attempts >= 2 && recovered.events.some((e: any) => /recover|Picked up/.test(e.kind + e.summary)), "the job records that a new worker picked it up");
+  await page.reload(); await page.getByTestId("roster").waitFor();
+  await shot(page, "15b-office-after-restart-desktop.png");
+
+  step("Office on the phone: compact roster, no horizontal scroll");
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const m = await ctx.newPage(); watch(m, "mobile-office");
+  await m.goto(base + "/office"); await m.getByTestId("roster").waitFor();
+  ok((await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0, "Office has no horizontal scroll on the phone");
+  await m.getByTestId("roster-job").first().tap();
+  await m.getByTestId("inspector").getByText("Delegated by").waitFor();
+  await shot(m, "16-office-mobile.png");
+  await ctx.close();
+}
 async function main() {
   fs.mkdirSync(SHOTS, { recursive: true });
   await startServer();
@@ -526,6 +610,7 @@ async function main() {
     await journeyTask(page); await journeyResume(page); await journeyCouncil(page); await journeySkills(page);
     await journeyExam(page); await journeyRegistrar(page); await journeyMemoryGoals(page); await journeyVoice(page);
     await journeyBreak(page); await journeySettings(page);
+    await journeyOffice(page, browser);
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);

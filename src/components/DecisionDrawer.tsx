@@ -11,9 +11,9 @@ const STATE_LABEL: Record<string, string> = { accepted: "Done", deferred: "Defer
 
 export function DecisionList({ compact }: { compact?: boolean }) {
   const { open } = useDrawerParams();
-  const pending = useQuery<any>("/decisions");
+  const pending = useQuery<any>("/decisions", { poll: 3000 });
   const past = useQuery<any>("/decisions?state=accepted,deferred,handled");
-  const inbox = useQuery<any>("/inbox");
+  const inbox = useQuery<any>("/inbox", { poll: 6000 });
   return (
     <div className="space-y-5">
       <section>
@@ -102,6 +102,7 @@ export function DecisionDrawer({ id, onClose }: { id: string; onClose: () => voi
   const ev = d.evidence ?? {};
   const pending = d.state === "pending";
   const reqs: any[] = ev.requirements ?? [];
+  const isPlan = ["deadline_moved", "commitment_plan"].includes(d.kind);
   const err = reserve.error || defer.error || handled.error || resolve.error || accept.error;
 
   return (
@@ -111,7 +112,7 @@ export function DecisionDrawer({ id, onClose }: { id: string; onClose: () => voi
         <div className="space-y-2">
           {err && <ErrorBox error={err} />}
           {conflict && <Notice>{conflict} Pick one of the fresh options above.</Notice>}
-          {d.kind === "deadline_moved" && <div className="flex flex-wrap gap-2">
+          {isPlan && <div className="flex flex-wrap gap-2">
             <Button variant="primary" busy={reserve.busy} disabled={!rec || (plan === "best" ? rec.best : rec.alternative).chunks.length === 0} onClick={() => reserve.run()}>Reserve</Button>
             <Button onClick={() => { setDeferOpen((v) => !v); if (!until) setUntil(defaultUntil()); }} aria-expanded={deferOpen}>Defer</Button>
             <Button variant="ghost" busy={handled.busy} onClick={() => handled.run()}>Already handled</Button>
@@ -125,17 +126,18 @@ export function DecisionDrawer({ id, onClose }: { id: string; onClose: () => voi
       {result && <Notice tone="accent">{result}</Notice>}
       {!pending && <Notice tone="neutral" ><span data-testid="decision-state">{d.state === "accepted" ? "Done" : STATE_LABEL[d.state] ?? d.state}</span>{d.state === "deferred" && d.resolution?.until ? `. Comes back ${fmtDateTime(d.resolution.until)}. The original due date still stands.` : ""}{d.resolution?.action === "reserve" ? `. Reserved ${d.resolution.minutes} min as ${d.resolution.mode === "booked" ? "confirmed" : "proposed"} local blocks.` : ""}{d.resolution?.action === "handled" ? ". Evidence trail kept." : ""}</Notice>}
 
-      {d.kind === "deadline_moved" && <>
-        <section>
+      {isPlan && <>
+        {d.kind === "deadline_moved" && <section>
           <SectionTitle>What changed</SectionTitle>
           <div className="rounded-xl border border-line bg-bg p-4 flex items-center gap-3 flex-wrap">
             <Mono className="text-sm text-muted line-through">{fmtDateTime(ev.oldDue)}</Mono><ArrowRight className="size-4 text-amber" aria-hidden /><Mono className="text-sm font-semibold">{fmtDateTime(ev.newDue)}</Mono>
             <Badge tone="amber" className="ml-auto">{ev.label}</Badge>
           </div>
-        </section>
+        </section>}
         <section>
           <SectionTitle>Source</SectionTitle>
-          <Quote source={<>{ev.sourceTitle} · posted {fmtDateTime(ev.publishedAt)}</>}>{ev.quote}</Quote>
+          {ev.synthetic && <div className="mb-2"><Badge tone="amber">SYNTHETIC SOURCE EVENT (fixture)</Badge></div>}
+          <Quote source={<>{ev.sourceTitle} · {ev.captureId ? "captured" : "posted"} {fmtDateTime(ev.publishedAt)}</>}>{ev.quote}</Quote>
           <button onClick={() => setShowSources((v) => !v)} className="mt-2 text-[13px] text-accent flex items-center gap-1">{showSources ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}Both versions and copies</button>
           {showSources && <div className="mt-2 space-y-2">{task.loading && <Spinner />}{task.data?.sources.map((s: any) => (
             <div key={s.revision_id} className="rounded-lg border border-line p-2.5 text-[13px]"><div className="flex items-center gap-2 flex-wrap"><span className="font-medium">{s.title}</span>{s.duplicate_of && <Badge>duplicate copy</Badge>}{s.stale ? <Badge tone="amber">older, ignored</Badge> : null}<Mono className="text-[11px] text-muted ml-auto">{fmtDateTime(s.published_at)}</Mono></div><p className="text-muted mt-1 break-words">{s.excerpt}</p></div>

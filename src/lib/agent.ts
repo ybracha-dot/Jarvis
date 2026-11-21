@@ -8,6 +8,7 @@ import { Router, RouterError } from "./router";
 import { today, sourceHealth } from "./today";
 import { recentChanges } from "./ingest";
 import { emitDecision } from "./decisions";
+import { captureToJarvis, recallFromJarvis, CaptureInput } from "./capture";
 
 export interface Tool<S extends z.ZodType = z.ZodType> { name: string; description: string; schema: S; mutating: boolean; run(ctx: Ctx, args: z.output<S>): unknown }
 const empty = z.object({}).strict();
@@ -27,6 +28,11 @@ export const TOOLS: Tool[] = [
       const d = emitDecision(c, { dedupKey: `agent:${a.title}:${a.summary}`.slice(0, 200), taskId: a.taskId, kind: "agent_proposal", title: `Proposed: ${a.title}`, summary: a.summary, evidence: { quote: a.summary, sourceTitle: "Agent proposal", publishedAt: c.now().toISOString() }, options: [{ id: "handled", label: "Dismiss" }], expiresAt: null });
       return { id: d.id, created: d.created };
     } },
+  { name: "save_to_jarvis", description: "Save something the user explicitly asked Jarvis to remember. Returns a receipt with the stored id and a deep link. Replays are deduplicated. Saving never sends anything.",
+    schema: z.object({ text: z.string().min(3).max(4000), course: z.string().max(60).optional(), project: z.string().max(80).optional(), sourceRef: z.string().max(300).optional(), dedupKey: z.string().max(200).optional(), sourceKind: z.enum(["claude-chat", "claude-project", "mcp"]).optional(), synthetic: z.boolean().optional() }).strict(), mutating: true,
+    run: (c, a: any) => captureToJarvis(c, { ...a, sourceKind: a.sourceKind ?? "claude-chat", via: "mcp", delivery: "MCP tool call: save_to_jarvis" }) },
+  { name: "recall_from_jarvis", description: "Search what was saved to Jarvis (captures, commitments, study guides, notes). Searches saved records only, never a user's Claude chats.",
+    schema: z.object({ query: z.string().min(2).max(200) }).strict(), mutating: false, run: (c, a: any) => recallFromJarvis(c, a.query) },
 ];
 
 /** Roles and what they may call. The Blackboard monitor can read; it cannot propose or change anything. */

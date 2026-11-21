@@ -45,7 +45,7 @@ export function listDecisions(ctx: Ctx, states: string[] = ["pending"]) {
 export interface Recommendation { best: Plan; alternative: Plan; impact: string[]; displaced: { id: string; start: string; title: string }[] }
 
 export function recommendationFor(ctx: Ctx, decision: any): Recommendation | null {
-  if (decision.kind !== "deadline_moved" || !decision.task_id) return null;
+  if (!["deadline_moved", "commitment_plan"].includes(decision.kind) || !decision.task_id) return null;
   const task = get(ctx.db, "SELECT * FROM tasks WHERE id=? AND owner_id=?", decision.task_id, ctx.owner);
   if (!task || !task.due_at) return null;
   const now = ctx.now();

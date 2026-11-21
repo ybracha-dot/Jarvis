@@ -9,14 +9,14 @@ import { listCommitments } from "./commitments";
 import { latestCheckpoint } from "./resume";
 import { unreadCount, nextBriefAfter } from "./notify";
 
-export interface SourceHealth { provider: string; label: string; state: string; lastSuccessAt: string | null; lastAttemptAt: string | null; message: string | null; age: string; stale: boolean }
+export interface SourceHealth { provider: string; label: string; state: string; lastSuccessAt: string | null; lastAttemptAt: string | null; lastEventAt: string | null; nextCheckAt: string | null; gapReason: string | null; message: string | null; age: string; stale: boolean }
 
 export function sourceHealth(ctx: Ctx): SourceHealth[] {
   const now = ctx.now().getTime();
   return all(ctx.db, "SELECT * FROM source_status WHERE owner_id=? ORDER BY label", ctx.owner).map((s) => {
     const ageMs = s.last_success_at ? now - new Date(s.last_success_at as string).getTime() : null;
     return {
-      provider: s.provider as string, label: s.label as string, state: s.state as string, lastSuccessAt: s.last_success_at as string | null, lastAttemptAt: s.last_attempt_at as string | null,
+      provider: s.provider as string, label: s.label as string, state: s.state as string, lastSuccessAt: s.last_success_at as string | null, lastAttemptAt: s.last_attempt_at as string | null, lastEventAt: (s.last_event_at as string | null) ?? null, nextCheckAt: (s.next_check_at as string | null) ?? null, gapReason: (s.gap_reason as string | null) ?? null,
       message: s.message as string | null, age: ageMs == null ? "never verified" : fmtAge(ageMs), stale: ageMs != null && ageMs > 36 * 3600000,
     };
   });

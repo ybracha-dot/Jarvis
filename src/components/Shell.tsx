@@ -2,7 +2,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarClock, ListChecks, Target, CheckCheck, Brain, Sparkles, Users, MoreHorizontal, Search, Plus, Inbox, Settings, Plug, Mic, FolderInput, Activity, Bell, Command as CmdIcon, WifiOff, GitCompareArrows } from "lucide-react";
+import { CalendarClock, ListChecks, Target, CheckCheck, Brain, Sparkles, Users, MoreHorizontal, Search, Plus, Inbox, Settings, Plug, Mic, FolderInput, Activity, Bell, Command as CmdIcon, WifiOff, GitCompareArrows, Building2 } from "lucide-react";
 import { api, useQuery, useAction, ApiError } from "./api";
 import { Button, Badge, Drawer, Field, inputCls, cx, Mono, Notice, ErrorBox, Spinner, Empty } from "./ui";
 import { DecisionDrawer, DecisionList } from "./DecisionDrawer";
@@ -18,6 +18,7 @@ const NAV = [
   { href: "/memory", label: "Memory", icon: Brain },
   { href: "/skills", label: "Skills", icon: Sparkles },
   { href: "/council", label: "Council", icon: Users },
+  { href: "/office", label: "Office", icon: Building2 },
 ];
 const MORE = [
   { href: "/sources", label: "Sources and import", icon: FolderInput },
@@ -46,7 +47,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { sp, open, close } = useDrawerParams();
   const session = useQuery<any>("/session");
-  const today = useQuery<any>("/today");
+  const today = useQuery<any>("/today", { poll: 5000 });
   const [palette, setPalette] = useState(false);
   const [more, setMore] = useState(false);
   const [online, setOnline] = useState(true);
