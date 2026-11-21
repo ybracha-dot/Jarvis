@@ -120,11 +120,11 @@ export function replay(ctx: Ctx, name: FixtureName) {
   return out;
 }
 
-const TABLES = ["skill_uses", "skill_corrections", "skills", "council_sessions", "goal_observations", "goals", "checkpoints", "practice_results", "time_logs", "advisor_sources", "commitment_events", "commitments", "student_record", "deliveries", "inbox", "decisions", "requirements", "task_events", "task_due_history", "blocks", "tasks", "source_revisions", "source_status", "sources", "courses", "notes", "runs", "activity", "schedule_runs", "import_previews", "settings"];
+const TABLES = ["quiz_answers", "quiz_attempts", "document_versions", "documents", "messages", "conversations", "attachments", "job_events", "job_steps", "jobs", "specialist_templates", "captures", "skill_uses", "skill_corrections", "skills", "council_sessions", "goal_observations", "goals", "checkpoints", "practice_results", "time_logs", "advisor_sources", "commitment_events", "commitments", "student_record", "deliveries", "inbox", "decisions", "requirements", "task_events", "task_due_history", "blocks", "tasks", "source_revisions", "source_status", "sources", "courses", "notes", "runs", "activity", "schedule_runs", "import_previews", "settings"];
 
 /** Erase this workspace's data (not its watched inbox files). Demo reset and personal erase share this and each only touches its own directory. */
 export function wipe(ctx: Ctx) {
-  for (const d of ["vault", "skills"]) fs.rmSync(path.join(/*turbopackIgnore: true*/ modeDir(ctx.mode), d), { recursive: true, force: true });
+  for (const d of ["vault", "skills", "attachments"]) fs.rmSync(path.join(/*turbopackIgnore: true*/ modeDir(ctx.mode), d), { recursive: true, force: true });
   tx(ctx.db, () => { ctx.db.exec("DELETE FROM notes_fts"); for (const t of TABLES) ctx.db.exec(`DELETE FROM ${t}`); });
 }
 

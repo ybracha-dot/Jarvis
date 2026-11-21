@@ -30,3 +30,9 @@ Three pinned checkouts were fetched with the brief's sparse-checkout block into 
 ## Additional references (documentation only, not fetched into the repo)
 
 Chief-of-staff cookbook, Agent SDK for TypeScript, skill authoring best practices, Anthropic multi-agent architecture, Obsidian storage, BU Blackboard notification settings, Cowork scheduling, Claude Dispatch, Claude Voice, Claude Code cloud. Capability claims about these surfaces are written as setup guidance in `docs/SURFACES.md` and were not verified live from this build environment.
+
+## pixel-agents-hq/pixel-agents (design reference for the Office, added)
+
+- **License:** the repository's top-level `LICENSE` is MIT (Copyright (c) 2026 Pablo De Lucca). Read at `main`, not at a pinned revision.
+- **What was read:** only that license text. I did **not** read its code or look at its art, and I did **not** check the license of any pixel-art assets or tilesets, which can differ from the code license.
+- **What was reused:** nothing. The Office is an original SVG scene (`src/components/OfficeScene.tsx`). Sprites are drawn from rectangles in code, and the layout (Intake, Research, Planning and Decisions rooms, a supervisor desk, a door) is my own. Pixel Agents was only the idea that agents can be seen as characters at desks. If you later want to borrow its code or art, check the asset licenses first.

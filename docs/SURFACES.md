@@ -26,3 +26,17 @@ These are different products with different credentials, schedules and usage. Mi
 - **Real process:** `npm run worker`. It writes a heartbeat. The app says "Worker running" only while that heartbeat is fresh, and says "No worker is running" otherwise.
 - **Cowork alternative:** create a scheduled task that checks your mail connector and saves new Blackboard notification emails as `.eml` files into the watched folder shown on the Sources page. The worker or **Run now** then ingests them. This setup is described, not tested here.
 - An in-browser timer is not used and would not count.
+
+## Where the Office and its jobs run (added)
+
+| Piece | Where it runs | Needs a connected device? |
+|---|---|---|
+| Job queue and leases | the SQLite file in `data/<workspace>/` | No. It is just a file. |
+| **App-server runner** | inside `npm run dev` / `npm run start` | Only while that process is alive, which means your Mac awake and the app running. It writes a heartbeat the Office shows. |
+| **Worker** (`npm run worker`) | a separate process, any always-on machine with the repo and the same data folder | Yes: that machine must be on. For all-day use run it there. It also runs the 08:00 and 16:00 checks. |
+| Recovery | a restarted runner re-queues any job whose lease expired (default 15 s) and finishes it. Completed steps are not repeated | n/a |
+| Cowork / cloud | **not** used for the Office. A cloud session or a sleeping Mac cannot run these jobs or read your local data | n/a |
+
+Two runners can be up together. Leases stop them taking the same job. If neither is running, jobs wait and the Office says "No runner active".
+
+Voice and photos run in your browser plus this app's server. The server calls Claude directly for image reading and question writing (when a key and budget exist). Regular Claude Voice is a separate front door that can reach Jarvis only through the connector tools in `docs/CAPTURE-SETUP.md`. It was not tested here.

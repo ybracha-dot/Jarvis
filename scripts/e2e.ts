@@ -20,7 +20,8 @@ function startWorker(pace: number) {
   stopWorker();
   worker = spawn("npx", ["tsx", "scripts/worker.ts"], { env: { ...process.env, JARVIS_DATA_DIR: dataDir, JARVIS_JOB_PACE_MS: String(pace), JARVIS_JOB_LEASE_MS: "3000" }, stdio: "ignore", detached: true });
 }
-async function restartServer() { const d = dataDir!; stopWorker(); if (server?.pid) { try { process.kill(-server.pid, "SIGTERM"); } catch { /* gone */ } } await new Promise((r) => setTimeout(r, 1200)); await startServer(d); }
+let restarting = false;
+async function restartServer() { restarting = true; const d = dataDir!; stopWorker(); if (server?.pid) { try { process.kill(-server.pid, "SIGTERM"); } catch { /* gone */ } } await new Promise((r) => setTimeout(r, 1200)); await startServer(d); restarting = false; }
 function killServer() { stopWorker(); if (server?.pid) { try { process.kill(-server.pid, "SIGTERM"); } catch { /* already gone */ } } }
 const problems: string[] = [];
 const steps: string[] = [];
@@ -38,9 +39,9 @@ async function startServer(reuseDir?: string) {
 }
 
 function watch(page: Page, label: string) {
-  page.on("console", (m) => { if (m.type() === "error") { const t = m.text(); if (!/favicon/.test(t) && !problems.includes(`console(${label}): ${t}`)) problems.push(`console(${label}): ${t}`); } });
+  page.on("console", (m) => { if (m.type() === "error") { const t = m.text(); if (!(restarting && /ERR_CONNECTION_REFUSED/.test(t)) && !/favicon/.test(t) && !problems.includes(`console(${label}): ${t}`)) problems.push(`console(${label}): ${t}`); } });
   page.on("pageerror", (e) => problems.push(`pageerror(${label}): ${e.message}`));
-  page.on("requestfailed", (r) => { if (!/_next\/webpack-hmr|\.map$/.test(r.url()) && !/ERR_ABORTED/.test(r.failure()?.errorText ?? "")) problems.push(`requestfailed(${label}): ${r.url()} ${r.failure()?.errorText}`); });
+  page.on("requestfailed", (r) => { if (!/_next\/webpack-hmr|\.map$/.test(r.url()) && !/ERR_ABORTED/.test(r.failure()?.errorText ?? "") && !(restarting && /ERR_CONNECTION_REFUSED/.test(r.failure()?.errorText ?? ""))) problems.push(`requestfailed(${label}): ${r.url()} ${r.failure()?.errorText}`); });
   page.on("response", (r) => { if (r.status() >= 400 && !r.url().includes("/__expect")) problems.push(`http ${r.status()}(${label}): ${r.request().method()} ${r.url()}`); });
 }
 const shot = (page: Page, name: string) => page.screenshot({ path: path.join(SHOTS, name), fullPage: false });
@@ -514,7 +515,8 @@ async function journeyA11y(browser: Browser) {
     const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h } });
     const page = await ctx.newPage(); watch(page, `a11y-${vp.n}`);
     await post("/demo/reset", { confirm: "RESET DEMO" }); await post("/demo/replay", { name: "bulletin" });
-    for (const p of ["/", "/tasks", "/goals", "/completed", "/memory", "/skills", "/council", "/sources", "/voice", "/settings", "/activity"]) {
+    const gid = (await api("/courses/BI107")).documents.find((d: any) => /Final/.test(d.title))?.id;
+    for (const p of ["/", "/tasks", "/goals", "/completed", "/memory", "/skills", "/council", "/sources", "/voice", "/settings", "/activity", "/office", "/courses", "/courses/BI107", ...(gid ? [`/guides/${gid}`] : [])]) {
       await page.goto(base + p); await page.waitForLoadState("networkidle"); await scan(page, `${p} (${vp.n})`);
     }
     await page.goto(base + (vp.n === "phone" ? "/decisions" : "/")); await page.getByTestId("decision-card").first().waitFor();

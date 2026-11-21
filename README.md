@@ -29,7 +29,9 @@ The server binds to loopback only. It rejects other hosts and other origins on e
 2. Click that decision. Read the quote, both dates, the print requirement for articles 4, 13, 16 and 31, and **Both versions and copies**.
 3. Click **Reserve**. Two local blocks are created. They are not on Google Calendar.
 4. Refresh. The decision stays decided. Click **Replay update** again: nothing changes.
-5. Open **Council**, **Load the sample essay**, **Bring in the council**. Then type "You missed the printed excerpt last time." under **Correct Jarvis** and look at **Skills**.
+5. Open **Office**, press **Send as synthetic Claude message**, and watch a supervisor assign a helper and put one decision on your desk. Replay it: nothing doubles.
+6. Back on Today, use **Ask Jarvis**: tap the mic (or type), attach the two photos from `fixtures/bi107/`, send. See `docs/MAC-CHECKLIST.md`.
+7. Open **Council**, **Load the sample essay**, **Bring in the council**. Then type "You missed the printed excerpt last time." under **Correct Jarvis** and look at **Skills**.
 
 ## Commands
 
@@ -38,7 +40,9 @@ The server binds to loopback only. It rejects other hosts and other origins on e
 | `npm run verify` | typecheck, all tests, production build |
 | `npm test` | 75 tests: domain, API boundary, imports, scheduler, router, council, skills, MCP over stdio, Postgres RLS |
 | `npm run e2e` | real-browser journey (needs `npm run build` first). Saves screenshots to `docs/screenshots/` |
-| `npm run worker` | unattended scheduler with a heartbeat (checks 08:00 and 16:00 New York, weekly Sunday 15:00) |
+| `npm run worker` | unattended scheduler and job runner with a heartbeat (checks 08:00 and 16:00 New York, weekly Sunday 15:00; runs Office jobs) |
+| `npm run mcp:smoke -- <url> <token>` | smoke test for an authorized MCP connector (see docs/CAPTURE-SETUP.md) |
+| `npm run fixtures` | rewrite the two synthetic BI107 test photos in `fixtures/bi107/` |
 | `npm run mcp` | opt-in local MCP server over stdio |
 | `npm run reset-demo` | resets the example workspace only |
 

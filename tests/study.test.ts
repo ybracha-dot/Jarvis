@@ -315,3 +315,23 @@ describe("one front door", () => {
     expect(handleUtterance(ctx, { text: "make me a study guide", conversationId: conv }).reply.text).toMatch(/Which course/);
   });
 });
+
+describe("resetting the example workspace", () => {
+  it("clears jobs, captures, conversations, documents, quizzes and photos, so a reset starts from the true Monday state", async () => {
+    const dir = tmpDataDir(); closeDb("demo");
+    const { resetDemo } = await import("@/lib/demo"); const { captureToJarvis } = await import("@/lib/capture");
+    const ctx = makeCtx("demo"); seedDemo(ctx); ensureBi107(ctx);
+    const ph = FIXTURE_PHOTOS().map((p) => saveAttachment(ctx, { course: "BI107", name: p.name, bytes: p.bytes }));
+    captureToJarvis(ctx, { text: "Remember for Jarvis: I owe the TAMID team three pitch angles by Thursday.", sourceKind: "claude-chat" });
+    handleUtterance(ctx, { text: "make me a study guide for BI107", conversationId: getConversation(ctx, null, "BI107").id as string, attachmentIds: ph.map((p) => p.id) });
+    await processQueue(ctx, fast(ctx));
+    const id = get(ctx.db, "SELECT id FROM documents WHERE title='BI107 Final study guide'")!.id as string; startQuiz(ctx, { docId: id, mode: "all" });
+    expect(fs.readdirSync(path.join(dir, "demo", "attachments")).length).toBe(2);
+    resetDemo(ctx);
+    for (const t of ["jobs", "job_steps", "job_events", "captures", "conversations", "messages", "documents", "document_versions", "quiz_attempts", "quiz_answers", "attachments", "specialist_templates"]) expect(count(ctx, t), t).toBe(0);
+    expect(fs.existsSync(path.join(dir, "demo", "attachments"))).toBe(false);
+    seedDemo(ctx); ensureBi107(ctx);
+    expect(get(ctx.db, "SELECT current_version v FROM documents WHERE title='BI107 Midterm study guide'")!.v).toBe(1);   // not v2
+    closeDb("demo");
+  });
+});
