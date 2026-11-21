@@ -40,3 +40,30 @@ body { background: var(--color-bg); color: var(--color-fg); font-family: var(--f
 .office-char { transition: transform 900ms ease-in-out, opacity 600ms ease; cursor: pointer; transform-box: fill-box; }
 .office-char:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; }
 @media (prefers-reduced-motion: reduce) { .office-char { transition: none; } }
+
+/* Office scene */
+:root { --signal: #67d4ff; }
+.oc-walk .oc-legL { animation: oc-stepL .32s steps(2, jump-none) infinite; transform-box: fill-box; }
+.oc-walk .oc-legR { animation: oc-stepR .32s steps(2, jump-none) infinite; transform-box: fill-box; }
+.oc-walk .oc-body { animation: oc-bob .32s steps(2, jump-none) infinite; }
+.oc-type .oc-armL { animation: oc-tapL .42s steps(2, jump-none) infinite; transform-box: fill-box; }
+.oc-type .oc-armR { animation: oc-tapR .42s steps(2, jump-none) infinite; transform-box: fill-box; }
+.oc-read .oc-head { animation: oc-nod 1.8s ease-in-out infinite; transform-box: fill-box; }
+.oc-pop { animation: oc-pop 1.1s ease-out 1; transform-box: fill-box; transform-origin: center; }
+.oc-ask { animation: oc-ask 1.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.oc-flow { stroke-dasharray: 10 8; animation: oc-flow .7s linear infinite; }
+.oc-tick { animation: oc-pulse 1.6s ease-in-out infinite; }
+@keyframes oc-stepL { from { transform: translateY(0); } to { transform: translateY(-2px); } }
+@keyframes oc-stepR { from { transform: translateY(-2px); } to { transform: translateY(0); } }
+@keyframes oc-bob { from { transform: translateY(0); } to { transform: translateY(-1.5px); } }
+@keyframes oc-tapL { from { transform: translateY(0); } to { transform: translateY(-3px); } }
+@keyframes oc-tapR { from { transform: translateY(-3px); } to { transform: translateY(0); } }
+@keyframes oc-nod { 0%,100% { transform: translateY(0); } 50% { transform: translateY(2px); } }
+@keyframes oc-pop { from { transform: scale(.4); opacity: 1; } to { transform: scale(1.7); opacity: 0; } }
+@keyframes oc-ask { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes oc-flow { to { stroke-dashoffset: -18; } }
+@keyframes oc-pulse { 0%,100% { opacity: .55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .oc-walk .oc-legL, .oc-walk .oc-legR, .oc-walk .oc-body, .oc-type .oc-armL, .oc-type .oc-armR, .oc-read .oc-head, .oc-pop, .oc-ask, .oc-flow, .oc-tick { animation: none; }
+  .oc-pop { opacity: 0; }
+}

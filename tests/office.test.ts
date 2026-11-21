@@ -31,8 +31,8 @@ describe("capture through the Live Office", () => {
     expect(r.deepLink).toMatch(/\/tasks\?tab=followups&focus=cmt_/);
     expect(count(ctx, "commitments", "action='three pitch angles'")).toBe(1);   // saved immediately
     await processQueue(ctx, base(ctx, clock));
-    const jobs = all(ctx.db, "SELECT * FROM jobs ORDER BY depth");
-    expect(jobs.map((j) => [j.kind, j.status, j.depth])).toEqual([["supervise_capture", "done", 0], ["capture_planner", "done", 1]]);
+    const jobs = all(ctx.db, "SELECT * FROM jobs ORDER BY depth, rowid");
+    expect(jobs.map((j) => [j.kind, j.status, j.depth])).toEqual([["supervise_capture", "done", 0], ["capture_planner", "done", 1], ["capture_reviewer", "done", 1]]);
     expect(jobs[1].parent_id).toBe(jobs[0].id);
     expect(jobs[1].delegated_by).toMatch(/Handle:/);
     expect(JSON.parse(jobs[1].evidence_ids as string)).toEqual([r.id]);
@@ -60,7 +60,7 @@ describe("capture through the Live Office", () => {
     captureToJarvis(ctx, { text: TAMID, sourceKind: "claude-chat", synthetic: true });
     // worker A crashes right after creating the task (before the decision)
     await processQueue(ctx, base(ctx, clock, { workerId: "A", crashAfterStep: "task" }));
-    const mid = all(ctx.db, "SELECT kind,status,lease_owner FROM jobs ORDER BY depth");
+    const mid = all(ctx.db, "SELECT kind,status,lease_owner FROM jobs ORDER BY depth, rowid");
     expect(mid[1]).toMatchObject({ kind: "capture_planner", status: "running", lease_owner: "A" });
     expect(count(ctx, "decisions", "kind='commitment_plan'")).toBe(0);
     // before the lease expires, nobody else can take it
@@ -68,8 +68,8 @@ describe("capture through the Live Office", () => {
     tick(2000);   // lease expires
     expect(recoverStale(ctx, clock)).toBeGreaterThanOrEqual(0);
     await processQueue(ctx, base(ctx, clock, { workerId: "B" }));
-    const end = all(ctx.db, "SELECT kind,status,attempts FROM jobs ORDER BY depth");
-    expect(end.map((j) => j.status)).toEqual(["done", "done"]);
+    const end = all(ctx.db, "SELECT kind,status,attempts FROM jobs ORDER BY depth, rowid");
+    expect(end.map((j) => j.status)).toEqual(["done", "done", "done"]);
     expect(end[1].attempts).toBe(2);
     expect(count(ctx, "decisions", "kind='commitment_plan'")).toBe(1);
     expect(count(ctx, "commitments", "action='three pitch angles'")).toBe(1);
@@ -181,6 +181,42 @@ describe("authenticated MCP connector (real SDK client over Streamable HTTP, in 
     expect(bad.isError).toBe(true);
     await client.close();
     delete process.env.JARVIS_MCP_TOKEN;
+  });
+});
+
+describe("verification loop", () => {
+  const sabotage = (ctx: any, times: number) => { let n = 0; return { ...HANDLERS, capture_planner: async (api: any) => { const r = await (HANDLERS.capture_planner as any)(api); if (n++ < times) { const t = get(ctx.db, "SELECT task_id FROM captures WHERE id=?", api.input.captureId)!.task_id; ctx.db.exec(`UPDATE captures SET task_id=NULL WHERE id='${api.input.captureId}'`); ctx.db.exec(`DELETE FROM tasks WHERE id='${t}'`); } return r; } }; };
+  it("the reviewer checks the artifact, and the decision carries the verification receipt", async () => {
+    const { ctx, clock } = fresh();
+    captureToJarvis(ctx, { text: TAMID, sourceKind: "claude-chat", synthetic: true });
+    await processQueue(ctx, base(ctx, clock));
+    const rev = all(ctx.db, "SELECT * FROM jobs WHERE kind='capture_reviewer'")[0];
+    expect(JSON.parse(rev.result as string)).toMatchObject({ verdict: "verified", problems: [] });
+    const dec = listDecisions(ctx).find((d) => d.kind === "commitment_plan")!;
+    expect(dec.evidence.verification.map((c: any) => c.ok)).toEqual([true, true, true]);
+    const o = officeState(ctx, clock).jobs;
+    expect(o.find((j) => j.kind === "capture_reviewer")!.needsYou).toMatchObject({ kind: "decision", decisionId: dec.id });   // who needs you: the reviewer
+    expect(o.find((j) => j.kind === "capture_planner")!.needsYou).toBeNull();
+    expect(o.find((j) => j.kind === "supervise_capture")!.needsYou).toBeNull();
+    expect(o.find((j) => j.kind === "capture_planner")!.parentRole).toBe("Supervisor");
+  });
+  it("a gap sends the work back once, then verifies", async () => {
+    const { ctx, clock } = fresh();
+    captureToJarvis(ctx, { text: TAMID, sourceKind: "claude-chat", synthetic: true });
+    await processQueue(ctx, base(ctx, clock, { handlers: sabotage(ctx, 1) }));
+    expect(all(ctx.db, "SELECT kind FROM jobs ORDER BY depth, rowid").map((j) => j.kind)).toEqual(["supervise_capture", "capture_planner", "capture_reviewer", "capture_planner", "capture_reviewer"]);
+    expect(count(ctx, "decisions", "kind='commitment_plan'")).toBe(1);
+    expect(listDecisions(ctx).find((d) => d.kind === "commitment_plan")!.summary).not.toMatch(/problem/);
+    expect(all(ctx.db, "SELECT kind FROM job_events WHERE kind='retry'").length).toBe(1);
+  });
+  it("a gap that survives the retry is handed to you plainly, not hidden", async () => {
+    const { ctx, clock } = fresh();
+    captureToJarvis(ctx, { text: TAMID, sourceKind: "claude-chat", synthetic: true });
+    await processQueue(ctx, base(ctx, clock, { handlers: sabotage(ctx, 2) }));
+    const d = listDecisions(ctx).find((x) => x.kind === "commitment_plan")!;
+    expect(d.summary).toMatch(/found a problem I could not fix/);
+    expect(count(ctx, "jobs", "kind='capture_reviewer'")).toBe(2);        // bounded: two rounds, never a loop
+    expect(all(ctx.db, "SELECT status FROM jobs").every((j) => j.status === "done")).toBe(true);
   });
 });
 

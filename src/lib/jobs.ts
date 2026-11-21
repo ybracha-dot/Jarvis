@@ -6,7 +6,7 @@ import { Ctx, all, get, run, tx, uid } from "./db";
 
 export type JobStatus = "queued" | "running" | "waiting" | "blocked" | "done" | "failed" | "cancelled";
 export const TERMINAL: JobStatus[] = ["done", "failed", "cancelled"];
-export type Area = "supervisor" | "intake" | "research" | "planning" | "decisions";
+export type Area = "supervisor" | "intake" | "research" | "planning" | "review" | "decisions";
 
 export const LIMITS = { maxDepth: 2, maxChildrenPerParent: 4, maxRunning: 4 };
 
@@ -212,6 +212,12 @@ export function cancelJob(ctx: Ctx, id: string, clock: Clock = real): number {
 export const jobEvents = (ctx: Ctx, jobId: string, limit = 12) =>
   all(ctx.db, "SELECT at,kind,summary FROM job_events WHERE job_id=? ORDER BY id DESC LIMIT ?", jobId, limit).reverse();
 
+function needsYou(ctx: Ctx, j: any): { kind: "question" | "decision"; text: string; decisionId?: string } | null {
+  if (j.status === "blocked") return { kind: "question", text: j.result?.ask?.question ?? j.error ?? "Needs your answer" };
+  const id = j.status === "done" && j.area !== "supervisor" ? j.result?.decisionId : null;
+  if (id) { const d = get(ctx.db, "SELECT title FROM decisions WHERE id=? AND owner_id=? AND state='pending'", id, ctx.owner); if (d) return { kind: "decision", text: d.title as string, decisionId: id }; }
+  return null;
+}
 export function officeState(ctx: Ctx, clock: Clock = real) {
   const now = clock().getTime();
   const rows = all(ctx.db, "SELECT * FROM jobs WHERE owner_id=? AND (finished_at IS NULL OR finished_at>?) ORDER BY created_at", ctx.owner, now - 6 * 3600_000).map(parseJob);
@@ -225,6 +231,9 @@ export function officeState(ctx: Ctx, clock: Clock = real) {
     synthetic: !!j.synthetic, result: j.result, error: j.error, finishedAgoMs: j.finished_at ? now - j.finished_at : null,
     steps: all(ctx.db, "SELECT step,label FROM job_steps WHERE job_id=? ORDER BY done_at", j.id).map((s) => s.label),
     events: jobEvents(ctx, j.id, 10),
+    createdAgoMs: now - j.created_at, parentRole: j.parent_id ? byId.get(j.parent_id)?.role ?? null : null,
+    // Who needs you: a helper stopped on a question, or a finished helper whose decision you have not answered yet.
+    needsYou: needsYou(ctx, j),
   }));
   void byId;
   const active = jobs.filter((j) => !TERMINAL.includes(j.status as JobStatus));
