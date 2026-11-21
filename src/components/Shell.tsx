@@ -75,8 +75,8 @@ function ShellInner({ children }: { children: React.ReactNode }) {
       <header className="h-12 shrink-0 border-b border-line flex items-center gap-3 px-3 md:px-4 bg-bg/80 backdrop-blur sticky top-0 z-30">
         <Link href="/" className="md:hidden font-semibold tracking-tight">Jarvis</Link>
         <div className="flex items-center gap-2 min-w-0" data-testid="workspace-badge">
-          {demo ? <Badge tone="amber">EXAMPLE WORKSPACE</Badge> : <Badge tone="accent">PRIVATE WORKSPACE</Badge>}
-          {t && <Mono className="text-[12px] text-muted truncate">{demo ? "Demo clock " : ""}{fmtDateTime(t.now)}</Mono>}
+          {demo ? <Badge tone="amber" className="whitespace-nowrap"><span className="hidden sm:inline">EXAMPLE WORKSPACE</span><span className="sm:hidden">EXAMPLE</span></Badge> : <Badge tone="accent" className="whitespace-nowrap"><span className="hidden sm:inline">PRIVATE WORKSPACE</span><span className="sm:hidden">PRIVATE</span></Badge>}
+          {t && <><Mono className="hidden sm:inline text-[12px] text-muted truncate">{demo ? "Demo clock " : ""}{fmtDateTime(t.now)}</Mono><Mono className="sm:hidden text-[12px] text-muted whitespace-nowrap">{localHM(t.now)}</Mono></>}
         </div>
         <div className="flex-1" />
         <button onClick={() => setPalette(true)} aria-label="Open command palette" className="hidden sm:flex items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[13px] text-muted hover:text-fg w-56">
@@ -84,7 +84,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         </button>
         <button onClick={() => setPalette(true)} aria-label="Open command palette" className="sm:hidden p-2 text-muted"><Search className="size-4" /></button>
         <button onClick={() => open("connections")} aria-label="Connections and health" className="p-2 rounded-md text-muted hover:text-fg hover:bg-surface2"><Plug className="size-4" /></button>
-        <Button size="sm" variant="ghost" busy={switchMode.busy} onClick={() => switchMode.run()} className="hidden md:inline-flex">{demo ? "Open private workspace" : "Back to example"}</Button>
+        <div className="hidden md:block"><Button size="sm" variant="ghost" busy={switchMode.busy} onClick={() => switchMode.run()}>{demo ? "Open private workspace" : "Back to example"}</Button></div>
       </header>
 
       <div className="flex-1 flex min-h-0">

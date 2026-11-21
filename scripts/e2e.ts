@@ -434,6 +434,7 @@ async function journeyMobile(browser: Browser) {
   ok(!!box && box.width <= 391 && box.x >= -1, `drawer fits the phone (${box?.width}px)`);
   ok((await overflow()) <= 0, "drawer has no horizontal scroll");
   await dlg.evaluate((el) => { const s = el.querySelector(".overflow-y-auto"); if (s) s.scrollTop = 400; });
+  await page.waitForTimeout(400);
   await shot(page, "11-decision-drawer-mobile.png");
   const reserve = dlg.getByRole("button", { name: "Reserve", exact: true });
   ok(await reserve.isVisible(), "Reserve stays reachable while scrolled (sticky footer)");

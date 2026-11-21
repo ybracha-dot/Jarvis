@@ -77,15 +77,15 @@ export function applyPractice(ctx: Ctx, examTaskId: string, area: string, correc
       const extraId = createTask(ctx, {
         courseExternalId: exam.course_ext as string, externalId: `${exam.external_id}-retry-${area.replace(/\W+/g, "-")}-${correct}of${total}-${Date.now() % 100000}`,
         title: `Retry: ${area}`, kind: "practice", effortMinutes: 30, dueAt: parseLocal(addDays(localDate(ctx.now()), 3), "00:00").toISOString(), parentId: examTaskId,
-        milestone: `Solve 5 more ${area} problems unaided. Last result: ${correct}/${total}. Target: 4 of 5.`, meta: { area, retry: true },
+        milestone: `Solve 5 more problems on ${area}, unaided. Last result: ${correct}/${total}. Target: 4 of 5.`, meta: { area, retry: true },
       });
       const slot = findSlot(ctx, addDays(localDate(ctx.now()), 2), 30, ctx.now(), localDate(exam.due_at as string));
       if (slot) run(ctx.db, `INSERT OR IGNORE INTO blocks(id,owner_id,start_at,end_at,tz,kind,title,task_id,source,idempotency_key,sync,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
         uid("blk"), ctx.owner, slot.start, slot.end, "America/New_York", "proposed", `Retry: ${area}`, extraId, "jarvis", `study:${extraId}`, "local-only", ctx.now().toISOString());
-      effect = `${area} is at ${correct}/${total}. Added a 30 min retry${slot ? ` on ${fmtDateTime(slot.start)}` : ""}${next ? ` and kept "${next.title}" unchanged` : ""}.`;
+      effect = `Scored ${correct}/${total}. Added a 30 min retry${slot ? ` on ${fmtDateTime(slot.start)}` : ""}${next ? ` and kept "${next.title}" unchanged` : ""}.`;
     } else {
-      if (next) run(ctx.db, "UPDATE tasks SET milestone=?, effort_minutes=MAX(20, effort_minutes-15) WHERE id=?", `Maintenance: solve 3 ${area} problems unaided. Last result: ${correct}/${total}.`, next.id);
-      effect = `${area} is at ${correct}/${total}. ${next ? `"${next.title}" is now a shorter maintenance session.` : "No later session to shorten."}`;
+      if (next) run(ctx.db, "UPDATE tasks SET milestone=?, effort_minutes=MAX(20, effort_minutes-15) WHERE id=?", `Maintenance: solve 3 problems on ${area}, unaided. Last result: ${correct}/${total}.`, next.id);
+      effect = `Scored ${correct}/${total}. ${next ? `"${next.title}" is now a shorter maintenance session.` : "No later session to shorten."}`;
     }
     addTaskEvent(ctx, examTaskId, "practice_result", `${area}: ${correct}/${total}. ${effect}`, { area, correct, total });
     return { mastery, effect };

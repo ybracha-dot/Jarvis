@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { Square, ChevronDown, ChevronRight, Lightbulb, Plus, X } from "lucide-react";
-import { api, useQuery, useAction } from "@/components/api";
+import { api, useQuery, useAction, invalidate } from "@/components/api";
 import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Empty, Notice, Field, inputCls, cx, Quote } from "@/components/ui";
 
 const SEV: Record<string, "danger" | "amber" | "neutral" | "accent"> = { high: "danger", medium: "amber", low: "neutral", info: "accent" };
@@ -72,7 +72,7 @@ function Session({ id, onRerun }: { id: string; onRerun: () => void }) {
   const q = useQuery<any>(`/council/${id}`, { poll: live ? 600 : 0 });
   const cancel = useAction(async () => { await api(`/council/${id}/cancel`, { body: {} }); });
   const s = q.data;
-  useEffect(() => { if (s && s.status !== "running") setLive(false); else if (s) setLive(true); }, [s?.status]);
+  useEffect(() => { if (s && s.status !== "running") { setLive(false); invalidate(); } else if (s) setLive(true); }, [s?.status, s?.id]);
   const [hear, setHear] = useState(false);
   if (q.loading && !s) return <Spinner label="Starting council" />;
   if (q.error && !s) return <ErrorBox error={q.error} onRetry={q.reload} />;
