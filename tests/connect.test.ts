@@ -81,3 +81,51 @@ describe("ordinary-Claude emulation over the authenticated route", () => {
     expect(probeState(ctx)).toMatchObject({ complete: true, read: { sawMarker: true } });
   });
 });
+
+import { loadWorkspaceFixtures } from "@/lib/workspace-fixtures";
+import { handleUtterance } from "@/lib/study-guide";
+import { processQueue } from "@/lib/jobs";
+import { HANDLERS } from "@/lib/handlers";
+describe("the same work from ordinary Claude (official MCP client over the authenticated route, simulated Claude)", () => {
+  const work = async (ctx: any) => { let t = 1_000_000; await processQueue(ctx, { workerId: "w", handlers: HANDLERS, clock: () => new Date(t), leaseMs: 1000 }); };
+  const PITCH = "Pick up where we left off on the pitch and draft my follow-up.";
+  it("submit from Claude, return a receipt at once, retrieve the finished result in a fresh chat, with links that open the same records", async () => {
+    const ctx = fresh(); loadWorkspaceFixtures(ctx); const t = createToken(ctx, { label: "Claude" });
+    const s = await connect(t.token);
+    const rc = (await s.call("submit_goal", { text: PITCH, dedupKey: "chat-9:msg-1" })).json;
+    expect(rc).toMatchObject({ status: "queued", ready: false, duplicate: false }); expect(rc.links.result).toMatch(/^\/results\/res_/);
+    expect((await s.call("get_goal", { requestId: rc.requestId })).json).toMatchObject({ ready: false, plain: expect.stringMatching(/Waiting|Working/) });   // the receipt returned before any work ran
+    expect((await s.call("submit_goal", { text: PITCH, dedupKey: "chat-9:msg-1" })).json).toMatchObject({ duplicate: true, requestId: rc.requestId });
+    await work(ctx);
+    await s.client.close(); const fresh2 = await connect(t.token);                                                    // a brand new Claude chat
+    const res = (await fresh2.call("get_result", { id: rc.resultId })).json;
+    expect(res).toMatchObject({ kind: "draft", version: 1, requestRevision: 1, ready: true }); expect(res.body).toMatch(/Wednesday, [A-Z][a-z]{2} \d{1,2}/); expect(res.body).not.toMatch(/Confirming Friday|50,000/);
+    expect(res.sources.find((x: any) => x.role === "confirms the date")).toMatchObject({ stillAvailable: true, url: expect.stringMatching(/\/evidence\/ev_/) });
+    expect(res.flags.map((f: any) => f.kind)).toEqual(expect.arrayContaining(["older_proposal", "unsupported_figure"]));
+    const hits = (await fresh2.call("search_evidence", { query: "Confirming Wednesday sponsor follow-up" })).json.hits; expect(hits.map((h: any) => h.title)).toContain("Re: Lantern Club sponsor pitch follow-up"); expect(JSON.stringify(hits)).not.toMatch(/Sam Ortiz|50,000/);
+  });
+  it("start by voice, close the tab, then change it from Claude: one request, one current draft, the instruction applied, a late old result refused", async () => {
+    const ctx = fresh(); loadWorkspaceFixtures(ctx); const t = createToken(ctx, { label: "Claude" });
+    const voice: any = handleUtterance(ctx, { text: PITCH, via: "voice" }); await work(ctx);                           // simulated microphone: the page is then closed
+    const s = await connect(t.token);
+    const listed = (await s.call("get_goal", {})).json.goals; expect(listed).toHaveLength(1); const rid = listed[0].requestId; expect(rid).toBe(voice.reply.data.requestId);
+    const rev = (await s.call("revise_goal", { requestId: rid, instruction: "Use the Wednesday decision and keep it to three sentences.", dedupKey: "m-2" })).json; expect(rev.revision).toBe(2);
+    expect((await s.call("revise_goal", { requestId: rid, instruction: "Use the Wednesday decision and keep it to three sentences.", dedupKey: "m-2" })).json.replay).toBe(true);
+    await work(ctx);
+    const res = (await s.call("get_result", { id: rid })).json;
+    expect(res).toMatchObject({ version: 2, requestRevision: 2, applied: ["Keep it to 3 sentences", "Use the wednesday decision"] });
+    expect(all(ctx.db, "SELECT COUNT(*) n FROM results")[0].n).toBe(1);
+    const { saveResult } = await import("@/lib/assistant");
+    expect(saveResult(ctx, { requestId: rid, revision: 1, title: "old", body: "OLD", summary: "o", sources: [], flags: [], unavailable: [], kind: "draft", projectId: null })).toMatchObject({ discarded: true });
+    expect((await s.call("get_result", { id: rid })).json.body).not.toContain("OLD");
+    const tools = (await s.client.listTools()).tools.map((x) => x.name); expect(tools.some((n) => /send|email|post|publish/.test(n))).toBe(false);   // nothing can be sent
+  });
+  it("a read-only token can retrieve results but cannot submit, revise, cancel or share; share_excerpt becomes a citable, forgettable source", async () => {
+    const ctx = fresh(); loadWorkspaceFixtures(ctx); const ro = createToken(ctx, { label: "ro", scopes: ["read"] }); const rw = createToken(ctx, { label: "rw" });
+    const r = await connect(ro.token); expect((await r.call("submit_goal", { text: PITCH })).isError).toBe(true); expect((await r.call("share_excerpt", { excerpt: "A".repeat(20), origin: "Chat" })).isError).toBe(true);
+    expect((await r.call("get_result", {})).isError).toBe(false);
+    const w = await connect(rw.token); const sh = (await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "Lantern Club", dedupKey: "x1" })).json;
+    expect(sh).toMatchObject({ saved: true }); expect((await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "Lantern Club", dedupKey: "x1" })).json.unchanged).toBe(true);
+    expect((await w.call("search_evidence", { query: "pilot checkpoint venue" })).json.hits[0].source).toMatch(/Shared from Claude/);
+  });
+});

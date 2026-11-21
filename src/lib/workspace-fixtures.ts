@@ -7,6 +7,8 @@ import { addDays, localDate, parseLocal, DEFAULT_TZ } from "./time";
 
 const OTHER_OWNER = "other-owner";
 const atDay = (ctx: Ctx, daysAgo: number, hm = "10:00") => parseLocal(addDays(localDate(ctx.now()), -daysAgo), hm, DEFAULT_TZ).toISOString();
+/** The most recent given weekday strictly before today (0 = Sunday), so the story reads the same whatever day it is loaded. */
+const lastWeekday = (ctx: Ctx, wd: number) => { let d = addDays(localDate(ctx.now()), -1); while (new Date(`${d}T12:00:00Z`).getUTCDay() !== wd) d = addDays(d, -1); return d; };
 
 export function loadWorkspaceFixtures(ctx: Ctx, o: { calendar?: boolean } = {}) {
   setSetting(ctx.db, "owner_name", "Yonathan");
@@ -17,7 +19,7 @@ export function loadWorkspaceFixtures(ctx: Ctx, o: { calendar?: boolean } = {}) 
   const notices = registerSource(ctx, { kind: "notice", label: "Course notice emails (fixture)", mode: "fixture" });
   const portal = registerSource(ctx, { kind: "portal", label: "Blackboard portal", mode: "unavailable", state: "needs_signin", message: "Needs your sign-in (Duo) on this computer. Until then Jarvis reads notification emails, the course calendar feed or files you export." });
   void portal;
-  ingestItem(ctx, { sourceId: meet.id, externalId: "sync-1", kind: "transcript", title: "Lantern Club sponsor pitch sync", author: "Dana Reyes", participants: ["Dana Reyes", "Yonathan"], at: atDay(ctx, 6), projectId: project.id,
+  ingestItem(ctx, { sourceId: meet.id, externalId: "sync-1", kind: "transcript", title: "Lantern Club sponsor pitch sync", author: "Dana Reyes", participants: ["Dana Reyes", "Yonathan"], at: parseLocal(addDays(lastWeekday(ctx, 5), -3), "10:00", DEFAULT_TZ).toISOString(), projectId: project.id,
     body: [
       "[00:00:41] Dana Reyes: Thanks for joining. Let's follow up with the sponsors soon, because they asked for the revised budget before demo day.",
       "[00:01:12] Yonathan: I'll draft the follow-up and send it to Dana for review.",
@@ -25,7 +27,7 @@ export function loadWorkspaceFixtures(ctx: Ctx, o: { calendar?: boolean } = {}) 
       "[00:02:05] Dana Reyes: I'll book the room and confirm the attendee list.",
       "[00:02:40] Yonathan: We have about 40 members, so the room needs to be big.",
     ].join("\n") });
-  ingestItem(ctx, { sourceId: mail.id, externalId: "re-follow-up", kind: "email", title: "Re: Lantern Club sponsor pitch follow-up", author: "Dana Reyes", participants: ["Dana Reyes", "Yonathan"], at: atDay(ctx, 3, "16:20"), projectId: project.id,
+  ingestItem(ctx, { sourceId: mail.id, externalId: "re-follow-up", kind: "email", title: "Re: Lantern Club sponsor pitch follow-up", author: "Dana Reyes", participants: ["Dana Reyes", "Yonathan"], at: parseLocal(lastWeekday(ctx, 5), "16:20", DEFAULT_TZ).toISOString(), projectId: project.id,
     body: "Hi Yonathan,\nConfirming Wednesday for the sponsor follow-up. We moved it from Monday since Priya is out.\nPlease mention the club's 40 members and that we are asking sponsors for $12,000.\nThanks, Dana" });
   // A same-name look-alike that belongs to someone else. It must never be read, quoted or counted.
   const other = makeCtx(ctx.mode, { db: ctx.db, owner: OTHER_OWNER, now: ctx.now });

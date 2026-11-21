@@ -28,7 +28,7 @@ async function handle(req: Request): Promise<Response> {
   else return deny(401, "Missing, wrong, expired or revoked bearer token");
   if (rateLimited(rateKey)) return deny(429, "Too many requests. Slow down.");
   if (req.method !== "POST") return Response.json({ error: "Use POST" }, { status: 405 });
-  const server = buildMcpServer(mode, (name) => { if (name === "save_to_jarvis") kick(mode); }, scopes);
+  const server = buildMcpServer(mode, (name) => { if (["save_to_jarvis", "submit_goal", "revise_goal", "resume_goal", "share_excerpt"].includes(name)) kick(mode); }, scopes);
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return transport.handleRequest(req);
