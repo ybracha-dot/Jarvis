@@ -665,6 +665,68 @@ async function journeyPlan(page: Page, browser: Browser) {
   ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole run made zero model calls");
 }
 
+async function journeyShuttle(browser: Browser) {
+  step("Field-test regression through /try: work out X and draft Y, then the same with an input missing");
+  const NOTE = "Archive shuttle on December 4: 23 volunteers must arrive by 10:30. One van has eight passenger seats. It takes 20 minutes to drive from campus to the archive and 20 minutes to drive back. There is no loading time. Jo originally offered an 08:40 departure from campus.";
+  const UPDATE = "Update for the December 4 archive shuttle: the earliest departure from campus is now 09:00. This replaces the 08:40 departure. The capacity, travel times and arrival deadline are unchanged.";
+  const REQ = "Can one van get everyone to the archive by 10:30? Show when the last group arrives and draft a short reply to Jo.";
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
+  const p = await ctx.newPage(); watch(p, "shuttle"); startWorker(300);
+  const run = async (project: string, note: string, update: string, req = REQ) => {
+    await p.goto(base + "/try"); await p.getByTestId("try-privacy").waitFor();
+    await p.getByTestId("try-project").fill(project); await p.getByTestId("try-title").fill("Archive shuttle"); await p.getByTestId("try-text").fill(note); await p.getByTestId("try-save1").click(); await p.getByText(/local-only/).first().waitFor();
+    await p.getByTestId("try-correction").fill(update); await p.getByTestId("try-save2").click(); await p.getByText(/Saved as a correction/).waitFor();
+    await p.getByTestId("try-question").fill(req); await p.getByTestId("try-ask").click(); await p.getByTestId("try-done").waitFor({ timeout: 40000 });
+    await p.getByTestId("try-open-result").click(); await p.getByTestId("result-body").waitFor();
+  };
+  await run("Archive shuttle", NOTE, UPDATE);
+  const body = await p.getByTestId("result-body").innerText();
+  ok(/misses 10:30 by 10 minutes/.test(body) && /09:20, 10:00, 10:40 \(8, 8, 7 people\)/.test(body), "the answer says one van misses 10:30 by 10 minutes and gives the three arrival times");
+  ok(!/sources do not yet settle a date|recipient not identified/.test(body), "the old template wording is gone");
+  const draft = await p.getByTestId("draft-text").inputValue();
+  ok(/^Hi Jo,/.test(draft) && /last 7 would arrive at 10:40/.test(draft) && /leave at 08:50 or earlier, or arrange another vehicle/.test(draft), "the draft is addressed to Jo and uses the computed 10:40, 08:50 and extra-vehicle options");
+  const parts = await p.getByTestId("requested-part").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")));
+  ok(parts.length === 3 && parts.every((x) => x === "done") && (await p.getByTestId("partly-done").count()) === 0, "all three requested parts show as done");
+  const calc = (await p.getByTestId("calculation").textContent()) ?? "";
+  ok(/23 people ÷ 8 seats = 2\.88/.test(calc) && /3 outbound legs and 2 returns/.test(calc) && /09:00/.test(calc) && /08:40/.test(calc) && /replaced by 09:00/.test(calc), "the calculation shows the division, the legs, and 08:40 replaced by 09:00");
+  const src = await p.getByTestId("result-sources").innerText(); ok(/Correction to Archive shuttle/.test(src) && /Notes I imported/.test(src) && /“One van has eight passenger seats\.”/.test(src), "inputs cite the original note and the correction, each with its quote");
+  ok(/Finished/.test(await p.getByTestId("result-status").innerText()) && !/only partly/.test(await p.getByTestId("result-status").innerText()), "the job status says finished");
+  await shot(p, "44-shuttle-desktop.png");
+  const m = await ctx.newPage(); await m.setViewportSize({ width: 390, height: 844 }); await m.goto(p.url()); await m.getByTestId("result-body").waitFor(); ok((await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0, "the result has no horizontal scroll on the phone"); await m.close();
+  // The same request with the return duration removed from every source: partial work, named gap, honest status.
+  // Same private workspace, so forget the first run's notes through the API first: the missing input must be missing everywhere.
+  const items = (await (await p.request.get(base + "/api/evidence/items")).json()).items as { id: string }[];
+  for (const it of items) await p.request.post(`${base}/api/evidence/items/${it.id}/forget`, { data: { confirm: true }, headers: { origin: base } });
+  await run("Archive shuttle B", NOTE.replace(" and 20 minutes to drive back", ""), UPDATE.replace("Update for", "Second update for"), REQ + " Thanks.");   // a different wording: the same text would be treated as a duplicate of the first request
+  const body2 = await p.getByTestId("result-body").innerText();
+  ok(/drive back time was not found/.test(body2) && /15 minutes or less/.test(body2), "with the return time missing the answer is conditional and gives the break-even");
+  ok(/How long does the drive back take\?/.test(await p.getByTestId("draft-text").inputValue()), "the draft asks for the missing input instead of stating a number it does not have");
+  const parts2 = await p.getByTestId("requested-part").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")));
+  ok(parts2.length === 3 && parts2.every((x) => x === "partial") && (await p.getByTestId("partly-done").count()) === 1, "every part shows as partly done and the result says so");
+  ok(/only partly done: 0 of 3/.test(await p.getByTestId("result-status").innerText()), "the job status says it finished only partly");
+  await shot(p, "45-shuttle-partial-desktop.png");
+  // A fresh example that is not about transport: an agenda against a room booking. Then a kind of calculation Jarvis does not have.
+  const forgetAll = async () => { const its = (await (await p.request.get(base + "/api/evidence/items")).json()).items as { id: string }[]; for (const it of its) await p.request.post(`${base}/api/evidence/items/${it.id}/forget`, { data: { confirm: true }, headers: { origin: base } }); };
+  const ask2 = async (project: string, title: string, note: string, update: string, req: string) => {
+    await forgetAll(); await p.goto(base + "/try"); await p.getByTestId("try-privacy").waitFor();
+    await p.getByTestId("try-project").fill(project); await p.getByTestId("try-title").fill(title); await p.getByTestId("try-text").fill(note); await p.getByTestId("try-save1").click(); await p.getByTestId("try-step1").getByText(/Saved\./).waitFor();
+    await p.getByTestId("try-correction").fill(update); await p.getByTestId("try-save2").click(); await p.getByText(/Saved as a correction/).waitFor();
+    await p.getByTestId("try-question").fill(req); await p.getByTestId("try-ask").click(); await p.getByTestId("try-done").waitFor({ timeout: 40000 }); await p.getByTestId("try-open-result").click(); await p.getByTestId("result-body").waitFor();
+  };
+  await ask2("Board meeting", "Board meeting agenda", "Board meeting on March 3 in the library room. The agenda has four items: budget review takes 25 minutes, the garden proposal takes 40 minutes, volunteer awards take 15 minutes and the annual report takes 30 minutes. There is a 10 minute coffee break after the second item. The library room is booked from 14:00 to 16:00. Dev wants to start at 14:00.", "Update for the March 3 board meeting: the garden proposal now takes 50 minutes. This replaces the 40 minutes. The other items and the coffee break are unchanged, and the library room booking is unchanged.", "Will the whole agenda fit in the room booking? Show when each item starts and ends, and write the agenda as a list I can paste to the board.");
+  const body3 = await p.getByTestId("result-body").innerText(); ok(/runs until 16:10, 10 minutes past the end of the 14:00 to 16:00 booking/.test(body3), "agenda: the corrected 50-minute item pushes it 10 minutes past the booking");
+  const list = await p.getByTestId("draft-text").inputValue(); ok(/14:25–15:15\s+Garden proposal/.test(list) && /15:40–16:10\s+Annual report/.test(list), "agenda: the pasteable list gives each start and end");
+  ok((await p.getByTestId("requested-part").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")))).join() === "done,done,done", "agenda: all three requested parts are done");
+  await shot(p, "46-agenda-desktop.png");
+  await ask2("Bake sale", "Bake sale baking plan", "Bake sale on Saturday: we need 96 cookies on the table by 10:00. The oven bakes 24 cookies per tray and one tray takes 12 minutes. The oven needs 8 minutes to preheat, once. Nobody can start before 08:00. Priya is bringing a second oven.", "Update for the bake sale: Priya's oven also bakes 24 cookies per tray but only arrives at 08:45. The first oven is unchanged. We now need 120 cookies, not 96.", "Can we have all the cookies baked by 10:00? Give me a checklist of when each tray goes in.");
+  ok(/We now need 120 cookies, not 96/.test(await p.getByTestId("result-body").innerText()), "unsupported calculation: the sources and the correction are quoted");
+  ok((await p.getByTestId("requested-part").evaluateAll((els) => els.map((e) => e.getAttribute("data-status")))).join() === "missing,missing" && /none of the requested parts could be done \(0 of 2/.test(await p.getByTestId("result-status").innerText()), "unsupported calculation: both parts are reported as not done and the job says so");
+  ok(/no calculation for this kind of question yet/.test(await p.getByTestId("requested-parts").innerText()), "unsupported calculation: it says exactly what is missing instead of inventing a schedule");
+  await shot(p, "47-unsupported-desktop.png");
+  ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole run made zero model calls");
+  await ctx.close();
+}
+
 async function journeyPrivate(browser: Browser) {
   step("Private run: one note, one correction, one question (invented material)");
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
@@ -1150,6 +1212,7 @@ async function main() {
     else if (only === "quizlatency") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "quiz"); startWorker(300); await journeyQuizLatency(p); await c.close(); }
     else if (only === "decision") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "decision"); await journeyDecision(p, browser); await c.close(); }
     else if (only === "plan") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "plan"); await journeyPlan(p, browser); await c.close(); }
+    else if (only === "shuttle") { await journeyShuttle(browser); }
     else if (only === "private") { await journeyPrivate(browser); }
     else if (only === "blackboard") { await journeyBlackboard(browser); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
@@ -1170,6 +1233,7 @@ async function main() {
     await journeyDecision(page, browser);
     await journeyPlan(page, browser);
     await journeyPrivate(browser);
+    await journeyShuttle(browser);
     await journeyBlackboard(browser);
     await journeyRoundTrip(browser);
     await desktop.close();

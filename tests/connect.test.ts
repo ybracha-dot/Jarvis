@@ -156,3 +156,26 @@ describe("round trip with Claude: write, change in Jarvis, fresh read", () => {
     expect(listTokens(ctx)[0].lastClient).toBe("claude-ai 1");
   });
 });
+
+// The field-test request from ordinary Claude's local test path: a calculation AND a draft, retrieved in a fresh chat with the draft and the per-part status.
+import { createProject } from "@/lib/projects";
+import { importText } from "@/lib/evidence";
+describe("a calculation plus a draft, from ordinary Claude (local test client, not a real account)", () => {
+  it("submit_goal returns at once; a fresh chat's get_result carries the verified answer, the draft to Jo, and a status for each requested part", async () => {
+    const ctx = fresh(); const t = createToken(ctx, { label: "Claude" });
+    const proj = createProject(ctx, { name: "Archive shuttle", kind: "project" });
+    const n1 = importText(ctx, { kind: "note", title: "Archive shuttle", text: "Archive shuttle on December 4: 23 volunteers must arrive by 10:30. One van has eight passenger seats. It takes 20 minutes to drive from campus to the archive and 20 minutes to drive back. There is no loading time. Jo originally offered an 08:40 departure from campus.", at: "2026-11-10T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", localOnly: true });
+    importText(ctx, { kind: "note", title: "Archive shuttle update", text: "Update for the December 4 archive shuttle: the earliest departure from campus is now 09:00. This replaces the 08:40 departure. The capacity, travel times and arrival deadline are unchanged.", at: "2026-11-14T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", localOnly: true, corrects: n1.id });
+    const s = await connect(t.token);
+    const rc = (await s.call("submit_goal", { text: "Can one van get everyone to the archive by 10:30? Show when the last group arrives and draft a short reply to Jo.", project: "Archive shuttle" })).json;
+    expect(rc).toMatchObject({ status: "queued", ready: false });
+    let tick = 1_000_000; await processQueue(ctx, { workerId: "w", handlers: HANDLERS, clock: () => new Date(tick), leaseMs: 1000 });
+    await s.client.close(); const chat2 = await connect(t.token);
+    const res = (await chat2.call("get_result", { id: rc.resultId })).json;
+    expect(res.ready).toBe(true); expect(res.body).toMatch(/misses 10:30 by 10 minutes/); expect(res.body).toMatch(/09:20, 10:00, 10:40/);
+    expect(res.draft).toMatchObject({ to: "Jo", note: expect.stringMatching(/Nothing was sent/) }); expect(res.draft.body).toMatch(/last 7 would arrive at 10:40/);
+    expect(res.completion).toBe("complete"); expect(res.requestedParts.map((p: any) => `${p.kind}:${p.status}`)).toEqual(["answer:done", "report:done", "draft:done"]);
+    expect(res.sources.map((x: any) => x.title)).toEqual(expect.arrayContaining(["Archive shuttle", "Archive shuttle update"]));
+    expect(all(ctx.db, "SELECT model_calls FROM jobs").every((j: any) => j.model_calls === 0)).toBe(true);
+  });
+});

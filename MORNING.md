@@ -1,6 +1,35 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **From finding evidence to finishing the job** (this round), **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Field test: finish the calculation before drafting** (this round), **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+
+# Field test: finish the calculation before drafting (latest)
+
+Checked against `f4f316c`, the commit the independent tester used. Both failures reproduced there exactly.
+
+**First failed results (kept as regressions).** Request: *“Can one van get everyone to the archive by 10:30? Show when the last group arrives and draft a short reply to Jo.”*
+- With the draft request: routed to the pitch-draft template. Result `kind: draft`, “To: (recipient not identified)”, “Hi there”, “the sources do not yet settle a date”, 0 sources, no calculation, marked ready.
+- Without it: an extractive digest that quoted 08:40 → 09:00 but gave no last arrival and no feasibility answer.
+
+**New result.** “No: 1 vehicle leaving 09:00 misses 10:30 by 10 minutes. The groups arrive at 09:20, 10:00, 10:40 (8, 8, 7 people), so the last 7 arrive at 10:40. Two ways to fix it: leave at 08:50 or earlier; or add another vehicle (the last group would arrive 10:00).” Three outbound legs and two returns; no final return is counted. The draft is addressed to **Jo** and uses those computed figures; nothing is sent. Changing only the departure to 08:50 gives an on-time 10:30.
+
+**What changed, in general.**
+- *Outcomes are tracked.* “Work out X and draft Y” is now split into parts (answer, figure, draft). Each part gets a status (done, partly done, not done) checked against the saved result: a draft counts as done only if it goes to the person named and carries the verified figures. The result page lists them under **What you asked for**, the job status says *“Finished, but only partly done: 1 of 3 …”*, and ordinary Claude’s `get_result` returns the same statuses and the draft.
+- *Corrections apply to the fact they change.* The 09:00 update replaces only the departure; seats, drive times and the deadline keep their original citations. Number words (“eight seats”) work.
+- *Missing input:* with the drive-back time removed everywhere, the answer is conditional (“works only if the drive back takes 15 minutes or less”), the draft asks for that number instead of stating one, and all three parts show *partly done*.
+- *Unsupported kind of calculation:* quotes the sources and says exactly what is missing; nothing is invented.
+- New solver in the existing planner for vehicle trips; the planner also gained a sequence solver (items in a booked window) after the fresh example below; a time span is no longer misread as a capacity.
+
+**Cited inputs (shuttle).** People 23, deadline 10:30, seats 8, drive out 20, drive back 20, no loading time: original note. Departure 09:00: the correction (08:40 shown as replaced). Each shows its quote on the result page.
+
+**Fresh, non-transport examples (chosen and run by me, NOT independent; the independent tester step is still open).** Results recorded before tuning:
+1. *Agenda against a room booking* (four items, a coffee break, a later correction making one item 50 minutes, ask for a pasteable list). **First result: failed.** It misread “takes 40 minutes” as a kiln-style capacity and said “proposal now: 1 run needed…”, and silently dropped the list request. Repaired (guard against time spans as capacities, “write … as a list” counts as a requested part, new sequence solver). Now: runs until 16:10, 10 minutes past the 16:00 end; per-item starts and ends; pasteable list. This example is tuned, so it is a regression, not a generalization test.
+2. *Bake sale with two ovens and a one-time preheat* (rates, parallel resources, a start-up time). **First result: partial, no invented figures.** It quoted the correction (96 → 120 cookies) and nothing else. After a wording fix it says “Jarvis has no calculation for this kind of question yet…” and marks both parts *not done*. **Not supported**; I did not tune for it.
+
+**Checks actually run.** 259 unit tests (new: `tests/shuttle.test.ts`, a connector test in `tests/connect.test.ts`); the browser journey `shuttle` through `/try` on Chromium (shuttle, missing return time, agenda, unsupported oven; desktop and phone width); the full browser suite: 309 checks, 0 problems, run on the final build. The ordinary-Claude path was exercised with the **local test client only**. Room, kiln, decision, source-forgetting and quiz tests all still pass. Zero model calls. Migration 7 adds one column (`result_versions.outcomes`); older results show no parts.
+
+**Still open (live, needs you or an outsider).** (1) Run the shuttle note and correction yourself at `/try`. (2) A person who did not build this should choose a fresh example with a different deliverable; I recorded mine but cannot call it independent. (3) A real Claude account round trip. Synthetic, real-account and paid-model results remain separate; paid model stays off.
+
+**Found on the way (verified).** Asking the identical question text in a second project returns the first request (a duplicate), so it keeps the first project and its sources. Fine when you ask once, surprising if you reuse a question across projects; I did not change it. (Re-importing identical text after forgetting it does bring it back, as revision 2.)
 
 # From finding evidence to finishing the job
 

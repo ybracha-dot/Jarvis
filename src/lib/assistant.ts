@@ -14,6 +14,7 @@ import { addDays, localDate, fmtDateTime, DEFAULT_TZ, localHM, parseLocal } from
 import { deepLinkBase } from "./capture";
 import { composeDecision, composePlan, synthesizeJudgment, recheckAnalysis, shortTitle, DECISION_Q, DRAFT_CUE, AnalysisJson, PlanJson } from "./decision-run";
 import { PLAN_Q } from "./plan";
+import { parseOutcomes, scoreOutcomes, completionOf, completionLine, OutcomeStatus } from "./requested-parts";
 
 // ---------- understanding ----------
 export type Deliverable = "draft" | "brief" | "answer";
@@ -128,7 +129,8 @@ export function receipt(ctx: Ctx, requestId: string) {
   const blockers: string[] = []; if (job?.status === "blocked") blockers.push(job.result?.ask?.question ?? job.error ?? "Needs your answer");
   const kids = job ? all(ctx.db, "SELECT status, result, error FROM jobs WHERE root_id=? AND status='blocked'", job.root_id ?? job.id) : []; for (const k of kids) { const q = k.result ? JSON.parse(k.result as string)?.ask?.question : null; if (q) blockers.push(q); }
   const status = (job?.status ?? "queued") as string; const done = status === "done" && (res?.version as number) > 0;
-  return { requestId, revision: r.revision as number, title: r.title as string, origin: r.origin as string, jobId: (r.job_id as string) ?? null, resultId: r.result_id as string, status: kids.length && status !== "blocked" ? "blocked" : status, plain: kids.length ? PLAIN.blocked : (PLAIN[status] ?? status), step: job?.stage ?? null, blockers, ready: done, version: (res?.version as number) ?? 0, resultState: (res?.state as string) ?? "pending", links: links(r.result_id as string, requestId) };
+  const parts: OutcomeStatus[] = done ? JSON.parse(String(get(ctx.db, "SELECT outcomes FROM result_versions WHERE result_id=? AND version=?", r.result_id, res!.version)?.outcomes ?? "[]")) : []; const completion = completionOf(parts);
+  return { requestId, revision: r.revision as number, title: r.title as string, origin: r.origin as string, jobId: (r.job_id as string) ?? null, resultId: r.result_id as string, status: kids.length && status !== "blocked" ? "blocked" : status, plain: kids.length ? PLAIN.blocked : done && completion !== "complete" ? completion === "incomplete" ? `Finished, but none of the requested parts could be done (${completionLine(parts)})` : `Finished, but only partly done: ${completionLine(parts)}` : (PLAIN[status] ?? status), completion, parts, step: job?.stage ?? null, blockers, ready: done, version: (res?.version as number) ?? 0, resultState: (res?.state as string) ?? "pending", links: links(r.result_id as string, requestId) };
 }
 
 // ---------- instruction revisions ----------
@@ -456,7 +458,7 @@ export function verifyResult(ctx: Ctx, c: { sources: SrcRef[]; body: string }) {
 const fmtDayFromQuote = (_s: SrcRef) => null as string | null;
 
 // ---------- saving ----------
-export function saveResult(ctx: Ctx, o: { requestId: string; revision: number; title: string; body: string; summary: string; sources: SrcRef[]; flags: any[]; unavailable: any[]; kind: string; projectId: string | null; verification?: any; analysis?: unknown; mode?: string; draft?: { to: string | null; subject: string; body: string; purpose: string } | null }) {
+export function saveResult(ctx: Ctx, o: { requestId: string; revision: number; title: string; body: string; summary: string; sources: SrcRef[]; flags: any[]; unavailable: any[]; kind: string; projectId: string | null; verification?: any; analysis?: unknown; mode?: string; outcomes?: OutcomeStatus[]; draft?: { to: string | null; subject: string; body: string; purpose: string } | null }) {
   return tx(ctx.db, () => {
     const r = get(ctx.db, "SELECT * FROM requests WHERE id=? AND owner_id=?", o.requestId, ctx.owner); if (!r) throw new HttpError(404, "No such request");
     // A result produced for an older instruction can never replace the current one.
@@ -464,7 +466,7 @@ export function saveResult(ctx: Ctx, o: { requestId: string; revision: number; t
     const resultId = r.result_id as string; const have = get(ctx.db, "SELECT version FROM result_versions WHERE result_id=? AND request_revision=?", resultId, o.revision);
     if (have) return { discarded: false as const, resultId, version: have.version as number, replay: true };
     const version = ((get(ctx.db, "SELECT MAX(version) v FROM result_versions WHERE result_id=?", resultId)?.v as number | null) ?? 0) + 1; const now = ctx.now().toISOString();
-    run(ctx.db, "INSERT INTO result_versions(result_id,version,request_revision,body,summary,sources,flags,unavailable,created_at,analysis,mode) VALUES(?,?,?,?,?,?,?,?,?,?,?)", resultId, version, o.revision, o.body, o.summary, JSON.stringify(o.sources), JSON.stringify([...o.flags, ...(o.verification?.problems ?? []).map((p: string) => ({ kind: "verification", text: p }))]), JSON.stringify(o.unavailable), now, o.analysis ? JSON.stringify(o.analysis) : null, o.mode ?? "rules");
+    run(ctx.db, "INSERT INTO result_versions(result_id,version,request_revision,body,summary,sources,flags,unavailable,created_at,analysis,mode,outcomes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", resultId, version, o.revision, o.body, o.summary, JSON.stringify(o.sources), JSON.stringify([...o.flags, ...(o.verification?.problems ?? []).map((p: string) => ({ kind: "verification", text: p }))]), JSON.stringify(o.unavailable), now, o.analysis ? JSON.stringify(o.analysis) : null, o.mode ?? "rules", o.outcomes?.length ? JSON.stringify(o.outcomes) : null);
     if (o.draft) run(ctx.db, "INSERT OR REPLACE INTO result_drafts(result_id,version,to_addr,subject,body,purpose) VALUES(?,?,?,?,?,?)", resultId, version, o.draft.to, o.draft.subject, o.draft.body, o.draft.purpose);
     run(ctx.db, "UPDATE results SET version=?, title=?, kind=?, project_id=?, state='current', updated_at=? WHERE id=?", version, o.title, o.kind, o.projectId, now, resultId);
     run(ctx.db, "UPDATE requests SET status='done', project_id=COALESCE(?,project_id), updated_at=? WHERE id=?", o.projectId, now, o.requestId);
@@ -480,6 +482,7 @@ export function resultView(ctx: Ctx, id: string, version?: number) {
   const sources = v ? (JSON.parse(v.sources as string) as SrcRef[]).map((s) => ({ ...s, link: `/evidence/${s.itemId}?q=${encodeURIComponent(s.quote.slice(0, 80))}`, url: `${deepLinkBase()}/evidence/${s.itemId}`, live: (() => { const it = getItem(ctx, s.itemId); return !!it && !("forgotten" in it && it.forgotten) && !("revoked" in it && it.revoked); })() })) : [];
   const revs = all(ctx.db, "SELECT revision, text, origin, at FROM request_revisions WHERE request_id=? ORDER BY revision", req.id).map((r) => ({ revision: r.revision as number, text: String(r.text).replace(/^\(asked again\)\s*/, ""), origin: String(r.origin).split("#")[0], at: r.at as string }));
   return { id: res.id as string, kind: res.kind as string, title: res.title as string, state: res.state as string, projectId: res.project_id as string | null, projectName: res.project_id ? (get(ctx.db, "SELECT name FROM projects WHERE id=?", res.project_id)?.name as string) : null, version: (v?.version as number) ?? 0, latestVersion: res.version as number, versions: vers.map((x) => ({ version: x.version as number, requestRevision: x.request_revision as number, summary: x.summary as string, at: x.created_at as string, stale: x.stale as string | null })),
+    outcomes: (v?.outcomes ? JSON.parse(v.outcomes as string) : []) as OutcomeStatus[], completion: completionOf(v?.outcomes ? JSON.parse(v.outcomes as string) : []),
     analysis: v?.analysis ? JSON.parse(v.analysis as string) : null, mode: (v?.mode as string) ?? "rules", draft: (() => { if (!v) return null; const d = get(ctx.db, "SELECT * FROM result_drafts WHERE result_id=? AND version=?", res.id, v.version); return d ? { to: d.to_addr as string | null, subject: d.subject as string, body: (d.edited_body ?? d.body) as string, original: d.body as string, edited: !!d.edited_body, purpose: d.purpose as string } : null; })(),
     body: (v?.body as string) ?? null, summary: (v?.summary as string) ?? null, sources, flags: v ? JSON.parse(v.flags as string) : [], unavailable: v ? JSON.parse(v.unavailable as string) : [], stale: (v?.stale as string) ?? null,
     request: { id: req.id as string, text: req.text as string, revision: req.revision as number, origin: req.origin as string, revisions: revs, synthetic: !!req.synthetic }, receipt: rcpt, reads: readsFor(ctx, req.id as string, v ? (v.request_revision as number) : undefined),
@@ -520,14 +523,15 @@ const supervise_goal: Handler = async (api) => {
     await api.step(`retry${round}`, "The reviewer found a gap and sent the work back once", () => { api.event("retry", "The reviewer found a gap and sent the work back once", { problems: verdict.problems }); return true; });
   }
   api.assertNotCancelled();
-  const saved = await api.step("save", "Saving the result", () => saveResult(ctx, { requestId, revision, title: outcome.title, body: outcome.body, summary: outcome.summary, sources: outcome.sources, flags: outcome.flags ?? [], unavailable: outcome.unavailable ?? [], kind: outcome.kind, projectId: outcome.projectId ?? null, verification: verdict, analysis: outcome.analysis, mode: outcome.mode, draft: outcome.draft }));
+  const saved = await api.step("save", "Saving the result", () => saveResult(ctx, { requestId, revision, title: outcome.title, body: outcome.body, summary: outcome.summary, sources: outcome.sources, flags: outcome.flags ?? [], unavailable: outcome.unavailable ?? [], kind: outcome.kind, projectId: outcome.projectId ?? null, verification: verdict, analysis: outcome.analysis, mode: outcome.mode, outcomes: outcome.outcomes, draft: outcome.draft }));
   if (saved.discarded) { api.event("discarded", saved.reason); return { discarded: true }; }
   await api.step("announce", "Telling you it is ready", () => {
-    const conv = (api.input as any).conversationId as string | null; const rid = saved.resultId; const spoken = `${outcome.summary}${outcome.flags?.length ? ` ${outcome.flags.length} thing${outcome.flags.length === 1 ? "" : "s"} to check.` : ""}`;
-    if (conv && !get(ctx.db, "SELECT 1 x FROM messages WHERE job_id=? AND kind='result'", api.job.root_id ?? api.job.id)) addMessage(ctx, conv, { role: "jarvis", kind: "result", jobId: api.job.root_id ?? api.job.id, text: `${outcome.title} is ready. ${spoken}`, data: { resultId: rid, version: saved.version, links: { open: `/results/${rid}`, label: "Open the result" }, spoken: `${outcome.title} is ready. ${spoken}` } });
+    const conv = (api.input as any).conversationId as string | null; const rid = saved.resultId; const parts: OutcomeStatus[] = outcome.outcomes ?? []; const comp = completionOf(parts); const gaps = parts.filter((x) => x.status !== "done").map((x) => `${x.text}: ${x.status === "partial" ? "partly" : "not"} done`).join("; ");
+    const spoken = `${comp !== "complete" ? `Only partly done (${completionLine(parts)}): ${gaps}. ` : ""}${outcome.summary}${outcome.flags?.length ? ` ${outcome.flags.length} thing${outcome.flags.length === 1 ? "" : "s"} to check.` : ""}`; const readyWord = comp === "complete" ? "is ready" : "is partly ready";
+    if (conv && !get(ctx.db, "SELECT 1 x FROM messages WHERE job_id=? AND kind='result'", api.job.root_id ?? api.job.id)) addMessage(ctx, conv, { role: "jarvis", kind: "result", jobId: api.job.root_id ?? api.job.id, text: `${outcome.title} ${readyWord}. ${spoken}`, data: { resultId: rid, version: saved.version, links: { open: `/results/${rid}`, label: "Open the result" }, completion: comp, spoken: `${outcome.title} ${readyWord}. ${spoken}` } });
     // A scheduled check that found nothing says so in its receipt and stays quiet: no notification.
     const quiet = String(get(ctx.db, "SELECT origin FROM requests WHERE id=?", requestId)?.origin) === "schedule" && /^Nothing needs you/.test(String(outcome.summary));
-    if (!quiet) notify(ctx, { eventKey: `result:${rid}:${saved.version}`, level: "brief", title: `${outcome.title} is ready`, body: spoken });
+    if (!quiet) notify(ctx, { eventKey: `result:${rid}:${saved.version}`, level: "brief", title: `${outcome.title} ${readyWord}`, body: spoken });
     return true;
   });
   return { resultId: saved.resultId, version: saved.version };
@@ -573,6 +577,8 @@ const goal_writer: Handler = async (api) => {
     const c = intent.deliverable === "draft" ? composeDraft(ctx, bundle, instr, intent) : intent.deliverable === "brief" ? composeBrief(ctx, bundle, intent) : composeAnswer(ctx, bundle, instr);
     return { kind: intent.deliverable, projectId: bundle.projectId ?? intent.projectId ?? null, unavailable: bundle.unavailable ?? [], mode: "rules", ...c };
   });
+  // Every requested part gets a status, checked against what was actually produced. A part with no matching result is reported, not papered over.
+  { const asked = parseOutcomes(String(bundle.question ?? "")); out.needsCalc = !!bundle.plan; out.outcomes = asked.length >= 2 ? scoreOutcomes(asked, out) : []; }
   // Only what the rules could not settle may go to a model, and only if it is on, authorized and allowed for these sources.
   if (out.analysis && out.needsJudgment) {
     const j = await api.step("judgment", "Asking for an evidence-bounded judgment, if allowed", async () => {
@@ -591,6 +597,12 @@ const goal_reviewer: Handler = async (api) => {
   const request = String(get(api.ctx.db, "SELECT text FROM requests WHERE id=?", (api.input as any).requestId)?.text ?? "");
   const v = await api.step("verify", "Checking every cited source", () => {
     const base = (content.sources?.length || !content.flags?.some((f: any) => f.kind === "gap")) ? verifyResult(api.ctx, content) : { ok: true, problems: [] as string[], checks: [{ name: "Nothing to cite", ok: true, detail: "The request found no sources, and says so." }] };
+    if (content.outcomes?.length) {
+      const again = scoreOutcomes(parseOutcomes(request), content); const drift = again.filter((x, i) => x.status !== content.outcomes[i]?.status);
+      const left = content.outcomes.filter((x: OutcomeStatus) => x.status !== "done");
+      base.checks.push({ name: "Every requested part has a status that matches the result", ok: drift.length === 0, detail: drift.length ? `Re-checking disagrees on: ${drift.map((x) => x.text).join("; ")}.` : `${completionLine(content.outcomes)}${left.length ? `; open: ${left.map((x: OutcomeStatus) => x.text).join("; ")}` : ""}.` });
+      if (drift.length) { base.problems.push(`The status of a requested part does not match the saved result: ${drift.map((x) => x.text).join("; ")}.`); base.ok = false; }
+    }
     if (content.analysis) {
       const pr = recheckAnalysis(api.ctx, content.analysis as AnalysisJson | PlanJson, request);
       base.checks.push({ name: "Totals recomputed from the sources as they are now", ok: pr.length === 0, detail: pr.length ? pr.join(" ") : "Every total and the recommendation reproduce." });

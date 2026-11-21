@@ -7,20 +7,41 @@
 // plan says so and asks one precise question instead of guessing.
 import type { ItemIn, Src } from "./decision";
 
-export const PLAN_Q = /\b(where and when|which (?:room|slot|day|time|space)|what time|when (?:do|should|can|will|must|could) (?:i|we) (?:start|begin|run|hold|schedule|book|fire|load|send|set up)|each (?:firing|run|batch|session|load|shift|trip)|how many (?:sessions|firings|runs|batches|shifts|trips|rounds)|fit(?:s)? (?:everyone|all)|everyone (?:who )?(?:is )?(?:registered |signed up )?(?:can|could|will|to) ?attend|before the [\w -]{0,40}?(?:load-?in|deadline|opening|cut-?off|set-?up)|(?:finished|fired|done|unloaded|processed|completed|ready) (?:and \w+ )?before (?:the )?[\w -]{0,30}?(?:load-?in|deadline|opening))\b/i;
+export const PLAN_Q = new RegExp([
+  String.raw`\b(?:where and when|which (?:room|slot|day|time|space)|what time)\b`,
+  String.raw`\bwhen (?:do|should|can|will|must|could) (?:i|we) (?:start|begin|run|hold|schedule|book|fire|load|send|set up|leave)\b`,
+  String.raw`\beach (?:firing|run|batch|session|load|shift|trip)\b`,
+  String.raw`\bhow many (?:sessions|firings|runs|batches|shifts|trips|rounds|vehicles|vans|buses|cars)\b`,
+  String.raw`\bfit(?:s)? (?:everyone|all)\b`,
+  String.raw`\beveryone (?:who )?(?:is )?(?:registered |signed up )?(?:can|could|will|to) ?attend\b`,
+  String.raw`\bbefore the [\w -]{0,40}?(?:load-?in|deadline|opening|cut-?off|set-?up)\b`,
+  String.raw`\b(?:finished|fired|done|unloaded|processed|completed|ready) (?:and \w+ )?before (?:the )?[\w -]{0,30}?(?:load-?in|deadline|opening)\b`,
+  // "Can one van get everyone there by 10:30?": a feasibility question about moving or serving a count against a time.
+  String.raw`\b(?:can|could|will|would|is it possible|are we able)\b[^.?!]{0,80}\b(?:get|make|fit|reach|arrive|finish|complete|carry|move|transport|deliver|serve|seat)\b[^.?!]{0,80}\b(?:by|before|within|in time|on time|everyone|all of)\b`,
+  String.raw`\b(?:can|could|will|would)\b[^.?!]{0,60}\b(?:all|everyone|everything|whole|entire)\b[^.?!]{0,60}\b(?:by|before|within)\s+(?:\d|the\b|noon|midnight)`,
+  String.raw`\b(?:will|would|can|could|does|do|is|are)\b[^.?!]{0,60}\bfit\b[^.?!]{0,40}\b(?:in|into|within|before|inside)\b`,
+  String.raw`\b(?:when|what time) (?:does|do|will) (?:each|every)\b[^.?!]{0,30}\b(?:start|begin|end|finish)`,
+  String.raw`\b(?:show|tell me|work out|figure out|calculate|when does|when do|what time does|what time do)\b[^.?!]{0,40}\b(?:last|final|first|each|every)\b[^.?!]{0,30}\b(?:arrive|arrives|arrival|finish|finishes|end|ends|done|leave|leaves|depart|departs)\b`,
+].join("|"), "i");
 export const isPlanRequest = (t: string) => PLAN_Q.test(t);
 
 export interface PlanRow { label: string; value: string; src: Src | null; srcTitle: string; quote: string | null; note?: string }
 export interface PlanStep { when: string; what: string }
 export interface PlanOpt { option: string; label: string; verdict: "works" | "fails" | "depends"; summary: string; steps: PlanStep[]; checks: string[] }
 export interface PlanRec { kind: "recommend" | "ask" | "none_fits" | "insufficient"; option: string | null; label: string | null; headline: string; tradeoff: string[]; question: string | null; nextAction: { kind: string; option?: string; text: string } | null; basis: string[]; qualifiers: string[] }
-export interface PlanAnalysis { type: "plan"; kind: "capacity" | "batch"; recommendation: PlanRec; inputs: PlanRow[]; computation: string[]; options: PlanOpt[]; setAside: PlanRow[]; notes: string[]; contact: { name: string | null; why: string } | null; data: Record<string, unknown> }
+export interface PlanAnalysis { type: "plan"; kind: "capacity" | "batch" | "trips" | "sequence"; recommendation: PlanRec; inputs: PlanRow[]; computation: string[]; options: PlanOpt[]; setAside: PlanRow[]; notes: string[]; contact: { name: string | null; why: string } | null; data: Record<string, unknown>;
+  /** Figures the plan computed, by name, so a request for "the last arrival" can be checked against what was actually produced. */
+  figures?: { label: string; value: string }[];
+  /** Strings that must appear in a draft built from this plan, so the draft cannot drift from the verified answer. */
+  keyFigures?: string[];
+  /** Computed sentences a draft may use, and the questions it may ask, in the plan's own words. */
+  draftSketch?: { lines: string[]; ask: string[]; subject: string; form?: "message" | "list" } | null }
 
 // ---------- words, time and dates ----------
 const STOP = new Set("the and for you your are was were with that this from have has had not but can could would should will shall all any each every where when what which who how why get got our out into onto than then them they their there here also too very more most some such only own same just about over under after before between during while does did done being been its it's i'm i'd my me we us he she him her his hers one two three four draft short note write email message please make give need want like let see tell show find ask send book slot slots plan start begin run ready tomorrow today tonight morning everyone registered attend people".split(" "));
 const DAYS = new Set("monday tuesday wednesday thursday friday saturday sunday".split(" "));
 const stem = (t: string) => t.replace(/(?:es|s)$/, "").replace(/(?:ing|ed|e)$/, "");
-const wordsOf = (text: string) => [...new Set((text.replace(/'s\b/g, "").toLowerCase().match(/[a-z]+/g) ?? []).filter((w) => w.length > 2 && !STOP.has(w) && !DAYS.has(w)).map(stem))];
+export const wordsOf = (text: string) => [...new Set((text.replace(/'s\b/g, "").toLowerCase().match(/[a-z]+/g) ?? []).filter((w) => w.length > 2 && !STOP.has(w) && !DAYS.has(w)).map(stem))];
 /** Distinctive words of the request: what the question is about. Capitalised words after the first are names, not topic. */
 function topicOf(request: string): string[] {
   const raw = request.match(/[A-Za-z][A-Za-z'-]*/g) ?? []; const kept = raw.filter((w, i) => i === 0 || !/^[A-Z]/.test(w));
@@ -220,6 +241,7 @@ function planBatch(items: ItemIn[], request: string): PlanAnalysis | null {
   const caps: Cap[] = [];
   for (const s of all) {
     const m = CAPN.exec(s.text); if (!m) continue; const subject = subjectBefore(s.text, m.index); if (!subject) continue; const unit = m[2].toLowerCase();
+    if (/^(?:minutes?|mins?|hours?|hrs?|days?|seconds?|weeks?)$/.test(unit)) continue;   // "takes 40 minutes" is a duration, not a capacity per run
     const scope = scopePrefix(s.text);
     if (ownMatterOfSender(s)) { setAside.push(row(`${subject}: ${m[1]} ${unit} per run`, "set aside", s, "the sender is writing about their own batch, not yours")); continue; }
     if (scope && overlap(topic, scope) === 0) { setAside.push(row(`${subject}: ${m[1]} ${unit} per run`, "set aside", s, `stated for ${scope.trim()}, which is not what you asked about`)); continue; }
@@ -290,7 +312,7 @@ function planBatch(items: ItemIn[], request: string): PlanAnalysis | null {
     if (p.unloadW) inputs.push(row(`${p.resource}: unloading allowed`, `${hhmm(p.unloadW[0])} to ${hhmm(p.unloadW[1])}`, p.winS));
     if (p.slots.length) inputs.push(row(`${p.resource}: free to start`, p.slots.map((x) => x.label).join(" or "), p.slotS, p.slots.length > 1 ? "which slot applies is not settled in the sources" : undefined));
     comp.push(`${p.resource}: ${qty.n} ÷ ${p.cap.n} per run = ${(qty.n / p.cap.n).toFixed(2)}, rounded up to ${plural(n, "run")} (${sizes.join(" + ")}).`);
-    if (missing.length) { opts.push({ option: p.resource, label: p.resource, verdict: "depends", summary: `${p.resource}: ${plural(n, "run")} needed, but ${missing.join(" and ")} is not stated.`, steps: [], checks: [`Missing: ${missing.join("; ")}.`] }); continue; }
+    if (missing.length) { opts.push({ option: p.resource, label: p.resource, verdict: "depends", summary: `${p.resource}: ${plural(n, "run")} needed, but ${missing.join(" and ")} was not found in the sources, or not in wording Jarvis can read.`, steps: [], checks: [`Missing: ${missing.join("; ")}.`] }); continue; }
     for (const slot of p.slots) {
       const sim: Sim = []; let start = nextAllowed(slot.e, p.loadW);
       for (let i = 0; i < n; i++) { const end = start + p.cycle!; const unload = nextAllowed(end, p.unloadW); sim.push({ start, end, unload, size: sizes[i] }); start = nextAllowed(unload, p.loadW); }
@@ -328,9 +350,192 @@ function planBatch(items: ItemIn[], request: string): PlanAnalysis | null {
   return { type: "plan", kind: "batch", recommendation: mk("recommend", { option: first.p.resource, label: name, headline: `Yes: ${plural(n0, "run")} (${sizesTxt}) in the ${name}. ${sch(f0).join("; ")}. The last unload is ${lastTxt(f0)}, ${fmtSpan(f0.slack!)} before ${fmtAt(deadline)}.`, tradeoff, nextAction: { kind: "book_slot", option: first.p.resource, text: `Ask ${contact ?? "the resource owner"} to book ${plural(n0, "run")} starting ${f0.slot.label}.` }, qualifiers }), inputs, computation: comp, options: opts, setAside, notes, contact: { name: contact, why: name }, data: { runs: n0 } };
 }
 
+// =====================================================================================================
+//  TRIPS: moving a count of people or things with vehicles that go out, come back and go out again
+// =====================================================================================================
+const NUMW: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50 };
+const NUM = "(\\d{1,5}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)";
+const numOf = (t: string) => (/^\d+$/.test(t) ? Number(t) : NUMW[t.toLowerCase()] ?? null);
+const PERSON = "(?:people|persons|passengers|volunteers|guests|attendees|students|members|staff|workers|riders|visitors|participants|kids|children|players|employees|delegates|residents|campers|boxes|crates|pallets|parcels)";
+const VEHICLE = "(?:van|vans|bus|buses|minibus|minibuses|car|cars|shuttle|shuttles|coach|coaches|truck|trucks|boat|boats|ferry|ferries|minivan|minivans)";
+const durMin = (n: string, u: string) => Number(n) * (/^h/i.test(u) ? 60 : 1);
+const TRIP_WORDS = new RegExp(`\\b${VEHICLE}\\b|\\bseats?\\b|\\bdrive|\\bshuttle|\\bdeparture`, "i");
+export const looksLikeTrips = (request: string) => new RegExp(`\\b${VEHICLE}\\b|\\b(?:drive|ride|shuttle|trips?|carpool|depart\\w*)\\b`, "i").test(request);
+
+function planTrips(items: ItemIn[], request: string): PlanAnalysis | null {
+  const topic = topicOf(request); const all = sentencesOf(items).filter((s) => !ownMatterOfSender(s));
+  const relevantItems = new Set(items.filter((it) => overlap(topic, `${it.title}. ${it.sentences.map((x) => x.text).join(" ")}`) >= 1 || it.sentences.some((x) => TRIP_WORDS.test(x.text))).filter((it) => it.sentences.some((x) => TRIP_WORDS.test(x.text) || new RegExp(`${NUM}\\s+${PERSON}\\b`, "i").test(x.text))));
+  const S = all.filter((s) => relevantItems.has(s.item)); if (!S.length) return null;
+  const inputs: PlanRow[] = []; const setAside: PlanRow[] = []; const notes: string[] = []; const comp: string[] = [];
+  const latest = <T extends { s: Sent }>(xs: T[]) => [...xs].sort((a, b) => byRecency(a.s, b.s));
+  const gather = <T,>(f: (s: Sent) => T | null): (T & { s: Sent })[] => S.map((s) => { const v = f(s); return v === null ? null : { ...(v as object), s }; }).filter(Boolean) as (T & { s: Sent })[];
+
+  // Seats per vehicle and how many vehicles: "One van has eight passenger seats", "the bus seats 40".
+  const seatsC = latest(gather((s) => { const m = new RegExp(`\\b(?:(${NUM}|a|an|the)\\s+)?${VEHICLE}\\s+(?:has|have|holds|seats|carries|fits|takes)\\s+(?:up to\\s+|max(?:imum)?\\s+|at most\\s+)?${NUM}\\b`, "i").exec(s.text); return m ? { seats: numOf(m[m.length - 1])!, count: m[1] ? numOf(m[1]) : null } : null; }));
+  const seatsF = seatsC[0] ?? null;
+  const vm = new RegExp(`\\b${NUM}\\s+${VEHICLE}\\b`, "i").exec(request);
+  let vehicles = vm ? numOf(vm[1])! : seatsF?.count ?? null; let vehiclesSrc: Sent | null = seatsF && !vm && seatsF.count ? seatsF.s : null;
+  if (vehicles === null) { vehicles = 1; notes.push("No number of vehicles was stated, so one vehicle is assumed."); }
+  // People or things to move.
+  const peopleC = latest(gather((s) => { if (new RegExp(`${NUM}\\s+(?:passenger\\s+)?seats?\\b`, "i").test(s.text) && !/\bmust|need|arrive|get\b/i.test(s.text)) return null; const m = new RegExp(`\\b${NUM}\\s+${PERSON}\\b(?!\\s+seats?)`, "i").exec(s.text); return m && /\b(arrive|must|need|get|take|bring|move|going|riding|coming|attend)\b/i.test(s.text) ? { n: numOf(m[1])!, unit: m[0].replace(/^\S+\s+/, "").toLowerCase() } : null; }));
+  const people = peopleC[0] ?? null;
+  // Travel times.
+  const legs = latest(gather((s) => {
+    const out = new RegExp(`${NUM}\\s*(minutes?|mins?|hours?|hrs?)\\s+to\\s+(?:drive|travel|ride|walk|go|get|fly|sail)\\s+(?:from\\s+[\\w ]+?\\s+)?to\\b`, "i").exec(s.text);
+    const back = new RegExp(`${NUM}\\s*(minutes?|mins?|hours?|hrs?)\\s+(?:to\\s+)?(?:(?:drive|travel|ride|walk|go|get|come|fly|sail|return)\\s+)?back\\b|\\b(?:return|drive back|trip back)\\b[^.]{0,30}?(?:takes?|is)\\s+${NUM}\\s*(minutes?|mins?|hours?|hrs?)`, "i").exec(s.text);
+    const each = new RegExp(`${NUM}\\s*(minutes?|mins?|hours?|hrs?)\\s+each way`, "i").exec(s.text);
+    if (!out && !back && !each) return null;
+    return { out: out ? durMin(String(numOf(out[1])), out[2]) : each ? durMin(String(numOf(each[1])), each[2]) : null, back: back ? (back[1] ? durMin(String(numOf(back[1])), back[2]) : durMin(String(numOf(back[3])), back[4])) : each ? durMin(String(numOf(each[1])), each[2]) : null };
+  }));
+  const outS = legs.find((l) => l.out !== null) ?? null, backS = legs.find((l) => l.back !== null) ?? null;
+  // Boarding or loading time, if any.
+  const loadS = latest(gather((s) => { if (/\bno\s+(?:loading|boarding|unloading)(?:\s+time)?\b/i.test(s.text)) return { load: 0 }; const m = new RegExp(`\\b(?:loading|boarding|unloading)\\b[^.]{0,30}?(?:takes?|is|of|needs?)\\s+${NUM}\\s*(minutes?|mins?)`, "i").exec(s.text); return m ? { load: Number(numOf(m[1])) } : null; }))[0] ?? null;
+  // Departure: the latest statement wins; a sentence that says it replaces something is not a new value, and the replaced value is kept as history.
+  const depAll = gather((s) => {
+    const replacing = /\b(?:replaces?|replaced|instead of|rather than|no longer|supersedes?)\b/i.test(s.text); if (replacing) return null;
+    const m = new RegExp(`(${CLOCK})\\s+(?:departure|departing|leave|pick-?up)|\\b(?:departure|depart(?:s|ing)?|leave[s]?|pick-?up|set(?:s)? off)\\b[^.]{0,50}?\\b(?:is|at|of|to|now|by)\\s+(?:now\\s+)?(${CLOCK})`, "i").exec(s.text);
+    if (!m) return null; const cl = clocksIn(m[0]); return cl.length ? { min: cl[0] } : null;
+  });
+  const dep = latest(depAll)[0] ?? null;
+  // Deadline: a time of day by which they must have arrived.
+  const dlAll = gather((s) => { const m = new RegExp(`\\b(?:arrive(?:s|d)?|be there|get there|reach(?:ed)?)\\b[^.]{0,20}?\\b(by|before|no later than)\\s+(${CLOCK})|\\b(by|before|no later than)\\s+(${CLOCK})[^.]{0,20}?\\barriv`, "i").exec(s.text); if (!m) return null; const cl = clocksIn(m[0]); return cl.length ? { min: cl[cl.length - 1], strict: /before/i.test(m[1] ?? m[3] ?? "") } : null; });
+  const dl = latest(dlAll)[0] ?? null;
+  const day = [...S].sort(byRecency).flatMap((s) => datesIn(s.text, s.item.at).map((d) => d.day))[0] ?? null;
+
+  if (seatsF) inputs.push(row("Seats per vehicle", String(seatsF.seats), seatsF.s));
+  inputs.push(vehiclesSrc ? row("Vehicles", String(vehicles), vehiclesSrc) : row("Vehicles", String(vehicles), null, vm ? "from your request" : "assumed"));
+  if (people) inputs.push(row("People to carry", `${people.n} (${people.unit.replace(/^\d+\s*/, "")})`, people.s, "latest statement"));
+  if (outS) inputs.push(row("Drive out", `${outS.out} minutes`, outS.s));
+  if (backS) inputs.push(row("Drive back", `${backS.back} minutes`, backS.s));
+  if (loadS) inputs.push(row("Boarding or loading", `${loadS.load} minutes`, loadS.s)); else notes.push("No boarding or loading time was stated, so none is assumed.");
+  if (dep) inputs.push(row("Earliest departure", hhmm(dep.min), dep.s, "latest statement"));
+  if (dl) inputs.push(row(dl.strict ? "Must arrive before" : "Must arrive by", `${hhmm(dl.min)}${day !== null ? ` on ${fmtDay(day)}` : ""}`, dl.s));
+  for (const d of latest(depAll).slice(1)) if (dep && d.min !== dep.min) setAside.push(row("Earlier departure", hhmm(d.min), d.s, `replaced by ${hhmm(dep.min)} (${dep.s.item.title})`));
+  for (const p of peopleC.slice(1)) if (people && p.n !== people.n) setAside.push(row("Earlier count", String(p.n), p.s, `replaced by ${people.n}`));
+  const basis = [people ? `${people.n} people` : null, seatsF ? `${seatsF.seats} seats per vehicle` : null, dl ? `${dl.strict ? "before" : "by"} ${hhmm(dl.min)}` : null].filter(Boolean) as string[];
+  const rec = (kind: PlanRec["kind"], p: Partial<PlanRec>): PlanRec => ({ kind, option: null, label: null, headline: "", tradeoff: [], question: null, nextAction: null, basis, qualifiers: [], ...p });
+  const base = { type: "plan" as const, kind: "trips" as const, inputs, setAside, notes, computation: comp };
+  // Whatever cannot be known is named, with the part that can still be worked out.
+  const missing: string[] = []; if (!seatsF) missing.push("how many seats a vehicle has"); if (!people) missing.push("how many people need to travel"); if (!outS) missing.push("how long the drive out takes");
+  if (missing.length) { const q = `What is missing: ${missing.join("; ")}.`; return { ...base, recommendation: rec("insufficient", { headline: `I cannot work out the trips: ${missing[0]} is not in the sources.`, question: q, nextAction: { kind: "ask_missing", text: q } }), options: [], contact: null, data: {} }; }
+  const seats = seatsF!.seats, n = Math.ceil(people!.n / seats), out = outS!.out!, load = loadS?.load ?? 0, k = Math.max(1, vehicles);
+  const sizes = Array.from({ length: n }, (_, i) => (i < n - 1 ? seats : people!.n - seats * (n - 1)));
+  comp.push(`${people!.n} people ÷ ${seats} seats = ${(people!.n / seats).toFixed(2)}, rounded up to ${plural(n, "trip")} (${sizes.join(" + ")}).`);
+  const simulate = (depart: number, back: number, veh: number) => { const free = Array.from({ length: veh }, () => depart - load); const trips: { v: number; leave: number; arrive: number; back: number; size: number }[] = []; for (let i = 0; i < n; i++) { let j = 0; for (let x = 1; x < veh; x++) if (free[x] < free[j]) j = x; const leave = Math.max(free[j] + load, depart); const arrive = leave + out; const returned = arrive + back; free[j] = returned; trips.push({ v: j, leave, arrive, back: returned, size: sizes[i] }); } return trips; };
+  const okAt = (arr: number) => (dl ? (dl.strict ? arr < dl.min : arr <= dl.min) : null);
+  const needsReturn = n > k;
+  if (needsReturn && !backS) {
+    // The return time matters but is not stated: the answer is conditional, and the break-even is worked out.
+    const q = `How long does the drive back take? The last group's arrival depends on it: ${plural(Math.ceil(n / k) - 1, "return")} come before it.`;
+    let maxBack: number | null = null; if (dep && dl) for (let b = 0; b <= 600; b++) { const t = simulate(dep.min, b, k); if (okAt(Math.max(...t.map((x) => x.arrive)))) maxBack = b; else if (maxBack !== null) break; }
+    comp.push(`Last arrival = ${dep ? hhmm(dep.min) : "departure"} + ${Math.ceil(n / k)} × ${out} minutes out + ${Math.ceil(n / k) - 1} × (drive back).`);
+    const cond = dep && dl ? (maxBack === null ? `Even with an instant return the last group would arrive after ${hhmm(dl.min)}.` : `It works only if the drive back takes ${maxBack} minutes or less.`) : "";
+    return { ...base, recommendation: rec("ask", { headline: `Cannot confirm yet: the drive back time was not found in the sources, or not in wording Jarvis can read. ${cond}`.trim(), question: q, nextAction: { kind: "ask_missing", text: q }, tradeoff: [`${plural(n, "trip")} (${sizes.join(" + ")}) with ${plural(k, "vehicle")}.`, cond].filter(Boolean), qualifiers: ["Provisional until the return time is known."] }), options: [], contact: null, data: { trips: n, maxBack }, figures: [{ label: "Trips needed", value: `${n} (${sizes.join(" + ")})` }, ...(cond ? [{ label: "Condition", value: cond }] : [])], keyFigures: cond ? [String(maxBack ?? "")].filter(Boolean) : [], draftSketch: { subject: "A question about the return trip", lines: [`I am working out whether everyone can arrive${dl ? ` by ${hhmm(dl.min)}` : ""}.`, ...(cond ? [cond] : [])], ask: ["How long does the drive back take?"] } };
+  }
+  const back = backS?.back ?? 0;
+  if (!dep) {
+    const total = (n - 1) * (back + load) + n * out;   // single vehicle, sequential
+    const latestDep = dl ? dl.min - (Math.ceil(n / k) * out + (Math.ceil(n / k) - 1) * (back + load)) : null;
+    const q = "When is the earliest the vehicle can leave? No departure time is in the sources or your request.";
+    comp.push(`From departure to the last arrival takes ${fmtSpan(Math.ceil(n / k) * out + (Math.ceil(n / k) - 1) * (back + load))}.`); void total;
+    return { ...base, recommendation: rec("ask", { headline: `Cannot confirm yet: no departure time was found in the sources, or not in wording Jarvis can read.${latestDep !== null && dl ? ` Everyone arrives ${dl.strict ? "before" : "by"} ${hhmm(dl.min)} only if the vehicle leaves at ${hhmm(latestDep)} or earlier.` : ""}`, question: q, nextAction: { kind: "ask_missing", text: q }, qualifiers: ["Provisional until a departure time is known."] }), options: [], contact: null, data: { trips: n, latestDep }, figures: [{ label: "Trips needed", value: `${n} (${sizes.join(" + ")})` }, ...(latestDep !== null ? [{ label: "Latest departure that works", value: hhmm(latestDep) }] : [])], keyFigures: latestDep !== null ? [hhmm(latestDep)] : [], draftSketch: { subject: "Departure time", lines: [`Everyone can arrive${dl ? ` ${dl.strict ? "before" : "by"} ${hhmm(dl.min)}` : ""} only if the vehicle leaves${latestDep !== null ? ` at ${hhmm(latestDep)} or earlier` : " early enough"}.`], ask: ["When is the earliest it can leave?"] } };
+  }
+  const t = simulate(dep.min, back, k); const lastArr = Math.max(...t.map((x) => x.arrive)); const ok = okAt(lastArr); const arrivals = [...t].sort((a, b) => a.arrive - b.arrive);
+  t.forEach((x, i) => comp.push(`Trip ${i + 1}${k > 1 ? ` (vehicle ${x.v + 1})` : ""}: leaves ${hhmm(x.leave)}, arrives ${hhmm(x.arrive)} (${x.size} people)${i < n - 1 || k > 1 ? `, back at ${hhmm(x.back)}` : ""}.`));
+  const legsOut = n, legsBack = Math.ceil(n / k) - 1;
+  comp.push(`${plural(legsOut, "outbound leg")} and ${plural(legsBack, "return")} before the last arrival: ${hhmm(dep.min)} + ${Math.ceil(n / k)} × ${out}${legsBack ? ` + ${legsBack} × ${back + load}` : ""} minutes = ${hhmm(lastArr)}. The vehicle does not need to come back after the last delivery, so no final return is counted.`);
+  const lastGroup = arrivals[arrivals.length - 1];
+  let over = dl ? lastArr - dl.min : 0; const dlTxt = dl ? hhmm(dl.min) : "";
+  const arrTxt = arrivals.map((x) => hhmm(x.arrive)).join(", "); const sizeTxt = arrivals.map((x) => x.size).join(", ");
+  const figures = [{ label: "Last group arrives", value: `${hhmm(lastArr)}${dl ? (ok ? ` (${fmtSpan(dl.min - lastArr)} before the ${dlTxt} deadline)` : ` (${fmtSpan(over)} after the ${dlTxt} deadline)`) : ""}` }, { label: "Group arrival times", value: `${arrTxt} (${sizeTxt} people)` }, { label: "Trips needed", value: `${n} (${sizes.join(" + ")})` }, { label: "Legs before the last arrival", value: `${legsOut} out, ${legsBack} back` }];
+  const options: PlanOpt[] = [{ option: `${plural(k, "vehicle")}, leave ${hhmm(dep.min)}`, label: `${plural(k, "vehicle")}, leaving ${hhmm(dep.min)}`, verdict: ok === false ? "fails" : "works", summary: `${plural(k, "vehicle")} leaving ${hhmm(dep.min)}: the last group arrives ${hhmm(lastArr)}${dl ? (ok ? ", on time" : `, ${fmtSpan(over)} late`) : ""}.`, steps: arrivals.map((x, i) => ({ when: `${hhmm(x.leave)} to ${hhmm(x.arrive)}`, what: `Group ${i + 1}: ${x.size} people${k > 1 ? ` (vehicle ${x.v + 1})` : ""}` })), checks: dl ? [ok ? `Arrives ${fmtSpan(dl.min - lastArr)} before ${dlTxt}.` : `Arrives ${fmtSpan(over)} after ${dlTxt}.`] : ["No deadline found, so none was checked."] }];
+  const keyFigures = [hhmm(lastArr)]; const lines: string[] = []; const ask: string[] = [];
+  lines.push(`With the ${hhmm(dep.min)} departure the groups would arrive at ${arrTxt} (${sizeTxt} people), so the last ${lastGroup.size} would arrive at ${hhmm(lastArr)}${dl ? (ok ? `, in time for ${dlTxt}` : `, ${fmtSpan(over)} after the ${dlTxt} deadline`) : ""}.`);
+  const alt: string[] = [];
+  if (dl && ok === false) {
+    const latestDep = dep.min - over - (dl.strict ? 1 : 0); alt.push(`leave at ${hhmm(latestDep)} or earlier`); keyFigures.push(hhmm(latestDep));
+    options.push({ option: `leave ${hhmm(latestDep)}`, label: `Leave at ${hhmm(latestDep)} (${plural(k, "vehicle")})`, verdict: "works", summary: `Leaving ${hhmm(latestDep)} instead of ${hhmm(dep.min)}, the last group arrives ${hhmm(lastArr - (dep.min - latestDep))}.`, steps: [], checks: [`Everything shifts ${fmtSpan(dep.min - latestDep)} earlier, so the last arrival is ${hhmm(lastArr - (dep.min - latestDep))}.`] });
+    for (let kk = k + 1; kk <= k + 5; kk++) { const tt = simulate(dep.min, back, kk); const la = Math.max(...tt.map((x) => x.arrive)); if (okAt(la)) { alt.push(`add ${kk - k === 1 ? "another vehicle" : `${kk - k} more vehicles`} (the last group would arrive ${hhmm(la)})`); options.push({ option: `${kk} vehicles`, label: `${plural(kk, "vehicle")}, leaving ${hhmm(dep.min)}`, verdict: "works", summary: `${plural(kk, "vehicle")} leaving ${hhmm(dep.min)}: the last group arrives ${hhmm(la)}.`, steps: [...tt].sort((a, b) => a.arrive - b.arrive).map((x, i) => ({ when: `${hhmm(x.leave)} to ${hhmm(x.arrive)}`, what: `Group ${i + 1}: ${x.size} people (vehicle ${x.v + 1})` })), checks: [`Arrives ${fmtSpan(dl.min - la)} before ${dlTxt}.`] }); keyFigures.push(hhmm(la)); break; } }
+    ask.push(`Could we ${alt.length > 1 ? alt[0] + ", or " + (/^add /.test(alt[1]) ? alt[1].replace(/^add /, "arrange ") : alt[1]) : alt[0] ?? "change the plan"}?`);
+  }
+  const alsoTxt = alt.length ? ` Two ways to fix it: ${alt.join("; or ")}.` : "";
+  const headline = dl ? (ok ? `Yes: ${plural(k, "vehicle")} leaving ${hhmm(dep.min)} gets everyone there ${dl.strict ? "before" : "by"} ${dlTxt}. The last group of ${lastGroup.size} arrives ${hhmm(lastArr)}, ${fmtSpan(dl.min - lastArr)} early.` : `No: ${plural(k, "vehicle")} leaving ${hhmm(dep.min)} misses ${dlTxt} by ${fmtSpan(over)}. The groups arrive at ${arrTxt} (${sizeTxt} people), so the last ${lastGroup.size} arrive at ${hhmm(lastArr)}.${alsoTxt}`) : `The last group arrives ${hhmm(lastArr)}. No deadline was found, so none was checked.`;
+  const tradeoff = [`${people!.n} people at ${seats} per trip is ${plural(n, "trip")} (${sizes.join(" + ")}), each ${out} minutes out${legsBack ? ` and ${back} back` : ""}.`, `${plural(legsOut, "outbound leg")} and ${plural(legsBack, "return")} come before the last arrival, and no return is counted after it.`, ...options.slice(1).map((o) => o.summary)];
+  if (setAside.length && dep) tradeoff.push(`The departure used is ${hhmm(dep.min)}, which replaced ${setAside.filter((r) => r.label === "Earlier departure").map((r) => r.value).join(", ") || "an earlier time"}.`);
+  const contact = items.find((i) => i.author)?.author ?? null;
+  const next = ok === false ? { kind: "propose_fix", text: `Ask for an earlier departure (${alt[0]?.replace(/^leave /, "") ?? ""}) or another vehicle.` } : { kind: "none", text: "Nothing is blocking it on the evidence found." };
+  return { ...base, recommendation: rec(ok === false ? "none_fits" : "recommend", { option: options[0].option, label: options[0].label, headline, tradeoff, nextAction: next, qualifiers: day === null ? ["No date was found for this trip, so only times of day are compared."] : [] }), options, contact: { name: contact, why: "shuttle" }, data: { trips: n, lastArrival: hhmm(lastArr), over }, figures, keyFigures, draftSketch: { subject: ok === false ? "The shuttle will arrive late with the current departure" : "Shuttle plan", lines, ask } };
+}
+
 /** Plan from the authorized sources. Returns null when the sources hold nothing that looks like a plan. */
-export function analyzePlan(items: ItemIn[], request: string): PlanAnalysis | null {
+// =====================================================================================================
+//  SEQUENCE: items that run one after another, with breaks, against a window ("will the agenda fit the booking")
+// =====================================================================================================
+const ORD: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10 };
+const FILLER = new Set(["now", "still", "also", "only", "currently", "then", "just", "will", "the", "a", "an", "and", "each", "all", "that", "which", "item", "items", "agenda", "has", "have"]);
+const itemKey = (name: string) => name.toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter((w) => w && !FILLER.has(w)).map(stem).join(" ");
+const cleanName = (name: string) => name.replace(/^(?:and|then|also|the|a|an)\s+/i, "").replace(/\s+(?:now|still|also|only|currently|then|will)$/i, "").trim();
+export const looksLikeSequence = (request: string) => /\b(agenda|schedule|timetable|programme|program|itinerary|running order|line-?up|talks?|speakers?|items?|segments?|stops?)\b/i.test(request);
+
+function planSequence(items: ItemIn[], request: string): PlanAnalysis | null {
+  const all = sentencesOf(items).filter((s) => !ownMatterOfSender(s)); const inputs: PlanRow[] = []; const setAside: PlanRow[] = []; const notes: string[] = []; const comp: string[] = [];
+  // Each "<name> takes <n> minutes" clause, in the order written. The latest statement for a name wins; the replaced one is kept.
+  type Dur = { name: string; key: string; min: number; s: Sent; order: number };
+  const durs: Dur[] = [];
+  for (const s of [...all].sort((a, b) => String(a.item.at).localeCompare(String(b.item.at)) || a.start - b.start)) {
+    if (/\b(?:break|booked|reserved)\b/i.test(s.text) && !/\btakes?\b/i.test(s.text)) continue;
+    const clauses = s.text.split(/\s*(?:,|;|\band\b)\s*(?=[^,;]*\b(?:takes?|needs?|lasts?)\b)/i);
+    for (const c of clauses) { const m = new RegExp(`^(.{2,60}?)\\s+(?:now\\s+|still\\s+)?(?:takes?|needs?|lasts?|runs? for)\\s+(?:about\\s+)?${NUM}\\s*(minutes?|mins?|hours?|hrs?)\\b`, "i").exec(c.trim()); if (!m) continue; const name = cleanName(m[1].split(":").pop()!.replace(/^.*\bthat\s+/i, "")); const key = itemKey(name); if (!key) continue; durs.push({ name, key, min: durMin(String(numOf(m[2])), m[3]), s, order: durs.length }); }
+  }
+  const keys = [...new Set(durs.map((d) => d.key))]; if (keys.length < 2) return null;
+  const order = keys.map((k) => durs.find((d) => d.key === k)!);   // first mention fixes the position
+  const cur = order.map((first) => { const all2 = durs.filter((d) => d.key === first.key).sort((a, b) => byRecency(a.s, b.s)); return { first, now: all2[0], older: all2.slice(1) }; });
+  // Breaks: "10 minute coffee break after the second item".
+  const breaks: { after: number; min: number; s: Sent }[] = [];
+  for (const s of all) { const m = new RegExp(`${NUM}\\s*(?:-\\s*)?(minutes?|mins?|hours?|hrs?)?\\s+(?:[a-z]+\\s+)?break\\s+after\\s+(?:the\\s+)?(${Object.keys(ORD).join("|")}|\\d+(?:st|nd|rd|th)?)\\b`, "i").exec(s.text); if (m) { const after = ORD[m[3].toLowerCase()] ?? parseInt(m[3], 10); breaks.push({ after, min: m[2] ? durMin(String(numOf(m[1])), m[2]) : Number(numOf(m[1])), s }); } }
+  // The window and the start.
+  const win = [...all].sort(byRecency).map((s) => { const m = new RegExp(`\\b(?:booked|reserved|available|open|free|scheduled)\\s+(?:from\\s+)?(${CLOCK})\\s*(?:to|until|-|–)\\s*(${CLOCK})`, "i").exec(s.text); if (!m) return null; const cl = clocksIn(m[0]); return cl.length >= 2 ? { a: cl[0], b: cl[1], s } : null; }).find(Boolean) as { a: number; b: number; s: Sent } | undefined;
+  const startS = [...all].sort(byRecency).map((s) => { const m = new RegExp(`\\b(?:start|starts|begin|begins|kick(?:s)? off)\\b[^.]{0,20}?\\bat\\s+(${CLOCK})`, "i").exec(s.text); return m ? { min: clocksIn(m[0])[0], s } : null; }).find(Boolean) as { min: number; s: Sent } | undefined;
+  const start = startS?.min ?? win?.a ?? null;
+  const basis = [win ? `window ${hhmm(win.a)} to ${hhmm(win.b)}` : null].filter(Boolean) as string[];
+  const rec = (kind: PlanRec["kind"], p: Partial<PlanRec>): PlanRec => ({ kind, option: null, label: null, headline: "", tradeoff: [], question: null, nextAction: null, basis, qualifiers: [], ...p });
+  for (const c of cur) { inputs.push(row(`${c.first.name[0].toUpperCase()}${c.first.name.slice(1)}`, `${c.now.min} minutes`, c.now.s, c.older.length ? "latest statement" : undefined)); for (const o of c.older) if (o.min !== c.now.min) setAside.push(row(`Earlier length: ${c.first.name}`, `${o.min} minutes`, o.s, `replaced by ${c.now.min} minutes (${c.now.s.item.title})`)); }
+  for (const b of breaks) inputs.push(row(`Break after item ${b.after}`, `${b.min} minutes`, b.s));
+  if (win) inputs.push(row("Booked window", `${hhmm(win.a)} to ${hhmm(win.b)}`, win.s)); if (startS) inputs.push(row("Planned start", hhmm(startS.min), startS.s));
+  const base = { type: "plan" as const, kind: "sequence" as const, inputs, setAside, notes, computation: comp };
+  if (start === null) { const q = "When does it start, and what is the booked window? Neither is in the sources or your request."; return { ...base, recommendation: rec("insufficient", { headline: "I cannot lay the items out: no start time or booked window was found.", question: q, nextAction: { kind: "ask_missing", text: q } }), options: [], contact: null, data: {} }; }
+  let t = start; const rows: { name: string; a: number; b: number; brk?: number }[] = [];
+  cur.forEach((c, i) => { const a = t; const b = a + c.now.min; t = b; rows.push({ name: c.first.name.charAt(0).toUpperCase() + c.first.name.slice(1), a, b }); const br = breaks.find((x) => x.after === i + 1); if (br) { rows.push({ name: "Break", a: t, b: t + br.min, brk: br.min }); t += br.min; } });
+  const items2 = rows.filter((r) => !r.brk); const end = items2[items2.length - 1].b; const total = rows.reduce((a, r) => a + (r.b - r.a), 0);
+  comp.push(`${cur.map((c) => `${c.now.min}`).join(" + ")}${breaks.length ? ` + ${breaks.map((b) => b.min).join(" + ")} break` : ""} = ${total} minutes (${fmtSpan(total)}).`);
+  rows.forEach((r) => comp.push(`${r.name}: ${hhmm(r.a)} to ${hhmm(r.b)}`));
+  const winTxt = win ? `${hhmm(win.a)} to ${hhmm(win.b)}` : null; const over = win ? end - win.b : null; const ok = win ? end <= win.b : null;
+  if (win) comp.push(`Start ${hhmm(start)} + ${total} minutes = ${hhmm(end)}; the booking ends ${hhmm(win.b)}, so ${ok ? `${fmtSpan(win.b - end)} to spare` : `it overruns by ${fmtSpan(over!)}`}. Items run in the order written, with no gaps except the stated breaks.`);
+  const lines = rows.map((r) => `${hhmm(r.a)}–${hhmm(r.b)}  ${r.name}`);
+  const figures = [{ label: "Last item ends", value: `${hhmm(end)}${win ? (ok ? ` (${fmtSpan(win.b - end)} before the booking ends)` : ` (${fmtSpan(over!)} after the booking ends at ${hhmm(win.b)})`) : ""}` }, { label: "Total length", value: fmtSpan(total) }, ...rows.filter((r) => !r.brk).map((r) => ({ label: `${r.name} starts`, value: `${hhmm(r.a)} (ends ${hhmm(r.b)})` }))];
+  const timetable: PlanStep[] = rows.map((r) => ({ when: `${hhmm(r.a)} to ${hhmm(r.b)}`, what: r.name }));
+  const fixes: string[] = []; if (win && !ok) { const longest = [...cur].sort((a, b) => b.now.min - a.now.min)[0]; fixes.push(`extend the booking to ${hhmm(end)}`, `start at ${hhmm(start - over!)}`, `cut ${fmtSpan(over!)} (for example from the ${longest.first.name}, ${longest.now.min} minutes)`); }
+  const options: PlanOpt[] = [{ option: "as written", label: "As written", verdict: ok === false ? "fails" : "works", summary: `As written the last item ends ${hhmm(end)}${win ? (ok ? ", inside the booking" : `, ${fmtSpan(over!)} after it ends`) : ""}.`, steps: timetable, checks: win ? [ok ? `Ends ${fmtSpan(win.b - end)} before ${hhmm(win.b)}.` : `Ends ${fmtSpan(over!)} after ${hhmm(win.b)}.`] : ["No booked window found, so none was checked."] }];
+  if (fixes.length) options.push({ option: "fix", label: "What would make it fit", verdict: "works", summary: fixes.join("; "), steps: [], checks: fixes });
+  const headline = win ? (ok ? `Yes: the agenda fits. Starting ${hhmm(start)}, the last item ends ${hhmm(end)}, ${fmtSpan(win.b - end)} before the booking ends at ${hhmm(win.b)}.` : `No: starting ${hhmm(start)}, the agenda runs until ${hhmm(end)}, ${fmtSpan(over!)} past the end of the ${winTxt} booking. To fit: ${fixes.join(", or ")}.`) : `Starting ${hhmm(start)}, the last item ends ${hhmm(end)}. No booked window was found, so none was checked.`;
+  const tradeoff = [`${cur.length} items and ${plural(breaks.length, "break")} take ${fmtSpan(total)} in total.`, ...(setAside.length ? [`Latest lengths are used: ${setAside.map((r) => `${r.label.replace("Earlier length: ", "")} was ${r.value}, now ${r.note!.match(/replaced by (\d+ minutes)/)?.[1]}`).join("; ")}.`] : [])];
+  return { ...base, recommendation: rec(ok === false ? "none_fits" : "recommend", { option: "as written", label: "As written", headline, tradeoff, nextAction: ok === false ? { kind: "propose_fix", text: `Decide how to make it fit: ${fixes.join("; or ")}.` } : { kind: "none", text: "Nothing is blocking it on the evidence found." }, qualifiers: [] }), options, contact: null, data: { end: hhmm(end) }, figures, keyFigures: [hhmm(end)], draftSketch: { subject: "Agenda", lines, ask: [], form: "list" } };
+}
+
+const hm2 = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+/** Name the figures a plan produced, so a requested figure and a draft can be checked against them. */
+function withFigures(p: PlanAnalysis | null): PlanAnalysis | null {
+  if (!p || p.figures) return p;
+  const d = p.data as any;
+  if (p.kind === "capacity" && d.room && d.sessions) { const ss = d.sessions as { s: number; e: number; n: number }[]; p.figures = [{ label: "Room", value: String(d.room) }, { label: "Sessions", value: ss.map((x) => `${hm2(x.s)} to ${hm2(x.e)} (${x.n} people)`).join(" and ") }]; p.keyFigures = [String(d.room), hm2(ss[0].s)]; }
+  if (p.kind === "batch" && d.runs) { const good = p.options.find((o) => o.verdict === "works"); const last = good?.steps[good.steps.length - 1]; p.figures = [{ label: "Runs needed", value: String(d.runs) }, ...(last ? [{ label: "Last unload", value: last.when }] : [])]; p.keyFigures = last ? [last.when] : []; }
+  return p;
+}
+export function analyzePlan(items: ItemIn[], request: string): PlanAnalysis | null { return withFigures(analyzePlanRaw(items, request)); }
+function analyzePlanRaw(items: ItemIn[], request: string): PlanAnalysis | null {
   void dayOfIso;
+  if (looksLikeTrips(request)) { const t = planTrips(items, request); if (t && (t.options.length || t.inputs.length > 1)) return t; }
+  if (looksLikeSequence(request)) { const q = planSequence(items, request); if (q) return q; }
   const wantsPlace = /\b(where|which room|which space|what room)\b/i.test(request) || /\b(everyone|all)\b[^.?]*\b(attend|fit|registered|come)\b/i.test(request);
   const first = wantsPlace ? planCapacity(items, request) : planBatch(items, request);
   if (first && (first.options.length || first.recommendation.kind === "insufficient" && first.inputs.length)) return first;

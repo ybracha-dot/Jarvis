@@ -255,6 +255,9 @@ CREATE TABLE roundtrips(
   written_at TEXT, written_client TEXT, fact_id TEXT, edited_at TEXT, read_at TEXT, read_client TEXT, read_saw TEXT, read_origin TEXT);
 CREATE TABLE feed_state(source_id TEXT PRIMARY KEY REFERENCES evidence_sources(id), etag TEXT, last_modified TEXT, last_status TEXT, checked_at TEXT);
 `,
+  /* 7 requested parts: each part of a multi-part request keeps its own status */ `
+ALTER TABLE result_versions ADD COLUMN outcomes TEXT;
+`,
 ];
 
 const cache = new Map<string, DB>();

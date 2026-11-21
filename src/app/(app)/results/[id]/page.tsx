@@ -44,6 +44,8 @@ function Result({ id }: { id: string }) {
         {working && <Button size="sm" variant="danger" busy={cancel.busy} onClick={() => cancel.run()}><Square className="size-4" />Cancel</Button>}
         {(r.status === "failed" || r.status === "cancelled") && <Button size="sm" variant="primary" busy={resume.busy} onClick={() => resume.run()}>Continue</Button>}
       </section>
+      {d.outcomes?.length > 0 && <section aria-label="What you asked for" data-testid="requested-parts"><SectionTitle>What you asked for{d.completion !== "complete" && <Badge tone="amber" className="ml-2" data-testid="partly-done">partly done</Badge>}</SectionTitle>
+        <ul className="rounded-xl border border-line bg-surface divide-y divide-line">{d.outcomes.map((o: any) => <li key={o.id} className="px-4 py-3 flex gap-3 items-start" data-testid="requested-part" data-status={o.status}><Badge tone={o.status === "done" ? "accent" : o.status === "partial" ? "amber" : "danger"} className="shrink-0 mt-0.5">{o.status === "done" ? "done" : o.status === "partial" ? "partly done" : "not done"}</Badge><div className="min-w-0"><p className="text-[15px] break-words">{o.text}</p><p className="text-[14px] text-muted break-words">{o.detail}</p></div></li>)}</ul></section>}
       {blockedJob && <Card className="p-4 space-y-2" data-testid="result-question"><b className="text-[15px] text-amber">Jarvis needs one answer</b><p className="text-[15px]">{r.blockers[0]}</p><BlockedAsk /></Card>}
       {d.stale && <Notice>This version is out of date: {d.stale} Ask again to rebuild it from what is still authorized.</Notice>}
       {d.body && <section aria-label={KIND[d.kind]} className="rounded-2xl border border-line bg-surface metal p-5 md:p-6 space-y-1" data-testid="result-body">

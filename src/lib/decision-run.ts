@@ -123,7 +123,7 @@ function buildDraft(a: Analysis, rec: Analysis["recommendation"], me: string, re
 
 // ---------- time and capacity plans ----------
 const rowJson = (r: PlanRow) => ({ label: r.label, value: r.value, note: r.note ?? null, itemId: r.src?.itemId ?? null, title: r.srcTitle, at: r.src?.at ?? null, quote: r.quote });
-function planJson(p: PlanAnalysis, itemIds: string[]) { return { version: 1, type: "plan" as const, kind: p.kind, itemIds, recommendation: p.recommendation, inputs: p.inputs.map(rowJson), computation: p.computation, options: p.options, setAside: p.setAside.map(rowJson), notes: p.notes }; }
+function planJson(p: PlanAnalysis, itemIds: string[]) { return { version: 1, type: "plan" as const, kind: p.kind, itemIds, recommendation: p.recommendation, inputs: p.inputs.map(rowJson), computation: p.computation, options: p.options, setAside: p.setAside.map(rowJson), notes: p.notes, figures: p.figures ?? [], keyFigures: p.keyFigures ?? [] }; }
 export type PlanJson = ReturnType<typeof planJson>;
 const isPlan = (a: unknown): a is PlanJson => !!a && (a as any).type === "plan";
 export { isPlan };
@@ -141,20 +141,29 @@ export function composePlan(ctx: Ctx, b: { items: { id: string }[]; planIds?: st
   if (depends.length) lines.push("", `**What still depends on you**`, "", ...depends.map((d) => `- ${d}`));
   if (p.setAside.length) { lines.push("", `**Set aside, with the reason**`, "", ...p.setAside.map((r) => `- ${r.label}${r.value && r.value !== "set aside" ? ` (${r.value})` : ""}: ${r.note ?? ""} (${r.srcTitle})`)); for (const r of p.setAside) if (r.src && r.quote) sources.push({ itemId: r.src.itemId, revision: r.src.revision, title: r.src.title, kind: r.src.kind, at: r.src.at, sourceLabel: r.src.sourceLabel, mode: r.src.mode, role: `set aside: ${r.note ?? r.label}`.slice(0, 120), quote: r.quote }); }
   if (rec.kind === "insufficient" || rec.question) flags.push({ kind: "missing_input", text: rec.question ?? "An input is missing." });
-  const me = ownerName(ctx); const draft = o.wantDraft && rec.kind !== "insufficient" && !(rec.kind === "none_fits") ? buildPlanDraft(p, request, me, items) : null;
+  const me = ownerName(ctx); const draft = o.wantDraft && (p.draftSketch || (rec.kind !== "insufficient" && rec.kind !== "none_fits")) ? buildPlanDraft(p, request, me, items) : null;
   if (!o.wantDraft && rec.nextAction && !["none", "ask_missing"].includes(rec.nextAction.kind)) flags.push({ kind: "draft_available", text: "Say “draft it” to get a ready-to-edit message for that next step. Nothing is sent." });
   const summary = rec.headline.replace(/\*\*/g, "").slice(0, 260);
   return { title: `${p.kind === "capacity" ? "Plan" : "Schedule"}: ${shortTitle(request.split(/[,.?!]| and /)[0], 72)}`, body: lines.join("\n"), summary, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: planJson(p, ids), draft, needsJudgment: false, localOnly: !!b.localOnly };
 }
 
+const NOT_NAMES = new Set(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December", "Jarvis"]);
+/** The person the request names, resolved to a full name when a source gives one; otherwise the name as written. */
 function recipientIn(request: string, items: ItemIn[], fallback: string | null): string | null {
-  const m = /(?:to|for|ask|tell|email|message)\s+([A-Z][a-z]+)/.exec(request);
-  if (m) { const hit = items.find((i) => i.author && first(i.author).toLowerCase() === m[1].toLowerCase()); if (hit) return hit.author; }
+  const m = /\b(?:to|for|ask|tell|email|message)\s+([A-Z][a-z]+)\b/.exec(request);
+  if (m && !NOT_NAMES.has(m[1])) { const hit = items.find((i) => i.author && first(i.author).toLowerCase() === m[1].toLowerCase()); return hit?.author ?? m[1]; }
   return fallback;
 }
 /** A ready-to-edit message for the plan's next step. It states only what the plan computed, and says which part is still unconfirmed. */
 function buildPlanDraft(p: PlanAnalysis, request: string, me: string, items: ItemIn[]) {
   const rec = p.recommendation; const to = recipientIn(request, items, p.contact?.name ?? null); const hi = `Hi ${to ? first(to) : "there"},`;
+  // The plan supplies its own computed sentences and the questions it needs answered. The draft says only what the plan verified.
+  if (p.draftSketch) {
+    const sk = p.draftSketch;
+    if (sk.form === "list") return { to: null, subject: sk.subject, purpose: "list", body: [`${sk.subject} (${p.recommendation.headline.replace(/\*\*/g, "").split(". ")[0]}.)`, "", ...sk.lines].join("\n") };
+    const body = [hi, "", ...sk.lines, ...(sk.lines.length ? [""] : []), ...sk.ask, ...(sk.ask.length ? [""] : []), "Thanks,", me];
+    return { to, subject: sk.subject, purpose: "follow-up", body: body.join("\n") };
+  }
   if (p.kind === "batch") {
     const best = p.options.find((o) => o.verdict === "works") ?? p.options[0]; const steps = best?.steps ?? [];
     const slotTxt = (rec.nextAction?.text.match(/the (.+?) slot/)?.[1]) ?? best?.label.replace(/^.*starting /, "") ?? "";
