@@ -120,12 +120,12 @@ on("POST", "/projects/facts/:id/forget", (c, r) => { r.json(z.object({ confirm: 
 on("POST", "/projects/facts/:id/pin", (c, r) => pinFact(c, r.params.id, r.json(z.object({ pinned: z.boolean() })).pinned));
 on("POST", "/projects/facts/:id/resolve", (c, r) => resolveSuggestion(c, r.params.id, r.json(z.object({ accept: z.boolean() })).accept));
 on("POST", "/projects/events/:id/undo", (c, r) => undoEvent(c, r.params.id));
-on("GET", "/connections", (c) => ({ tokens: listTokens(c), probe: probeState(c), envToken: !!process.env.JARVIS_MCP_TOKEN, publicUrl: process.env.JARVIS_PUBLIC_URL ?? null, ingress: process.env.JARVIS_PUBLIC_MODE === "mcp-only" ? "mcp-only" : "full", mode: c.mode }));
-on("POST", "/connections/tokens", (c, r) => createToken(c, r.json(NewToken)));
-on("POST", "/connections/tokens/:id/revoke", (c, r) => revokeToken(c, r.params.id));
-on("POST", "/connections/tokens/:id/rotate", (c, r) => rotateToken(c, r.params.id));
-on("POST", "/connections/probe", (c) => startProbe(c));
-on("POST", "/connections/probe/:id/edit", (c, r) => editProbe(c, r.params.id));
+on("GET", "/connector", (c) => ({ tokens: listTokens(c), probe: probeState(c), envToken: !!process.env.JARVIS_MCP_TOKEN, publicUrl: process.env.JARVIS_PUBLIC_URL ?? null, ingress: process.env.JARVIS_PUBLIC_MODE === "mcp-only" ? "mcp-only" : "full", mode: c.mode }));
+on("POST", "/connector/tokens", (c, r) => createToken(c, r.json(NewToken)));
+on("POST", "/connector/tokens/:id/revoke", (c, r) => revokeToken(c, r.params.id));
+on("POST", "/connector/tokens/:id/rotate", (c, r) => rotateToken(c, r.params.id));
+on("POST", "/connector/probe", (c) => startProbe(c));
+on("POST", "/connector/probe/:id/edit", (c, r) => editProbe(c, r.params.id));
 on("GET", "/office", (c) => ({ ...officeState(c), runner: runnerStatus(c.mode), decisions: listDecisions(c).filter((d) => ["commitment_plan"].includes(d.kind)).map((d) => ({ id: d.id, title: d.title, urgency: d.urgency })),
   captures: all(c.db, "SELECT id FROM captures WHERE owner_id=? ORDER BY created_at DESC LIMIT 5", c.owner).map((x) => captureReceipt(c, x.id as string)), templates: all(c.db, "SELECT id,name,role,status,tools FROM specialist_templates WHERE owner_id=?", c.owner) }));
 on("POST", "/office/run", (c) => { kick(c.mode); return { ok: true }; });

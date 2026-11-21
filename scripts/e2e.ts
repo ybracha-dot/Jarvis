@@ -109,8 +109,10 @@ async function journeyDesktop(ctx: BrowserContext) {
   await page.reload();
   await page.getByTestId("primary-action").waitFor();
   ok((await page.getByTestId("decision-card").count()) === 0, "no pending decision after refresh");
-  await page.getByText("Decided").waitFor();
-  ok(/Reserved|Done|reserved/.test(await page.locator("aside").innerText()), "decided list persists after refresh");
+  ok((await page.locator("aside[aria-label='Decisions']").count()) === 0, "with nothing pending the decisions inspector gives the space back");
+  await page.goto(base + "/decisions"); await page.getByText("Decided").waitFor();
+  ok(/Reserved|Done|reserved/.test(await page.locator("main").innerText()), "decided list persists after refresh");
+  await page.goto(base + "/");
 
   step("Retry the same reserve through the API");
   const again = await post(`/decisions/${accepted.id}/reserve`, {});
@@ -297,7 +299,9 @@ async function journeyMemoryGoals(page: Page) {
 
   step("Memory: search, map, vault, forget");
   await page.goto(base + "/memory");
-  await page.getByLabel("Search notes").fill("shabbat");
+  await page.getByLabel("Ask memory").fill("shabbat");
+  await page.getByTestId("memory-answer").waitFor();
+  ok(/Why:/.test(await page.getByTestId("memory-answer").innerText()), "memory answers with a current answer and why");
   await page.getByRole("button", { name: /Protect Shabbat/ }).first().click();
   await page.getByTestId("note-editor").waitFor();
   ok(/Scheduling rules/.test(await page.getByTestId("note-editor").innerText()), "links and backlinks show");
@@ -317,13 +321,14 @@ async function journeyMemoryGoals(page: Page) {
   await page.getByTestId("reflection-log").getByText(/Perspective A/).waitFor();
   const dump = JSON.stringify(await (await fetch(`${base}/api/export`)).json());
   ok(!dump.includes("zebra-quokka-7731"), "private room content is not stored or exported");
-  await page.getByRole("tab", { name: "Notes" }).click();
-  await page.getByLabel("Search notes").fill("sydney");
+  await page.getByRole("tab", { name: "Memory" }).click();
   await page.getByRole("button", { name: /Leaning Sydney/ }).first().click();
   await page.getByRole("button", { name: "Forget", exact: true }).click();
   await page.getByRole("button", { name: /Confirm: remove/ }).click();
-  await page.getByText("No matches").waitFor();
-  ok(true, "forget removes the note from search");
+  await page.waitForFunction(() => !/Leaning Sydney/.test(document.querySelector("main")?.textContent ?? ""));
+  await page.getByLabel("Ask memory").fill("sydney");
+  await page.getByTestId("memory-answer").getByText(/nothing saved/).waitFor();
+  ok(true, "forget removes the note from the list and from the answer");
   await shot(page, "08-memory-desktop.png");
 }
 
@@ -411,7 +416,9 @@ async function journeyBreak(page: Page) {
   ok(/solid 2px/.test(outline), `focus is visible (${outline})`);
 
   step("Connections drawer and health check");
-  await page.getByRole("button", { name: "Connections and health" }).click();
+  await page.getByRole("link", { name: "Connections", exact: true }).click(); await page.waitForURL(/\/connections/);
+  ok(/Not verified with ordinary Claude yet/.test(await page.getByTestId("connection-status").innerText()), "connections page does not claim ordinary Claude is verified");
+  await page.goto(base + "/?connections=1");
   await page.getByTestId("connections-list").waitFor();
   await page.getByRole("button", { name: "Run health check" }).click();
   await page.getByText(/Local checks only/).first().waitFor();
@@ -419,6 +426,87 @@ async function journeyBreak(page: Page) {
   ok(!/live verified/i.test(ct.replace(/not live verified/gi, "")), "no connection claims to be live verified");
   ok(/Blackboard/.test(ct) && /Needs connection/.test(ct), "Blackboard is honest about needing you");
   await page.keyboard.press("Escape");
+}
+
+async function journeyProjects(page: Page) {
+  step("Projects and the connector: Claude plans a trip, Jarvis knows what was decided");
+  await post("/demo/reset", { confirm: "RESET DEMO" });
+  await page.goto(base + "/projects");
+  await page.getByTestId("projects-empty").waitFor();
+  ok(/Connections/.test(await page.getByTestId("projects-empty").innerText()), "the empty state says how a project starts and points at Connections");
+  await shot(page, "20-projects-empty-desktop.png");
+  await page.goto(base + "/connections");
+  ok(/Not verified with ordinary Claude yet/.test(await page.getByTestId("connection-status").innerText()), "connections starts unverified");
+  await page.getByTestId("token-create").click();
+  await page.getByTestId("token-fresh").waitFor();
+  const token = (await page.getByTestId("token-value").innerText()).trim();
+  ok(/^jvs_d_[A-Za-z0-9_-]{43}$/.test(token), "a token is shown once");
+  ok(!JSON.stringify(await api("/connector")).includes(token), "the API never returns the secret again");
+  await page.reload(); await page.getByTestId("token-list").waitFor();
+  ok((await page.getByTestId("token-fresh").count()) === 0 && !(await bodyText(page)).includes(token), "after a reload the secret is gone from the page");
+  ok(!page.url().includes("jvs_"), "the token never appears in a URL");
+
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+  const connect = async (t: string) => { const c = new Client({ name: "ordinary-claude-emulator", version: "1" }); await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${t}` } } })); return c; };
+  const call = async (c: any, name: string, args: any) => { const r = await c.callTool({ name, arguments: args }); return r.isError ? { error: r.content[0].text } : JSON.parse(r.content[0].text); };
+  const claude = await connect(token);
+  const r1 = await call(claude, "apply_project_update", { project: "Iceland trip", createIfMissing: { kind: "trip" }, eventId: "e2e-iceland-0001", dedupKey: "chat:4", changes: [{ op: "option", key: "lodging", text: "Reykjavik apartment" }, { op: "option", key: "lodging", text: "Vik guesthouse" }, { op: "decide", key: "dates", text: "June 14 to 21" }] });
+  ok(r1.saved && r1.revision === 1 && r1.origin === "claude", "Claude saved a trip update through the connector and got a receipt");
+  ok((await call(claude, "apply_project_update", { project: "Iceland trip", eventId: "e2e-iceland-0002", dedupKey: "chat:4", changes: [{ op: "fact", key: "z", text: "z" }] })).replay === true, "replaying the message did not write twice");
+  await page.goto(base + "/projects");
+  await page.getByTestId("project-card").filter({ hasText: "Iceland trip" }).click();
+  await page.getByTestId("project-answer").waitFor();
+  ok(/June 14 to 21/.test(await page.getByTestId("project-answer").innerText()), "the project page shows the decision Claude saved");
+  ok((await page.getByTestId("project-fact").filter({ hasText: "Vik guesthouse" }).count()) === 1, "undecided options are listed separately");
+  ok(/Claude conversation/.test(await page.getByTestId("project-fact").filter({ hasText: "June 14 to 21" }).innerText()), "each item says it came from a Claude conversation");
+  await shot(page, "21-project-desktop.png");
+  await page.getByTestId("project-fact").filter({ hasText: "June 14 to 21" }).locator("button").first().click();
+  await page.getByTestId("project-inspector").waitFor();
+  ok(/e2e-iceland-0001/.test(await page.getByTestId("project-inspector").innerText()), "the inspector shows the evidence: event id, revision, source");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Edit text").fill("June 15 to 22");
+  await page.getByRole("button", { name: "Save", exact: true }).first().click();
+  await page.getByTestId("project-answer").getByText(/June 15 to 22/).waitFor();
+  ok(true, "editing in Jarvis changes the current answer");
+  const ctxNow = await call(claude, "get_project_context", { project: "Iceland trip" });
+  ok(ctxNow.current.find((f: any) => f.key === "dates").text === "June 15 to 22", "Claude reads the edit you made in Jarvis");
+  const stale = await call(claude, "apply_project_update", { project: "Iceland trip", expectedRevision: 1, eventId: "e2e-iceland-0003", changes: [{ op: "decide", key: "dates", text: "June 20 to 27" }] });
+  ok(stale.saved === false && stale.conflict === true, "a stale Claude update is refused and does not overwrite your edit");
+  await page.getByRole("button", { name: "Choose this" }).first().click();
+  await page.getByTestId("project-fact").filter({ hasText: "Decided" }).filter({ hasText: /Reykjavik|Vik/ }).first().waitFor();
+  await page.getByTestId("project-undo").click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="project-fact"]').length > 0);
+  ok(true, "undo steps back the last update");
+
+  step("Two-way connection check");
+  await page.goto(base + "/connections");
+  await page.getByTestId("probe-start").click(); await page.getByTestId("probe").waitFor();
+  const code = (await page.getByTestId("probe").innerText()).match(/JV-[0-9A-F]{6}/)![0];
+  ok((await page.getByTestId("probe-edit").isDisabled()), "the marker step waits for Claude's write");
+  await call(claude, "save_to_jarvis", { text: `Remember for Jarvis: connection check ${code}`, synthetic: true });
+  await page.getByTestId("probe").getByText(/Received/).waitFor({ timeout: 10000 });
+  await page.getByTestId("probe-edit").click(); await page.getByTestId("probe").getByText(/Marker added/).waitFor();
+  const back = await call(claude, "recall_from_jarvis", { query: `connection check ${code}` });
+  ok(back.items[0].type === "connection_check", "Claude reads the note back");
+  await page.getByTestId("connection-status").getByText(/connected and verified/).waitFor({ timeout: 10000 });
+  ok(true, "the status turns verified only after write, edit and read-back");
+  await shot(page, "22-connections-desktop.png");
+
+  step("Revoke stops the connector at once");
+  await page.getByRole("button", { name: "Revoke" }).first().click();
+  await page.getByTestId("token-list").getByText("revoked").waitFor();
+  let refused = false; try { await call(claude, "get_project_context", {}); } catch { refused = true; }
+  ok(refused, "a revoked token stops working even in an open session");
+  await claude.close().catch(() => {});
+
+  step("Memory, Today and Activity after the work");
+  await page.goto(base + "/memory"); await page.getByTestId("memory-ask").fill("dates"); await page.getByTestId("memory-answer").getByText(/June 15 to 22/).waitFor();
+  ok(/Claude conversation|Jarvis/.test(await page.getByTestId("memory-answer").innerText()), "memory answers from the project decision and says why");
+  await shot(page, "23-memory-desktop.png");
+  await page.goto(base + "/activity"); await page.getByTestId("outcomes").waitFor();
+  ok((await page.getByTestId("outcome-row").filter({ hasText: "Iceland trip" }).count()) >= 1, "Activity lists the project update as an outcome with its receipt");
+  await shot(page, "24-activity-desktop.png");
 }
 
 async function journeyMobile(browser: Browser) {
@@ -432,12 +520,10 @@ async function journeyMobile(browser: Browser) {
   ok((await overflow()) <= 0, "Today has no horizontal scroll");
   await shot(page, "10-today-mobile.png");
   await page.getByTestId("replay-update").tap();
-  await page.getByRole("link", { name: /Decisions/ }).waitFor();
-  await page.getByRole("link", { name: /Decisions/ }).filter({ hasText: "1" }).waitFor();
-  ok(true, "Decisions tab shows the count");
-  await page.getByRole("link", { name: /Decisions/ }).tap();
+  await page.getByRole("navigation", { name: "Primary mobile" }).getByRole("link", { name: /Today/ }).filter({ hasText: "1" }).waitFor();
+  ok(true, "the Today tab shows the pending-decision count");
   await page.getByTestId("decision-card").first().waitFor();
-  ok((await overflow()) <= 0, "Decisions has no horizontal scroll");
+  ok((await overflow()) <= 0, "Today with a decision has no horizontal scroll");
   await page.getByTestId("decision-card").first().tap();
   const dlg = page.getByRole("dialog"); await dlg.getByTestId("plan-chunks").waitFor();
   const box = await dlg.boundingBox();
@@ -451,15 +537,15 @@ async function journeyMobile(browser: Browser) {
   await reserve.tap();
   await dlg.getByTestId("decision-state").waitFor();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Capture" }).tap();
+  await page.getByTestId("mobile-capture").tap();
   await page.getByRole("dialog").getByLabel("Who owes").fill("Example advisor");
   await page.getByRole("dialog").getByLabel("What was promised").fill("Send the reading list");
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).tap();
   await page.getByText(/Promise saved/).waitFor();
   ok(true, "Capture works on the phone");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "More" }).tap();
-  await page.getByRole("link", { name: "Council" }).tap();
+  await page.getByRole("button", { name: "More", exact: true }).tap();
+  await page.getByRole("link", { name: "Council", exact: true }).tap();
   await page.getByText("Load the sample essay").waitFor();
   ok((await overflow()) <= 0, "Council has no horizontal scroll");
   await shot(page, "12-council-mobile.png");
@@ -543,20 +629,32 @@ async function journeyOffice(page: Page, browser: Browser) {
   ok(/three pitch angles/.test(await page.getByTestId("receipt-message").innerText()), "receipt says what was saved");
   await page.getByTestId("roster-job").filter({ hasText: "Capacity specialist" }).first().waitFor({ timeout: 20000 });
   ok(true, "the supervisor assigned a Capacity specialist");
+  // The visual test: from the room alone, who assigned, who is working, and (later) who needs you.
+  await page.getByTestId("handoff-path").first().waitFor({ timeout: 15000 });
+  ok(/Jarvis/.test(await page.getByTestId("handoff-assigned").innerText()) && /Planner|Reviewer/.test(await page.getByTestId("handoff-assigned").innerText()), "the handoff strip says who assigned it and to whom");
+  await page.getByTestId("office-worker").filter({ has: page.locator("xpath=.") }).first().waitFor();
+  ok(/Planner/.test(await page.getByTestId("handoff-working").innerText()), "the handoff strip says who is working now");
+  const workerLabels = await page.getByTestId("office-worker").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")));
+  ok(workerLabels.some((l) => /^Planner:/.test(l ?? "")), "a Planner character is in the room");
+  await shot(page, "15a-office-handoff-desktop.png");
   const spec = page.getByTestId("roster-job").filter({ hasText: "Capacity specialist" }).first();
   await spec.click();
   const insp = page.getByTestId("inspector");
-  await insp.getByText("Delegated by").waitFor();
+  await insp.getByText("Assigned by", { exact: true }).waitFor();
   const it = await insp.innerText();
   ok(/Handle:/.test(it) && /cap_/.test(it) && /No model used/.test(it) && /Last heartbeat/.test(it), "inspector shows who delegated it, evidence, usage and heartbeat");
   await shot(page, "15-office-desktop.png");
   await waitFor("the decision to arrive", async () => (await api("/decisions")).decisions.some((d: any) => d.kind === "commitment_plan"));
-  await page.getByTestId("decision-card").filter({ hasText: "TAMID" }).first().waitFor();
-  ok(true, "a decision arrived at the Decisions desk");
+  await page.getByTestId("handoff-needs").getByText(/TAMID/).waitFor();
+  ok(/Reviewer/.test(await page.getByTestId("handoff-needs").innerText()), "the strip says the Reviewer needs you");
+  await page.getByTestId("ask-bubble").waitFor();
+  ok((await page.getByTestId("office-worker").evaluateAll((els) => els.filter((e) => e.getAttribute("data-needs-you") === "1").length)) === 1, "exactly one character is asking for you");
+  ok(/1 waiting/.test((await page.getByTestId("you-desk").textContent()) ?? ""), "your desk shows one item waiting");
+  await shot(page, "15c-office-needs-you-desktop.png");
   await waitFor("helpers to finish", async () => (await api("/office")).jobs.every((j: any) => j.status === "done"));
   const counts = async () => { const o = await api("/office"); const c = await api("/commitments"); const d = await api("/decisions"); return { jobs: o.jobs.length, cmts: c.commitments.filter((x: any) => /pitch angles/.test(x.action)).length, decs: d.decisions.filter((x: any) => x.kind === "commitment_plan").length }; };
   const c1 = await counts();
-  ok(c1.cmts === 1 && c1.decs === 1 && c1.jobs === 2, `one commitment, one decision, two jobs (${JSON.stringify(c1)})`);
+  ok(c1.cmts === 1 && c1.decs === 1 && c1.jobs === 3, `one commitment, one decision, three jobs (supervisor, planner, reviewer) (${JSON.stringify(c1)})`);
 
   step("Office: replay the same message");
   await page.getByTestId("capture-replay").click();
@@ -570,7 +668,7 @@ async function journeyOffice(page: Page, browser: Browser) {
   await page.reload();
   await page.getByTestId("roster").waitFor();
   await page.getByTestId("roster-job").first().waitFor();
-  ok((await page.getByTestId("roster-job").count()) === 2, "the roster is rebuilt from saved state after a reload");
+  ok((await page.getByTestId("roster-job").count()) === 3, "the roster is rebuilt from saved state after a reload");
 
   step("Office: kill the worker mid-job, start another, still one commitment and one decision");
   startWorker(1500);
@@ -598,7 +696,7 @@ async function journeyOffice(page: Page, browser: Browser) {
   await m.goto(base + "/office"); await m.getByTestId("roster").waitFor();
   ok((await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 0, "Office has no horizontal scroll on the phone");
   await m.getByTestId("roster-job").first().tap();
-  await m.getByTestId("inspector").getByText("Delegated by").waitFor();
+  await m.getByTestId("inspector").getByText("Assigned by", { exact: true }).waitFor();
   await shot(m, "16-office-mobile.png");
   await ctx.close();
 }
@@ -673,7 +771,7 @@ async function journeyStudy(browser: Browser) {
   const research = page.getByTestId("roster-job").filter({ hasText: "Research specialist" }).first();
   await research.waitFor({ timeout: 30000 });
   await research.click();
-  await page.getByTestId("inspector").getByText("Delegated by").waitFor();
+  await page.getByTestId("inspector").getByText("Assigned by", { exact: true }).waitFor();
   ok(/photo \d of 2|\d of 2/.test(await page.getByTestId("inspector").innerText()) || /Checking photo|Reading photo|final scope/.test(await page.getByTestId("inspector").innerText()), "the Office shows the research helper's real step");
   await shot(page, "17-office-study-desktop.png");
   await waitFor("the guide to be saved", async () => (await api("/courses/BI107")).documents.some((d: any) => d.title === "BI107 Final study guide"), 60000);
@@ -782,7 +880,7 @@ async function journeyStudy(browser: Browser) {
   await page.goto(base + "/office");
   const sup = page.getByTestId("roster-job").filter({ hasText: "Supervisor" }).filter({ hasText: "final study guide" }).last();
   await sup.click();
-  await page.getByTestId("inspector").getByText("Delegated by").waitFor();
+  await page.getByTestId("inspector").getByText("Assigned by", { exact: true }).waitFor();
   await page.getByRole("button", { name: /Cancel \(and its helpers\)/ }).click();
   await waitFor("the cancelled job to stop", async () => (await api("/office")).jobs.some((j: any) => j.kind === "supervise_study" && j.status === "cancelled"), 20000);
   await page.waitForTimeout(2500);
@@ -816,7 +914,8 @@ async function journeyMcp() {
   ok(bad.status === 401, "a wrong token is refused");
   const out = await new Promise<{ code: number; text: string }>((res) => { const c = spawn("npx", ["tsx", "scripts/mcp-smoke.ts", url, "e2e-token-0123456789abcdef"], { env: process.env }); let t = ""; c.stdout.on("data", (d) => (t += d)); c.stderr.on("data", (d) => (t += d)); c.on("close", (code) => res({ code: code ?? 1, text: t })); });
   ok(out.code === 0 && /MCP smoke test passed/.test(out.text), `the smoke script passes against the running server (${out.text.split("\n").filter((l) => l.startsWith("ok")).length} checks)`);
-  await waitFor("the supervisor to handle the connector capture", async () => (await api("/office")).jobs.some((j: any) => /smoke-test team/.test(j.title) && j.status === "done"), 40000);
+  await waitFor("the connector capture to reach a decision", async () => (await api("/decisions")).decisions.some((x: any) => /smoke-test team/.test(x.title)), 40000);
+  await waitFor("its helpers to finish", async () => (await api("/office")).jobs.filter((j: any) => /smoke-test team/.test(j.title)).every((j: any) => j.status === "done"), 40000);
   const d = await api("/decisions"); ok(d.decisions.filter((x: any) => /smoke-test team/.test(x.title)).length === 1, "the connector capture produced exactly one decision after a replay");
   const caps = await api("/captures"); const c = caps.captures.find((x: any) => /smoke-test/.test(x.parsed.owedTo ?? ""));
   ok(!!c && c.source.includes("Ordinary Claude chat") && c.synthetic === true, "the capture is labeled with its real source and as synthetic");
@@ -829,6 +928,7 @@ async function main() {
   try {
     const only = process.env.E2E_ONLY;
     if (only === "study") { await journeyStudy(browser); }
+    else if (only === "projects") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "projects"); await journeyProjects(p); await c.close(); }
     else if (only === "mcp") { startWorker(300); await journeyMcp(); }
     else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
     else {
@@ -840,6 +940,7 @@ async function main() {
     await journeyOffice(page, browser);
     await journeyStudy(browser);
     await journeyMcp();
+    await journeyProjects(page);
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);

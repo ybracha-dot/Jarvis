@@ -12,14 +12,14 @@ function Step({ n, done, title, children }: { n: number; done: boolean; title: s
 const CopyBtn = ({ text, label = "Copy" }: { text: string; label?: string }) => { const [ok, setOk] = useState(false); return <Button size="sm" onClick={async () => { try { await navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1500); } catch { /* clipboard blocked */ } }}>{ok ? <Check className="size-4" /> : <Copy className="size-4" />}{ok ? "Copied" : label}</Button>; };
 
 export default function ConnectionsPage() {
-  const q = useQuery<any>("/connections", { poll: 2500 });
+  const q = useQuery<any>("/connector", { poll: 2500 });
   const [label, setLabel] = useState("Claude on my Mac"); const [access, setAccess] = useState("write"); const [days, setDays] = useState("90");
   const [fresh, setFresh] = useState<any>(null);
-  const create = useAction(async () => { setFresh(await api("/connections/tokens", { body: { label, scopes: access === "read" ? ["read"] : ["read", "write"], expiresInDays: days === "never" ? null : Number(days) } })); });
-  const revoke = useAction(async (id: string) => { await api(`/connections/tokens/${id}/revoke`, { body: {} }); });
-  const rotate = useAction(async (id: string) => { setFresh(await api(`/connections/tokens/${id}/rotate`, { body: {} })); });
-  const start = useAction(async () => { await api("/connections/probe", { body: {} }); });
-  const edit = useAction(async (id: string) => { await api(`/connections/probe/${id}/edit`, { body: {} }); });
+  const create = useAction(async () => { setFresh(await api("/connector/tokens", { body: { label, scopes: access === "read" ? ["read"] : ["read", "write"], expiresInDays: days === "never" ? null : Number(days) } })); });
+  const revoke = useAction(async (id: string) => { await api(`/connector/tokens/${id}/revoke`, { body: {} }); });
+  const rotate = useAction(async (id: string) => { setFresh(await api(`/connector/tokens/${id}/rotate`, { body: {} })); });
+  const start = useAction(async () => { await api("/connector/probe", { body: {} }); });
+  const edit = useAction(async (id: string) => { await api(`/connector/probe/${id}/edit`, { body: {} }); });
   if (q.loading && !q.data) return <Spinner label="Checking connections" />;
   if (q.error && !q.data) return <ErrorBox error={q.error} onRetry={q.reload} offline={q.error.status === 0} />;
   const d = q.data; const p = d.probe; const active = d.tokens.filter((t: any) => t.status === "active");
