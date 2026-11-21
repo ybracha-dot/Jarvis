@@ -148,3 +148,17 @@ describe("routing is by meaning, not by example names", () => {
     expect(understand(ctx, "Brief me on what's coming up tomorrow").deliverable).toBe("brief");
   });
 });
+
+import { tick } from "@/lib/scheduler";
+import { setSetting } from "@/lib/db";
+describe("the morning brief is a scheduled goal on the same executor", () => {
+  it("runs once per occurrence, saves a brief, and a day with nothing to say stays quiet", async () => {
+    const { ctx, clock } = fresh(); setSetting(ctx.db, "scheduler_cursor", "2026-11-15T12:00:00.000Z");
+    await tick(ctx); await tick(ctx);
+    expect(all(ctx.db, "SELECT origin FROM requests")).toEqual([{ origin: "schedule" }]);                            // one request, not two
+    await processQueue(ctx, base(clock)); const rq = get(ctx.db, "SELECT result_id FROM requests")!;
+    expect(resultView(ctx, rq.result_id as string)).toMatchObject({ kind: "brief", request: { origin: "schedule" } });
+    const q = memCtx("2026-11-16T10:00:00-05:00"); setSetting(q.db, "scheduler_cursor", "2026-11-15T12:00:00.000Z"); await tick(q);
+    expect(count(q, "requests")).toBe(0);                                                                             // nothing connected: no job, no cost
+  });
+});

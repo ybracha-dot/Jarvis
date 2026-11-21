@@ -85,7 +85,7 @@ function useWalk(target: Pt, reduce: boolean) {
 }
 
 function Sprite({ area, pose, walking, synthetic }: { area: string; pose: Pose; walking: boolean; synthetic: boolean }) {
-  const skin = "#f0c9a0", shirt = SHIRT[area] ?? "#2fa27a", hair = HAIR[area] ?? "#2a2a2a", pants = "#2a3350", u = 3;
+  const skin = "#f0c9a0", shirt = SHIRT[area] ?? "#2fa27a", hair = HAIR[area] ?? "#2a2a2a", pants = "#2a3350", u = 3.7;
   const typing = pose === "type" && !walking, reading = pose === "read" && !walking, up = pose === "ask" || pose === "carry";
   return (
     <g shapeRendering="crispEdges" transform={`scale(${u})`} className={`${walking ? "oc-walk" : ""} ${typing ? "oc-type" : ""} ${reading ? "oc-read" : ""}`}>
@@ -108,6 +108,11 @@ function Sprite({ area, pose, walking, synthetic }: { area: string; pose: Pose; 
   );
 }
 
+/** A direction arrow at the receiving end, like the reference's cyan assignment arrows. */
+function Arrow({ pts, big }: { pts: Pt[]; big: boolean }) {
+  const a = pts[pts.length - 2] ?? pts[0], b = pts[pts.length - 1]; const ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI; const k = big ? 1.35 : 0.9;
+  return <g transform={`translate(${b.x} ${b.y}) rotate(${ang}) scale(${k})`}><path d="M-16 -11 L4 0 L-16 11 Z" fill="#67d4ff" stroke="#0a1228" strokeWidth="2.5" strokeLinejoin="round" /></g>;
+}
 function Plant({ x, y }: { x: number; y: number }) {
   return <g shapeRendering="crispEdges"><rect x={x - 9} y={y} width="18" height="14" fill="#a0603a" /><rect x={x - 9} y={y} width="18" height="3" fill="#c07848" /><rect x={x - 12} y={y - 14} width="8" height="14" fill="#2f8a4a" /><rect x={x - 4} y={y - 22} width="9" height="22" fill="#3fa85c" /><rect x={x + 4} y={y - 12} width="8" height="12" fill="#2f8a4a" /></g>;
 }
@@ -128,6 +133,13 @@ function DeskFront({ x, y, label, sub, glow, tone, selected }: { x: number; y: n
   );
 }
 
+/** The reference office shows what each agent is doing ("SEARCH WEB"). Ours says it from the real current step, never invented. */
+function actionLabel(p: Placed): string | null {
+  if (!p.visible || p.j.needsYou || p.j.status !== "running" || p.zone === "supervisor" || !p.j.stage) return null;
+  const st = p.j.stage.toLowerCase();
+  if (/calendar/.test(st)) return "READ CALENDAR"; if (/read|source|search|find/.test(st)) return "READ SOURCES"; if (/writ|compos|draft|saving/.test(st)) return "WRITE DRAFT"; if (/check|verif|review/.test(st)) return "CHECK CLAIMS";
+  return p.j.stage.toUpperCase().slice(0, 14).trim();
+}
 const trunc = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function Worker({ p, selected, reduce, onSelect }: { p: Placed; selected: boolean; reduce: boolean; onSelect: (id: string) => void }) {
@@ -139,16 +151,18 @@ function Worker({ p, selected, reduce, onSelect }: { p: Placed; selected: boolea
       <ellipse cx="0" cy="0" rx="22" ry="5" fill="#000" opacity="0.28" />
       {selected && <ellipse cx="0" cy="1" rx="30" ry="9" fill="none" stroke="#67d4ff" strokeWidth="3" />}
       <Sprite area={p.zone} pose={p.pose} walking={walking} synthetic={p.j.synthetic} />
-      {p.fresh && <g className="oc-pop"><circle cx="0" cy="-34" r="26" fill="none" stroke="#67d4ff" strokeWidth="3" /><circle cx="0" cy="-34" r="14" fill="none" stroke="#bdeaff" strokeWidth="2" /></g>}
-      {p.j.needsYou && p.waitIndex > 0 && <g className="oc-ask" data-testid="ask-badge"><circle cx="0" cy="-74" r="13" fill="#fff7e0" stroke="#f3b24b" strokeWidth="3" /><text x="0" y="-67" textAnchor="middle" fill="#8a4a00" fontSize="20" fontWeight="800">?</text></g>}
+      {p.fresh && <g><g className="oc-pop"><circle cx="0" cy="-40" r="30" fill="none" stroke="#67d4ff" strokeWidth="3" /><circle cx="0" cy="-40" r="16" fill="none" stroke="#bdeaff" strokeWidth="2" /></g>
+        <g data-testid="new-hire"><rect x="-38" y="-104" width="76" height="22" rx="4" fill="#0b1630" stroke="#67d4ff" strokeWidth="2" /><text x="0" y="-88" textAnchor="middle" fill="#ffe27a" fontSize="14" fontWeight="800" letterSpacing="1" fontFamily="var(--font-geist-sans), system-ui, sans-serif">NEW HIRE</text></g></g>}
+      {actionLabel(p) && <g data-testid="action-bubble"><rect x="34" y="-92" width={Math.max(70, actionLabel(p)!.length * 9 + 16)} height="26" rx="6" fill="#f6f1e6" stroke="#0b1630" strokeWidth="2" /><path d="M36 -70 l-9 8 l15 -2 z" fill="#f6f1e6" stroke="#0b1630" strokeWidth="2" strokeLinejoin="round" /><text x={34 + (Math.max(70, actionLabel(p)!.length * 9 + 16)) / 2} y="-74" textAnchor="middle" fill="#0b1630" fontSize="14" fontWeight="800" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{actionLabel(p)}</text></g>}
+      {p.j.needsYou && p.waitIndex > 0 && <g className="oc-ask" data-testid="ask-badge"><circle cx="0" cy="-84" r="13" fill="#fff7e0" stroke="#f3b24b" strokeWidth="3" /><text x="0" y="-77" textAnchor="middle" fill="#8a4a00" fontSize="20" fontWeight="800">?</text></g>}
       {p.j.needsYou && p.waitIndex === 0 && (
         <g className="oc-ask" data-testid="ask-bubble">
           <g transform={`translate(${AISLE_X - pos.x} 0)`}>
-            <rect x="-69" y="-124" width="138" height="48" rx="8" fill="#fff7e0" stroke="#f3b24b" strokeWidth="3" />
-            <path d={`M${Math.max(-50, Math.min(50, pos.x - AISLE_X)) - 8} -76 l8 14 l8 -14 z`} fill="#fff7e0" stroke="#f3b24b" strokeWidth="3" strokeLinejoin="round" /><rect x={Math.max(-50, Math.min(50, pos.x - AISLE_X)) - 6} y="-79" width="12" height="5" fill="#fff7e0" />
-            <text x="-58" y="-92" fill="#8a4a00" fontSize="26" fontWeight="800">?</text>
-            <text x="-38" y="-103" fill="#2a2208" fontSize="14" fontWeight="700" fontFamily="var(--font-geist-sans), system-ui, sans-serif">Needs you</text>
-            <text x="-38" y="-86" fill="#2a2208" fontSize="12.5" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{trunc(p.j.needsYou.text.replace(/^Proposed: /, ""), 15)}</text>
+            <rect x="-69" y="-134" width="138" height="48" rx="8" fill="#fff7e0" stroke="#f3b24b" strokeWidth="3" />
+            <path d={`M${Math.max(-50, Math.min(50, pos.x - AISLE_X)) - 8} -86 l8 14 l8 -14 z`} fill="#fff7e0" stroke="#f3b24b" strokeWidth="3" strokeLinejoin="round" /><rect x={Math.max(-50, Math.min(50, pos.x - AISLE_X)) - 6} y="-89" width="12" height="5" fill="#fff7e0" />
+            <text x="-58" y="-102" fill="#8a4a00" fontSize="26" fontWeight="800">?</text>
+            <text x="-38" y="-113" fill="#2a2208" fontSize="14" fontWeight="700" fontFamily="var(--font-geist-sans), system-ui, sans-serif">Needs you</text>
+            <text x="-38" y="-96" fill="#2a2208" fontSize="12.5" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{trunc(p.j.needsYou.text.replace(/^Proposed: /, ""), 15)}</text>
           </g>
         </g>
       )}
@@ -187,7 +201,7 @@ export function OfficeScene({ jobs, pendingDecisions, selected, onSelect, onOpen
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[calc(100dvh-210px)] min-h-[420px] rounded-xl border border-[#0a1228]" role="group" aria-label="The Jarvis office. Cyan lines show who assigned work, nameplates say who is working, and amber question bubbles show who needs you. The same workers are listed below." data-testid="office-scene">
       <defs>
-        <pattern id="planks" width="64" height="24" patternUnits="userSpaceOnUse"><rect width="64" height="24" fill="#c4915a" /><rect width="64" height="2" fill="#a97a47" /><rect x="0" y="12" width="64" height="12" fill="#cd9a63" /><rect x="31" y="12" width="2" height="12" fill="#a97a47" /><rect x="15" y="0" width="2" height="12" fill="#a97a47" /><rect y="12" width="64" height="2" fill="#a97a47" /></pattern>
+        <pattern id="planks" width="64" height="24" patternUnits="userSpaceOnUse"><rect width="64" height="24" fill="#d08a4c" /><rect width="64" height="2" fill="#a86333" /><rect x="0" y="12" width="64" height="12" fill="#d99556" /><rect x="31" y="12" width="2" height="12" fill="#a86333" /><rect x="15" y="0" width="2" height="12" fill="#a86333" /><rect y="12" width="64" height="2" fill="#a86333" /></pattern>
       </defs>
       <rect width={W} height={H} fill="#13244d" />
       <rect x="20" y="20" width={W - 40} height={H - 40} fill="url(#planks)" stroke="#0a1228" strokeWidth="4" />
@@ -208,7 +222,7 @@ export function OfficeScene({ jobs, pendingDecisions, selected, onSelect, onOpen
       {/* supervisor's desk and your desk sit in the aisle */}
       <DeskBack x={SUP.x} y={SUP.y - 6} />
       {/* assignments (under the workers, above the floor) */}
-      {traces.map((t) => <g key={t.id} data-testid="handoff-path" data-bright={t.bright ? "1" : "0"}><path d={pathD(t.pts)} fill="none" stroke="#0a1228" strokeWidth={t.bright ? 9 : 6} strokeLinejoin="round" opacity="0.35" /><path className={t.bright ? "oc-flow" : "oc-tick"} d={pathD(t.pts)} fill="none" stroke="#67d4ff" strokeWidth={t.bright ? 5 : 3} strokeLinejoin="round" strokeLinecap="round" opacity={t.bright ? 1 : 0.7} strokeDasharray={t.bright ? undefined : "2 8"} /><circle cx={t.pts[t.pts.length - 1].x} cy={t.pts[t.pts.length - 1].y} r={t.bright ? 8 : 5} fill="#67d4ff" stroke="#0a1228" strokeWidth="2" /></g>)}
+      {traces.map((t) => <g key={t.id} data-testid="handoff-path" data-bright={t.bright ? "1" : "0"}><path d={pathD(t.pts)} fill="none" stroke="#0a1228" strokeWidth={t.bright ? 9 : 6} strokeLinejoin="round" opacity="0.35" /><path className={t.bright ? "oc-flow" : "oc-tick"} d={pathD(t.pts)} fill="none" stroke="#67d4ff" strokeWidth={t.bright ? 5 : 3} strokeLinejoin="round" strokeLinecap="round" opacity={t.bright ? 1 : 0.7} strokeDasharray={t.bright ? undefined : "2 8"} /><Arrow pts={t.pts} big={t.bright} /></g>)}
       {needLines.map((t) => <path key={t.id} d={pathD(t.pts)} fill="none" stroke="#f3b24b" strokeWidth="3" strokeDasharray="3 7" strokeLinecap="round" opacity="0.9" />)}
       {/* characters */}
       {!supJob && <g aria-hidden transform={`translate(${SUP.x} ${SUP.y})`}><ellipse rx="22" ry="5" fill="#000" opacity="0.28" /><Sprite area="supervisor" pose="idle" walking={false} synthetic={false} /></g>}

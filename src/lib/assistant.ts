@@ -405,7 +405,9 @@ const supervise_goal: Handler = async (api) => {
   await api.step("announce", "Telling you it is ready", () => {
     const conv = (api.input as any).conversationId as string | null; const rid = saved.resultId; const spoken = `${outcome.summary}${outcome.flags?.length ? ` ${outcome.flags.length} thing${outcome.flags.length === 1 ? "" : "s"} to check.` : ""}`;
     if (conv && !get(ctx.db, "SELECT 1 x FROM messages WHERE job_id=? AND kind='result'", api.job.root_id ?? api.job.id)) addMessage(ctx, conv, { role: "jarvis", kind: "result", jobId: api.job.root_id ?? api.job.id, text: `${outcome.title} is ready. ${spoken}`, data: { resultId: rid, version: saved.version, links: { open: `/results/${rid}`, label: "Open the result" }, spoken: `${outcome.title} is ready. ${spoken}` } });
-    notify(ctx, { eventKey: `result:${rid}:${saved.version}`, level: "brief", title: `${outcome.title} is ready`, body: spoken });
+    // A scheduled check that found nothing says so in its receipt and stays quiet: no notification.
+    const quiet = String(get(ctx.db, "SELECT origin FROM requests WHERE id=?", requestId)?.origin) === "schedule" && /^Nothing needs you/.test(String(outcome.summary));
+    if (!quiet) notify(ctx, { eventKey: `result:${rid}:${saved.version}`, level: "brief", title: `${outcome.title} is ready`, body: spoken });
     return true;
   });
   return { resultId: saved.resultId, version: saved.version };

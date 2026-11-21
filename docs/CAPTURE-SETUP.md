@@ -61,3 +61,15 @@ Office → the receipt → **Undo**. It removes the commitment, the work item an
 ## What only you can verify
 
 Adding the connector in your own Claude account and seeing a real `save_to_jarvis` call. Nothing in this repo has touched a Claude account.
+
+## Activating the connector in your Claude account (the exact step)
+
+Anthropic documents fixed request headers for custom connectors as a limited beta ("Authenticate with request headers" in the custom-connector guide). Whether your account shows that option cannot be known from here.
+
+1. In Claude: Settings → Connectors → add a custom connector. Name: `Jarvis`. URL: `https://<your host>/mcp` (see `deploy/README.md`).
+2. **If the dialog shows "Request headers":** add the header `Authorization` with the full value `Bearer <token>` (the word Bearer, a space, then the token you created on the Connections page). Do not paste the token into a chat, a screenshot or a URL.
+3. **If it does not:** use the supported local path instead. Claude Desktop with the local connector (`npm run mcp`, config below) works today. Regular Claude on the web would need Jarvis to speak OAuth, which is **not built**: that is the remaining work for that path.
+4. Check it: Connections → "Run the two-way check". It turns green only after a real write from Claude, an edit in Jarvis, and a fresh read from Claude.
+5. For results: in Claude say "Use Jarvis to get me ready for tomorrow", then in a **new** chat "Show me my latest Jarvis result". Paste the Project instruction from the Connections page into the Claude Project you use.
+
+Account verification is **pending**: tests use the official MCP client against the authenticated route, which proves the code path, not your account.

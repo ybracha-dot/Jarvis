@@ -66,6 +66,9 @@ export default function ConnectionsPage() {
           </div>}
         </Step>
       </ol>
+      <section aria-label="Claude Project instruction"><SectionTitle>For Claude: a Project instruction</SectionTitle><Card className="p-4 space-y-2" data-testid="project-instruction">
+        <p className="text-[14px] text-muted">Paste this into the instructions of the Claude Project you use with Jarvis. It makes Claude look through its own past chats first, hand Jarvis only the excerpt that matters, and read results back.</p>
+        <pre className="mono text-[13px] whitespace-pre-wrap rounded-lg bg-bg border border-line p-3 select-all">{PROJECT_INSTRUCTION}</pre><CopyBtn text={PROJECT_INSTRUCTION} label="Copy the instruction" /></Card></section>
       <section aria-label="Sources Jarvis can read" data-testid="sources-panel"><SectionTitle>What Jarvis can read</SectionTitle>
         <p className="text-[14px] text-muted mb-2">Every source says how it got here. Fixture and simulated sources are synthetic. A source that needs you is skipped, and results say so.</p>
         <ul className="space-y-2">{srcs.data?.sources.map((s: any) => <SourceRow key={s.id} s={s} />)}{srcs.data?.sources.length === 0 && <li className="text-[15px] text-muted">Nothing connected yet. Import a note, a transcript or an email below{sess.data?.mode !== "personal" ? ", or load the sample workspace" : ""}.</li>}</ul>
@@ -97,3 +100,10 @@ function ImportForm() {
     {imp.error && <ErrorBox error={imp.error} />}{done && <Notice tone="accent">{done}</Notice>}
     <Button variant="primary" busy={imp.busy} disabled={!f.title.trim() || !f.text.trim()} onClick={() => imp.run()} data-testid="import-save">Import</Button></Card>;
 }
+
+const PROJECT_INSTRUCTION = `When I ask for something that depends on earlier work (for example "pick up where we left off on X"), do this:
+1. If you can, search my past chats first (Claude's own past-chat search) for the relevant conversation.
+2. Call Jarvis's share_excerpt with only the minimum relevant excerpt, where it came from (chat title and date), and what I want it for.
+3. Call submit_goal with my request in my own words and a stable dedupKey. Tell me the receipt. Do not wait for it to finish.
+4. Later, or in a fresh chat, call get_goal and get_result and show me the result with its source links. If I want it changed, call revise_goal.
+Jarvis can only read what I have authorized. Never send anything on my behalf; Jarvis drafts, I decide.`;

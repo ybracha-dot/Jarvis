@@ -1,6 +1,28 @@
 # Jarvis
 
-A private chief of staff for a student who guards uninterrupted work blocks. It watches sources you give it, notices when a deadline or requirement changes, and asks you for one decision with the evidence attached.
+A general-purpose chief of staff. You say or type an outcome (for example "Get me ready for tomorrow" or "Pick up where we left off on the pitch and draft my follow-up"), close the screen, and come back to a finished, checked result: one job, one result link, every claim tied to a source you can open, and nothing sent anywhere.
+
+## Try it now
+
+```bash
+npm install
+npm run dev          # http://127.0.0.1:3000
+npm run worker       # in a second terminal: runs the background jobs
+```
+
+1. **Connections** → **Load the sample workspace** (synthetic club, meetings, emails, a calendar and a changed notice, all labelled *fixture*).
+2. **Today** → in **Ask Jarvis** type or say: *Pick up where we left off on the pitch and draft my follow-up.* Open the result link it gives you at once.
+3. On the result page read the draft, **Check these**, **Where each claim came from** (click a source to see the original with the quote highlighted) and **What Jarvis read for this**. Then ask *Get me ready for tomorrow*.
+
+From ordinary Claude (after the connector is set up, `docs/CAPTURE-SETUP.md`): *Use Jarvis to get me ready for tomorrow*, then in a new chat *Show me my latest Jarvis result*. Results are never sent: they are drafts and briefs saved in Jarvis.
+
+`MORNING.md` has the full handoff: what is verified locally, what needs your accounts, and how to upgrade a ZIP-installed copy without losing data.
+
+---
+
+## About
+
+Originally a private chief of staff for a student who guards uninterrupted work blocks. It watches sources you give it, notices when a deadline or requirement changes, and asks you for one decision with the evidence attached.
 
 The example workspace is fictional and has a demo clock. The private workspace is blank and uses your real clock. They use separate folders and cannot see each other.
 

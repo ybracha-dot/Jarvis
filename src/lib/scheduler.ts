@@ -12,6 +12,7 @@ import { listGoals } from "./goals";
 import { listCommitments } from "./commitments";
 import { planWork } from "./planner";
 import { Router, RouterError } from "./router";
+import { submitGoal, capabilities } from "./assistant";
 
 export interface Occurrence { key: string; kind: "morning" | "afternoon" | "weekly"; at: Date }
 export const inboxDir = (ctx: Ctx) => path.join(modeDir(ctx.mode), "inbox");
@@ -128,6 +129,8 @@ export async function tick(ctx: Ctx, transports: Record<string, Transport> = def
     const r = await runCheck(ctx, o, transports);
     run(ctx.db, "INSERT OR IGNORE INTO schedule_runs(occurrence_key,kind,scheduled_for,ran_at,status,summary,missed) VALUES(?,?,?,?,?,?,0)", o.key, o.kind, o.at.toISOString(), now.toISOString(), "ok", r.message);
     ran.push(r);
+    // The morning brief is a scheduled goal run by the same executor as anything you type. Only when there is something to read; nothing connected means no job.
+    if (o.kind === "morning") { try { if (capabilities(ctx).some((c) => c !== "draft_local")) submitGoal(ctx, { text: "Get me ready for today", origin: "schedule", dedupKey: `schedule:${o.key}` }); } catch { /* a brief must never break the scheduler */ } }
   }
   return { ran, missed };
 }
