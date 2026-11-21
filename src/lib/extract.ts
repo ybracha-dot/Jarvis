@@ -24,8 +24,8 @@ export interface Facts {
 
 export function splitSentences(text: string): string[] {
   const protectedText = text
-    .replace(/\b([ap])\.m\./gi, "$1\u0001m\u0001")
-    .replace(/\b(e\.g|i\.e|etc|no|vs|dr|prof)\./gi, (m) => m.replace(/\./g, "\u0001"));
+    .replace(/\b([ap])\.m\./gi, "$1\u0001m.")
+    .replace(/\b(e\.g|i\.e|etc|vs|dr|prof)\./gi, (m) => m.replace(/\./g, "\u0001"));
   return protectedText
     .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])|\n+/)
     .map((s) => s.replace(/\u0001/g, ".").trim())
@@ -92,7 +92,7 @@ export function findTaskRefs(text: string): TaskRef[] {
 
 const CHANGE_RE = /\b(now due|is now|moved|moves|moving|extended|extension|postponed|rescheduled|changed to|pushed|brought forward|new deadline|due date (?:has )?(?:been )?changed|instead)\b/i;
 const WAIVE_RE = /\b(no longer (?:need|required|have|necessary)|do(?:es)? not need|don'?t need|waive[sd]?|not (?:be )?required|is (?:cancell?ed|dropped)|no need)\b/i;
-const NEG_PAPER_RE = /\bno (?:paper|printed|hard ?)copies\b|\bno printing\b|\bonline[- ]only\b/i;
+const NEG_PAPER_RE = /\bno (?:paper|printed|hard)[ -]?copies\b|\bno printing\b|\bonline[- ]only\b/i;
 const PRINT_RE = /\b(bring|print|printed|printout|hard ?copy|paper cop(?:y|ies))\b/i;
 const OPTIONAL_RE = /\b(optional|if you (?:like|wish|want|prefer)|consider|may (?:want|choose|wish)|you can|suggest(?:ed)?|recommended|helpful to)\b/i;
 const UPLOAD_RE = /\b(upload|submit(?:ted)?|turn in|hand in)\b[^.]*\b(blackboard|gradescope|portal|online|pdf|canvas|lms)\b/i;

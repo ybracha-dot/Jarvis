@@ -67,7 +67,7 @@ export const EVAL_CASES: EvalCase[] = [
     { id: "ann17", title: "Announcement 17", publishedAt: `2026-11-16T09:10:00${NY}`, text: "Bring a printed excerpt of articles 4, 13, 16 and 31." },
     { id: "ann18", title: "Announcement 18", publishedAt: `2026-11-17T12:00:00${NY}`, text: "The print requirement is waived. Everyone uploads to Blackboard instead." }] }, expect: { print: "none" } },
   { id: "u", name: "Unrelated personal task mentioning printing", input: { task: { title: "Club agenda", kind: "personal" }, revisions: [
-    { id: "club", title: "Club note", publishedAt: `2026-11-16T09:10:00${NY}`, text: "Bring a printed agenda to the club meeting." }] }, expect: { print: "none" } },
+    { id: "club", title: "Club note", publishedAt: `2026-11-16T09:10:00${NY}`, text: "Bring a printed copy of the agenda to the club meeting." }] }, expect: { print: "none" } },
 ];
 
 export interface CaseGrade { id: string; name: string; pass: boolean; exactQuote: boolean | null; statusCorrect: boolean; pointerCorrect: boolean | null; falsePositive: boolean; output: BriefOutput }
