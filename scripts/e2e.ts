@@ -904,7 +904,7 @@ async function journeyStudy(browser: Browser) {
     await page.getByTestId("quiz-next").click();
   }
   await page.getByTestId("quiz-done").waitFor();
-  ok(/Quiz finished: 5 of 8/.test(await page.getByTestId("quiz-done").innerText()) && /missed 3/.test(await page.getByTestId("quiz-done").innerText()), "the quiz records 5 of 8 with 3 missed");
+  ok(/Quiz finished: 5 of 8/.test(await page.getByTestId("quiz-done").innerText()) && /missed 3/.test(await page.getByTestId("quiz-done").innerText()), `the quiz records 5 of 8 with 3 missed (${(await page.getByTestId("quiz-done").innerText()).replace(/\s+/g, " ")})`);
   await page.goto(base + "/courses/BI107");
   await page.getByTestId("voice-dock").waitFor();
   await say(page, "Quiz me on what I missed.");
@@ -1005,7 +1005,8 @@ async function main() {
   const browser: Browser = await chromium.launch(exe ? { executablePath: exe } : {});
   try {
     const only = process.env.E2E_ONLY;
-    if (only === "study") { await journeyStudy(browser); }
+    if (only === "office+study") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await journeyStudy(browser); await c.close(); }
+    else if (only === "study") { await journeyStudy(browser); }
     else if (only === "projects") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "projects"); await journeyProjects(p); await c.close(); }
     else if (only === "assistant") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "assistant"); await journeyAssistant(p, browser); await c.close(); }
     else if (only === "mcp") { startWorker(300); await journeyMcp(); }

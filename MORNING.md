@@ -32,7 +32,7 @@ It routes on verbs, time words and what the sources contain, not on example name
 |---|---|---|
 | Pitch request: finds the later Wednesday decision, marks Monday as the older proposal, quotes the reason from the transcript, flags the `$12,000` figure that only one email states, links the confirming email, uses no other owner's look-alike | **Passes** in unit tests, through the authenticated MCP route, and in a real browser (`npm run e2e`) | **Not run.** No live mail, transcript or Claude account was used |
 | “Get me ready for tomorrow”: calendar, a changed notice, a prior Claude outline, ranked to at most three things, an unverified rubric reported not invented, Blackboard listed as unread; changing the calendar changes the brief | **Passes** (same three layers) | **Not run** |
-| Third request chosen by an independent QA agent | See “QA” below | Not run |
+| Third and fourth requests chosen by an independent QA agent | **First attempts FAILED, then repaired.** See “QA” below | Not run |
 | Same work from ordinary Claude: submit, receipt at once, fresh chat retrieves the result, revise, cancel | **Passes** with the official MCP client over the authenticated route (this simulates Claude) | **Pending: your account.** Needs the connector activated (below) |
 | Start by voice, close the tab, change it from Claude, one job and one current draft, a late result from the old instruction refused | **Passes** with a *simulated microphone* and a *simulated Claude client* | Pending |
 | Revoked source drops out; a result that cited it is flagged out of date; forgetting erases text, facts, search entries | **Passes** | n/a |
@@ -58,11 +58,31 @@ It routes on verbs, time words and what the sources contain, not on example name
 - **Office**: select the Jarvis desk (or any worker) → **Open what it produced**.
 - **Projects** → a project lists its drafts, briefs and answers. **Today** → *Where the output went* lists finished results. **Connections** shows every source, how it got here, and revoke/authorize.
 
+## QA: a request I did not choose
+After implementing, I gave an independent QA agent a disposable workspace and told it to pick its own unseen request and data, write the expected result first (with a trap), and record the first attempt before any retry. It did not see the code or tests.
+
+| | Request it chose | First attempt | What was wrong |
+|---|---|---|---|
+| 1 | “What's confirmed and what's still unbooked for my Lisbon trip in December?” (flight, a hotel booking later changed, a conference note with open to-dos, a same-word dental distractor) | **FAIL** | Ask Jarvis did not even make it a job; run directly it answered “No meeting transcript is saved yet” and read nothing. The answer path was a meetings-only pipeline, so the assistant was not general-purpose |
+| 2 | “Where did we land on the apartment lease renewal and what do I still have to do?” (a revised rent, a note with to-dos, a same-name coworker) | **FAIL** | Same cause |
+| 3 | Same QA run: “What did my accountant say about my Q4 estimated tax payment?” | **FAIL** | A transcript existed, so the question was turned into “Promises after <meeting>”, never stated the $3,200, and assumed the speaker “Alex” was someone else because it had “Yonathan” hardcoded as you |
+| 4 | After repair, a fresh one: “Which plumber should I go with for the bathroom re-pipe, and what will it really cost?” | **PARTIAL** | Found the right sources, ignored the pizzeria distractor, tracked the superseded quote. But it set aside your own budget note, dropped the “permit not included” caveat, showed availability as promises with a due date (“Sons”, “We”), had a garbled title and a noisy not-found flag |
+| 5 | Missing data: “What did the school say about the field trip permission slip deadline?” with only plumbing data | **PASS** | Said exactly what was missing, invented nothing |
+
+Every failure is kept as a regression test (`tests/assistant.test.ts`, “QA regression”) and the causes are fixed: one general answer path over every authorized source (what the sources say, what changed, what is still open), any outcome-shaped request becomes a job, currency and unit extraction, promises are listed by speaker when your name cannot be found (set it in Settings), your own notes are not set aside as someone else's, availability is not a promise, titles read as sentences. After the fixes all five pass as tests.
+
+**What it still cannot do, said plainly:** QA also expected a recommendation (“go with Okafor”) and a computed all-in total ($5,350 plus about $400 permit). Without a model Jarvis extracts, compares same-sender figures and reports changes; it does **not** weigh options, add up figures across sources, or recommend. Those need a configured Claude model, which stays off until you approve it. The result says so on every answer. It also cannot always tell a same-word distractor from your subject: it uses shared vocabulary and ignores nothing you wrote yourself, which worked on the dental email and the pizzeria quote but is a heuristic.
+
 ## Needs Yonathan
 1. **Activate the connector in your Claude account.** In Claude → Settings → Connectors → add custom connector (`https://<host>/mcp`). If the dialog shows **Request headers**, add `Authorization` = `Bearer <token>` (token from Connections; keep it out of chat and screenshots). If it does not, use Claude Desktop with `npm run mcp` today; regular Claude on the web would need OAuth in Jarvis, which is **not built**. Then run **Connections → two-way check**. Details: `docs/CAPTURE-SETUP.md`.
 2. **Blackboard sign-in** (Duo) is yours; there is no reader to hand it to yet. Paste notification emails or import the calendar file meanwhile.
 3. **Pixel Agents smoke test** stays pending until it can run on your Mac (see the redesign section).
 4. Publishing, hosting and any paid model use remain off until you say.
+
+## Test status
+`npm run verify` passes: typecheck, **171 unit tests** (was 142), production build. `npm run e2e`: **251 checks, 0 problems** on the last full run. Two earlier full runs had one intermittent failure in the *voice-study quiz* step (“the quiz records 5 of 8 with 3 missed”); it did not reproduce when that journey ran alone, with the Office journey before it, or in the next full run. I could not find a cause, so treat that check as flaky until proven otherwise.
+
+Known: connector result URLs use `JARVIS_PUBLIC_URL` (default `http://127.0.0.1:3000`), so on another port set that variable.
 
 ## What I did not build this round (honest list)
 Slack / Gmail / Notion / CRM live adapters and cursors; the overnight consolidation job and Obsidian vault mapping (`People/`, `Decisions/`, `user.md`…); learned-skill staging, evaluation and rollback for the follow-up procedure; plain-language routines beyond the morning brief; a Blackboard portal reader; Claude Code mods. The evidence store, retrieval, the shared executor, revisions, the connector tools and the interface are in place for those to build on.
