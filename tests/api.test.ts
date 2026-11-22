@@ -139,7 +139,7 @@ describe("agent adapter and MCP tools", () => {
     await client.connect(transport);
     try {
       const names = (await client.listTools()).tools.map((t) => t.name).sort();
-      expect(names).toEqual(["apply_project_update", "cancel_goal", "changed_tasks", "get_evidence", "get_goal", "get_project_context", "get_result", "propose_decision", "recall_from_jarvis", "resume_goal", "revise_goal", "save_to_jarvis", "search_evidence", "share_excerpt", "source_status", "submit_goal", "today"]);
+      expect(names).toEqual(["apply_project_update", "cancel_goal", "changed_tasks", "get_evidence", "get_goal", "get_project_context", "get_reader_task", "get_result", "propose_decision", "recall_from_jarvis", "resume_goal", "revise_goal", "save_to_jarvis", "search_evidence", "share_excerpt", "source_status", "submit_goal", "submit_reader_result", "today"]);
       const res: any = await client.callTool({ name: "today", arguments: {} });
       expect(JSON.parse(res.content[0].text).timeline).toBeDefined();
       const bad: any = await client.callTool({ name: "get_evidence", arguments: { decisionId: "nope" } });

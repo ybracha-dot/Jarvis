@@ -10,14 +10,14 @@ export const SOURCE_KINDS = ["email", "transcript", "claude", "notice", "note", 
 export type SourceMode = "live" | "imported" | "fixture" | "simulated" | "unavailable";
 export const MODE_LABEL: Record<SourceMode, string> = { live: "Live", imported: "Imported by you", fixture: "Fixture (synthetic)", simulated: "Simulated", unavailable: "Unavailable" };
 
-export interface SourceRow { id: string; kind: string; label: string; mode: SourceMode; projectId: string | null; state: string; localOnly: boolean; cursor: string | null; lastAttemptAt: string | null; lastSuccessAt: string | null; message: string | null; revokedAt: string | null }
-const srcRow = (r: any): SourceRow => ({ id: r.id, kind: r.kind, label: r.label, mode: r.mode, projectId: r.project_id, state: r.state, localOnly: !!r.local_only, cursor: r.cursor, lastAttemptAt: r.last_attempt_at, lastSuccessAt: r.last_success_at, message: r.message, revokedAt: r.revoked_at });
+export interface SourceRow { id: string; kind: string; label: string; mode: SourceMode; projectId: string | null; state: string; localOnly: boolean; shareable: boolean; cursor: string | null; lastAttemptAt: string | null; lastSuccessAt: string | null; message: string | null; revokedAt: string | null }
+const srcRow = (r: any): SourceRow => ({ id: r.id, kind: r.kind, label: r.label, mode: r.mode, projectId: r.project_id, state: r.state, localOnly: !!r.local_only, shareable: !!r.shareable, cursor: r.cursor, lastAttemptAt: r.last_attempt_at, lastSuccessAt: r.last_success_at, message: r.message, revokedAt: r.revoked_at });
 
-export function registerSource(ctx: Ctx, o: { kind: string; label: string; mode: SourceMode; projectId?: string | null; localOnly?: boolean; state?: string; message?: string }): SourceRow {
+export function registerSource(ctx: Ctx, o: { kind: string; label: string; mode: SourceMode; projectId?: string | null; localOnly?: boolean; shareable?: boolean; state?: string; message?: string }): SourceRow {
   const ex = get(ctx.db, "SELECT * FROM evidence_sources WHERE owner_id=? AND kind=? AND label=?", ctx.owner, o.kind, o.label);
   if (ex) return srcRow(ex);
   const id = `src_${sha(`${ctx.owner}|${o.kind}|${o.label}`).slice(0, 10)}`;
-  run(ctx.db, "INSERT INTO evidence_sources(id,owner_id,kind,label,mode,project_id,state,local_only,message,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)", id, ctx.owner, o.kind, o.label, o.mode, o.projectId ?? null, o.state ?? "ok", o.localOnly ? 1 : 0, o.message ?? null, ctx.now().toISOString());
+  run(ctx.db, "INSERT INTO evidence_sources(id,owner_id,kind,label,mode,project_id,state,local_only,message,created_at,shareable) VALUES(?,?,?,?,?,?,?,?,?,?,?)", id, ctx.owner, o.kind, o.label, o.mode, o.projectId ?? null, o.state ?? "ok", o.localOnly ? 1 : 0, o.message ?? null, ctx.now().toISOString(), o.shareable ? 1 : 0);
   return srcRow(get(ctx.db, "SELECT * FROM evidence_sources WHERE id=?", id)!);
 }
 export const listSources = (ctx: Ctx) => all(ctx.db, "SELECT s.*, (SELECT COUNT(*) FROM evidence_items i WHERE i.source_id=s.id AND i.tombstone=0) n FROM evidence_sources s WHERE s.owner_id=? ORDER BY s.created_at", ctx.owner).map((r) => ({ ...srcRow(r), items: r.n as number }));
@@ -229,8 +229,9 @@ export function getItem(ctx: Ctx, id: string) {
 export const listItems = (ctx: Ctx, o: { projectId?: string; kind?: string } = {}) => all(ctx.db, `SELECT i.id, i.title, i.kind, i.at, i.revision, i.project_id, s.label slabel, s.mode smode FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.tombstone=0 AND s.revoked_at IS NULL ${o.projectId ? "AND i.project_id=?" : ""} ${o.kind ? "AND i.kind=?" : ""} ORDER BY i.at DESC LIMIT 100`, ...[ctx.owner, ...(o.projectId ? [o.projectId] : []), ...(o.kind ? [o.kind] : [])]);
 
 /** Paste, export or file import. The user chose it, so it is labelled imported. */
-export function importText(ctx: Ctx, o: { kind: string; title: string; text: string; at?: string; author?: string; participants?: string[]; projectId?: string | null; label?: string; externalId?: string; corrects?: string | null; localOnly?: boolean }) {
-  const src = registerSource(ctx, { kind: o.kind, label: o.label ?? `Imported ${o.kind}`, mode: "imported", projectId: o.projectId ?? null, localOnly: o.localOnly });
+export function importText(ctx: Ctx, o: { kind: string; title: string; text: string; at?: string; author?: string; participants?: string[]; projectId?: string | null; label?: string; externalId?: string; corrects?: string | null; localOnly?: boolean; shareable?: boolean }) {
+  if (o.shareable && o.localOnly) throw new HttpError(400, "A source cannot be both local-only and shareable with Claude");
+  const src = registerSource(ctx, { kind: o.kind, label: o.label ?? (o.shareable ? `Shareable ${o.kind} (Claude may read these)` : `Imported ${o.kind}`), mode: "imported", projectId: o.projectId ?? null, localOnly: o.localOnly, shareable: !!o.shareable });
   const r = ingestItem(ctx, { sourceId: src.id, externalId: o.externalId ?? sha(o.title + o.text).slice(0, 16), kind: o.kind, title: o.title, author: o.author ?? null, participants: o.participants, at: o.at ?? ctx.now().toISOString(), body: o.text, projectId: o.projectId ?? null, corrects: o.corrects ?? null });
   return { ...r, sourceId: src.id };
 }

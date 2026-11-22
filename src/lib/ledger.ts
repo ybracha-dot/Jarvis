@@ -10,7 +10,7 @@ export interface TaskRow { id: string; task: string; obj: string; key: Set<strin
 export interface TableSpec { columns: string[]; rowUnit: string | null; excludeDone: boolean; form?: "table" | "checklist"; groupByOwner?: boolean; perPerson?: boolean; numbered?: boolean; sortByDue?: boolean; person?: string | null; about?: string | null; autoDue?: boolean }
 export interface TableAnalysis { type: "table"; form: "table" | "checklist"; columns: string[]; keys: string[]; rows: { cells: string[]; task: string; owner: string | null; due?: string | null; cites: Cite[] }[]; leftOut: { text: string; reason: string; cites: Cite[] }[]; notes: string[]; unparsed: { text: string; src: Src }[]; missingColumns: string[]; openCount: number; taskCount: number; addedTaskColumn: boolean; numbered: boolean; filtered: string | null }
 
-const NOT_NAMES = new Set("Update Correction Note Notes Handoff The This That These Those It He She They We I You Everything Nothing Someone Anyone Also Then Now Still Side Planning Plan Task Tasks Owner Status Next Action Blocker Done Open If In On At As So No Or To Of By My Our His Her Its An Is Are Was Be We Do Go Up Us".split(" "));
+const NOT_NAMES = new Set("Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March April May June July August September October November December Update Correction Note Notes Handoff The This That These Those It He She They We I You Everything Nothing Someone Anyone Also Then Now Still Side Planning Plan Task Tasks Owner Status Next Action Blocker Done Open If In On At As So No Or To Of By My Our His Her Its An Is Are Was Be We Do Go Up Us".split(" "));
 const NOT_TASK_VERBS = new Set("says said thinks think wants want asked asks mentioned mentions noted confirmed confirms feels feel knows know likes like hopes hope believes believe seems seem is was has had does did gets got looks look".split(" "));
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const stripThe = (s: string) => s.replace(/^(?:the|a|an|our|their)\s+/i, "");
@@ -25,6 +25,7 @@ export function ingBase(w: string): string { let b = w.toLowerCase().replace(/in
 /** Peel a blocker off the end of a task phrase: "…, which is waiting on finance's spreadsheet", "…but only after the soil arrives", "… once the edit is finished". */
 function splitBlocker(rest: string): { rest: string; blocker: string | null; next: string | null } {
   let r: RegExpExecArray | null;
+  if ((r = /^(.+?),?\s+and\s+(?:can|could|is able to)\s+(?:start|begin|go ahead)(?:\s+(?:immediately|now|right away|at once))?$/i.exec(rest))) return { rest: r[1], blocker: null, next: null };
   if ((r = /^(.+?)\s+and\s+(?:needs|requires)\s+(.+?)\s+before\s+\w+\s+can\s+(.+)$/i.exec(rest))) return { rest: r[1], blocker: `Waiting for ${clean(r[2])}`, next: r[3] };
   if ((r = /^(.+?)\s+and\s+(?:needs|requires)\s+(.+?)\s+first$/i.exec(rest))) return { rest: r[1], blocker: `Waiting for ${clean(r[2])}`, next: null };
   if ((r = /^(.+?),\s*(?:but\s+)?(?:needs|requires)\s+(.+)$/i.exec(rest))) return { rest: r[1], blocker: `Waiting for ${clean(r[2])}`, next: null };
@@ -93,7 +94,7 @@ export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[
   };
   const sorted = [...items].sort((a, b) => String(a.at).localeCompare(String(b.at)));
   for (const it of sorted) for (const sent of it.sentences) {
-    const raw = sent.text.trim(); let S = alias(clean(raw).replace(/^[A-Z][^:.]{0,60}:\s*(?=[A-Za-z])/, "").replace(/^(?:we|i)\s+(?:also\s+)?(?:forgot|noticed|realised|realized|remembered|learned|agreed)\s+(?:that\s+)?/i, ""));   // "Update for the fair: ..." / "Side chat: ..."
+    const raw = sent.text.trim(); let S = alias(clean(raw).replace(/^[A-Z][^:.]{0,60}:\s*(?=[A-Za-z])/, "").replace(/^(?:we|i)\s+(?:also\s+)?(?:forgot|noticed|realised|realized|remembered|learned|agreed)\s+(?:that\s+)?/i, "").replace(/^(?:for|on|in|at|during)\s+the\s+[^,]{3,60},\s+/i, ""));   // "Update for the fair: ..." / "Side chat: ..."
     const clauses = S.split(/\s*(?:;|,\s+so\s+|(?:,\s+|\s+and\s+)(?=[A-ZÀ-ÝĀ-ſḀ-ỿ][\wà-ÿĀ-ſḀ-ỿ]+\s+(?:will|is|are|has|have|must|should|can)\b)|,\s+and\s+(?=(?:the\s+)?[\w'’ -]{2,40}?\s+(?:is|are|will be)\s+(?:to be\s+|expected to be\s+)?\w+)|,\s+and\s+(?=[A-Za-z'’]+\s+(?:is|are|was|were|has|have)\b)|\s+and\s+(?=(?:the\s+)?[\w' -]{2,30}?\s+(?:is|are)\s+[A-Z][a-zà-ÿĀ-ſḀ-ỿ]+['’]s\b)|\s+and\s+(?=(?:the\s+)?[\w' -]{2,40}?\s+(?:is|are|was|were|has been|have been)\s+(?:now\s+)?(?:no longer|done|finished|complete|completed|fixed|ordered|booked)\b))\s*/i).filter(Boolean);
     let last: TaskRow | null = null; let consumed = false;
     for (const C of clauses) {
@@ -123,7 +124,7 @@ export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[
       // Finished.
       const nounSubject = (t: string) => t.split(/\s+/).length <= 8 && !/\b(?:will|would|can|could|should|must|once|when|after|until|because|if|unless|then|going to|plans? to|is|are|was|were|which|that|who)\b/i.test(t) && !/^[A-Z][a-zà-ÿĀ-ſḀ-ỿ]+\s+[a-z]+s\b/.test(t) && !isName(t.split(/\s+/)[0]);
       const doneMatch = ((): RegExpExecArray | null => { let r: RegExpExecArray | null;
-        if ((r = /^(?:the\s+)?(.+?)\s+(?:is|are|was|were|has been|have been|got)\s+(?:now\s+)?(?:finished|complete|completed|done|signed off|approved|delivered|shipped|sorted|fixed|repaired|resolved|installed|ordered|booked|placed|submitted)\b/i.exec(Cn)) && nounSubject(r[1])) return r;
+        if ((r = /^(?:the\s+)?(.+?)\s+(?:is|are|was|were|has been|have been|got)\s+(?:now\s+|already\s+)?(?:finished|complete|completed|done|signed off|approved|delivered|shipped|sorted|fixed|repaired|resolved|installed|ordered|booked|placed|submitted)\b/i.exec(Cn)) && nounSubject(r[1])) return r;
         if ((r = /^(?:the\s+)?(.+?)\s+(?:was|were|is|are)\s+[^,]*,\s*(?:done|finished|complete|completed)$/i.exec(Cn)) && nounSubject(r[1])) return r;
         if ((r = /^[A-Z][a-zà-ÿĀ-ſḀ-ỿ]+\s+(?:has\s+)?(?:finished|completed|wrapped up|done with)\s+(?:the\s+)?(.+)$/.exec(Cn))) return r;
         return null; })();
@@ -140,7 +141,7 @@ export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[
         const k = keyOf(m[1]); const hits = open().filter((t) => t.blocker && same(t.blockerKey, k)); if (hits.length) { for (const t of hits) unblock(t, it, raw); hit = hits[0]; } else ok = false;
       }
       else if ((m = /^([A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?(?:\+[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?)*)\s+already\s+(?:sent|finished|completed|booked|ordered|paid|submitted|done|wrapped up)\s+(?:the\s+)?(.+?)(?:\s+(?:yesterday|today|last \w+|this \w+))?$/.exec(Cn)) && isName(m[1])) { const t = find(m[2], m[1]); if (t) { t.done = true; t.cites.push(cite(it, raw, "completed")); hit = t; } else ok = false; }
-      else if ((m = /^([A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?(?:\+[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?)*)\s+(?:has\s+)?(?:already\s+)?(?:collected|booked|ordered|paid|submitted|printed|delivered|bought|made|wrote|signed|cleaned|painted|built|fixed|called|emailed|phoned|posted|filed|finished|completed|arranged|organised|organized|confirmed)\s+(?:the\s+)?(.+?)(?:\s+(?:yesterday|today|last \w+|this \w+|on \w+|already))?$/.exec(Cn)) && isName(m[1]) && !/\bto\b/.test(m[2].split(" ")[0])) { const t = find(m[2], m[1]); if (t) { t.done = true; t.cites.push(cite(it, raw, "completed")); hit = t; } else { consumed = true; } }
+      else if ((m = /^([A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?(?:\+[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?)*)\s+(?:has\s+)?(?:already\s+)?(?:collected|booked|ordered|paid|submitted|printed|delivered|bought|made|wrote|signed|cleaned|painted|built|fixed|called|emailed|phoned|posted|filed|finished|completed|arranged|organised|organized|confirmed)\s+(?:the\s+)?(.+?)(?:\s+(?:yesterday|today|last \w+|this \w+|on \w+|already))?$/.exec(Cn)) && isName(m[1]) && !/\bto\b/.test(m[2].split(" ")[0])) { const t = /^(?:it|them|this|that)$/i.test(clean(m[2])) ? open().filter((x) => (x.owner ?? "").split("+").includes(m![1])).pop() ?? null : find(m[2], m[1]); if (t) { t.done = true; t.cites.push(cite(it, raw, "completed")); hit = t; } else { consumed = true; } }
       // In progress: "they are in progress", "Felix has started the badges".
       else if ((m = /^(?:they|it|this|that)\s+(?:is|are)\s+(?:now\s+)?(?:in progress|underway|under way|started)\b/i.exec(Cn)) && last) { last.progress = true; last.cites.push(cite(it, raw, "in progress")); hit = last; }
       else if ((m = /^(?:the\s+)?(.+?)\s+(?:is|are)\s+(?:now\s+)?(?:in progress|underway|under way|started)\b/i.exec(Cn))) { const t = find(m[1], null); if (t) { t.progress = true; t.cites.push(cite(it, raw, "in progress")); hit = t; } else ok = false; }
@@ -156,6 +157,12 @@ export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[
       else if ((m = /^[A-Z][a-zà-ÿĀ-ſḀ-ỿ]+\s+(?:has\s+)?(?:got|gotten|received|collected|picked up)\s+(?:the\s+)?(.+)$/.exec(Cn)) && open().some((t) => t.blocker && same(t.blockerKey, keyOf(m![1])))) { const k = keyOf(m[1]); const hs = open().filter((t) => t.blocker && same(t.blockerKey, k)); for (const t of hs) unblock(t, it, raw); hit = hs[0]; }
       // "Hana's menu is now Lucía's job as Hana is travelling", "the pump test is Ines's".
       else if ((m = /^(?:the\s+)?(.+?)\s+(?:is|are)\s+(?:now\s+)?([A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?(?:\+[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?)*)['’]s(?:\s+(?:job|task|responsibility))?(?:\s+as well)?(?:,?\s+due\b.*)?(?:\s+(?:as|because|since)\b.*)?$/.exec(Cn.replace(/^([A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?(?:\+[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?)*)['’]s\s+/, ""))) && isName(m[2])) { const t = find(m[1], null); if (t) { reassign(t, m[2], it, raw); hit = t; } else { const nt = assign(m[2], m[1].replace(/^(?:the\s+)?/, ""), it, raw, { due: dueOf2(Cn) }); if (nt) hit = nt; } }
+      // "The badge proof is in Leila Park's hands.", "the badge proof is with Leila".
+      else if ((m = /^(?:the\s+)?(.+?)\s+(?:is|are)\s+in\s+([A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?(?:\+[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?)*)['’]s\s+hands\b/i.exec(Cn)) && isName(m[2])) { const t = assign(m[2], m[1], it, raw, {}); if (t) hit = t; }
+      // "She is waiting for the sponsor artwork before she can release it." (the person and task named just before)
+      else if ((m = /^(?:she|he|they)\s+(?:is|are)\s+(?:still\s+)?waiting\s+(?:for|on)\s+(.+?)(?:\s+before\s+(?:she|he|they)\s+can\s+(.+))?$/i.exec(Cn)) && lastTask && !lastTask.done) {
+        block(lastTask, m[1], "Waiting for", it, raw); if (m[2]) { const objp = /^(?:the|a|an|our|their)\s/i.test(lastTask.obj) ? lastTask.obj : `the ${lastTask.obj}`; lastTask.next = cap(clean(m[2]).replace(/\b(it|them|this|that)\b/i, objp)); } hit = lastTask;
+      }
       // Reassigned: "the sound system is now with Lucia", "The posters have been handed to Tomas", "Route signs passed to Bao", "Carmen's helmet collection moved to Elena".
       else if ((m = /^(?:the\s+)?(.+?)\s+(?:(?:is|are|has been|have been|was|were)\s+)?(?:now\s+)?(?:with|(?:handed|passed|moved|reassigned|assigned|given|going|gone|transferred|handed over|passed on|passed over)(?:\s+(?:over|on))?\s+to|owned by|falls? to|goes to|stays with|remains? with)\s+([A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?(?:\+[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?)*)\b/.exec(Cn.replace(/^([A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?(?:\+[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]+(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?)*)['’]s\s+/, ""))) && isName(m[2])) {
         const t = find(m[1], null); if (t) { reassign(t, m[2], it, raw); hit = t; } else { notes.push(`“${raw}” hands something to ${m[2]}, but no earlier note described that task, so it was not applied.`); unparsed.push({ text: raw, src: it }); hit = null; ok = true; consumed = true; }
@@ -204,7 +211,7 @@ export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[
       void ok;
     }
     // A sentence that names a person or a task on the list but was not understood is reported, not dropped.
-    if (!consumed) { const taskish = new RegExp(`\\b(?:will|needs? to|has to|have to|must|should|owns|handles?|stalled|blocked|waiting|stuck|covering|taking over|picking up|assigned|responsible|in charge|agreed|promised|volunteered|offered|going to|cancel+ed|anymore|instead of|moved|pushed|due|deadline|taken care of)\\b|\\bis\\s+[a-z]+ing\\b|\\b(?:by|before|no later than)\\s+${DATEP}`, "i").test(S); const mentionsOwner = (S.match(/\b[A-Z][a-zà-ÿĀ-ſḀ-ỿ]{1,15}\b/g) ?? []).some((w) => taskish && (tasks.some((t) => t.owner === w) || nameWords.has(w.toLowerCase()))); const mentionsTask = tasks.some((t) => same(t.key, keyOf(S))); const anyOwner = (S.match(/(?<![\wÀ-ÿĀ-ſḀ-ỿ])[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}\b/g) ?? []).some((w) => tasks.some((t) => (t.owner ?? "").split("+").includes(w))); if ((mentionsOwner || mentionsTask || (it.corrects && anyOwner)) && !/^[A-Z][a-zà-ÿĀ-ſḀ-ỿ]+(?:\s+[a-z]+){0,3}\.?$/.test(S)) unparsed.push({ text: raw, src: it }); }
+    if (!consumed) { const taskish = new RegExp(`\\b(?:will|needs? to|has to|have to|must|should|owns|handles?|stalled|blocked|waiting|stuck|covering|taking over|picking up|assigned|responsible|in charge|agreed|promised|volunteered|offered|going to|cancel+ed|anymore|instead of|moved|pushed|due|deadline|taken care of)\\b|\\bis\\s+[a-z]+ing\\b|\\b(?:by|before|no later than)\\s+${DATEP}`, "i").test(S); const mentionsOwner = (S.match(/\b[A-Z][a-zà-ÿĀ-ſḀ-ỿ]{1,15}\b/g) ?? []).some((w) => taskish && (tasks.some((t) => t.owner === w) || nameWords.has(w.toLowerCase()))); const mentionsTask = tasks.some((t) => same(t.key, keyOf(S))); const anyOwner = (S.match(/(?<![\wÀ-ÿĀ-ſḀ-ỿ])[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}\b/g) ?? []).some((w) => tasks.some((t) => (t.owner ?? "").split("+").includes(w))); const toks = (S.match(/(?<![\wÀ-ÿĀ-ſḀ-ỿ])[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}(?:-[a-zà-ÿĀ-ſḀ-ỿ]+)?/g) ?? []); const namesPerson = toks.some((w) => tasks.some((t) => (t.owner ?? "").split("+").includes(w))) || (!!it.corrects && toks.some((w) => nameWords.has(w.toLowerCase()) && !S.startsWith(w))); if ((mentionsOwner || mentionsTask || namesPerson || (it.corrects && anyOwner)) && !/^[A-Z][a-zà-ÿĀ-ſḀ-ỿ]+(?:\s+[a-z]+){0,3}\.?$/.test(S)) unparsed.push({ text: raw, src: it }); }
   }
   return { tasks, notes, unparsed, disp };
 }
@@ -224,6 +231,10 @@ const dueKey = (d: string | null): number => { if (!d) return 99999; const m1 = 
 /** Build the table or checklist. Columns the sources cannot fill are reported, not made up. */
 export function buildTaskTable(items: ItemIn[], spec: TableSpec): TableAnalysis {
   const { tasks, notes, unparsed, disp } = buildLedger(items);
+  return tableFromTasks(tasks, notes, unparsed, disp, spec);
+}
+/** Shape tasks (from the local reader or from a validated Claude reading) into the requested table or checklist. */
+export function tableFromTasks(tasks: TaskRow[], notes: string[], unparsed: { text: string; src: Src }[], disp: (o: string | null) => string, spec: TableSpec): TableAnalysis {
   const wanted0 = spec.columns.length ? spec.columns : ["Owner", "Next action", "Blocker"];
   let keys = wanted0.map((c) => columnKey(c) ?? "unknown"); let wanted = [...wanted0];
   if (spec.autoDue && !keys.includes("due") && tasks.some((t) => !t.done && t.due)) { keys.push("due"); wanted.push("Due"); }
@@ -261,4 +272,11 @@ export function checklistMarkdown(t: TableAnalysis): string {
   const by = new Map<string, typeof t.rows>(); for (const r of t.rows) by.set(r.owner ?? "Unassigned", [...(by.get(r.owner ?? "Unassigned") ?? []), r]);
   const out: string[] = []; for (const [who, rs] of by) { out.push(`**${who}**`); for (const r of rs) out.push(`- [ ] ${line(r)}`); out.push(""); }
   return out.join("\n").trim();
+}
+
+/** People named in the notes: capitalised words never written in lower case, seen somewhere other than the start of a sentence or as a possessive owner. */
+export function personNames(items: ItemIn[]): Set<string> {
+  const lower = new Set((items.flatMap((it) => it.sentences.map((x) => x.text)).join(" ").match(/\b[a-z]{3,}\b/g) ?? [])); const out = new Set<string>();
+  for (const it of items) for (const sn of it.sentences) { const re = /(?<![\wÀ-ÿĀ-ſḀ-ỿ])[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}(?:-[a-zà-ÿĀ-ſḀ-ỿ]+)?/g; let m: RegExpExecArray | null; while ((m = re.exec(sn.text))) { const w = m[0]; const first = m.index === 0; if (NOT_NAMES.has(w) || lower.has(w.toLowerCase().split("-")[0])) continue; if (!first || /^[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ-]+\s+(?:will|is|are|has|have|must|should|can|owns|handles|volunteered)\b/.test(sn.text)) out.add(w.toLowerCase()); } }
+  return out;
 }

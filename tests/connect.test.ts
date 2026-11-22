@@ -200,3 +200,28 @@ describe("a handoff table from ordinary Claude (local test client, not a real ac
     expect(ra.completion).toBe("complete"); expect(ra.requestedParts).toEqual([expect.objectContaining({ kind: "table", status: "done" })]); expect(ra.table.markdown).toMatch(/^\| Owner \| Next action \| Blocker \|/);
   });
 });
+
+// The Claude reader over the authenticated connector (a LOCAL TEST CLIENT, not a real Claude account): the shareable test project the app creates, the exact prompt,
+// a rejected reading that saves nothing, then an accepted one, retrieved in a fresh chat as the same result.
+import { createReaderTestProject, readerTestState } from "@/lib/reader";
+describe("Claude reads the notes over the connector (local test client)", () => {
+  it("submit_goal -> get_reader_task -> a bad then a good submit_reader_result -> a fresh chat reads the same saved result", async () => {
+    const ctx = fresh(); const t = createToken(ctx, { label: "Claude" }); const tp = createReaderTestProject(ctx);
+    expect(readerTestState(ctx)).toMatchObject({ exists: true, shareableNotes: 2, accepted: null, live: expect.stringMatching(/Pending/) }); expect(tp.prompt).toMatch(/get_reader_task/);
+    const s = await connect(t.token); const g = (await s.call("submit_goal", { text: "What does my team still owe? One row per open item with Owner, Next action and Blocker. Leave closed items out.", project: tp.project })).json;
+    expect(g.readerAvailable).toBe(true); const task = (await s.call("get_reader_task", { requestId: g.requestId })).json; expect(task.eligible).toBe(true); expect(task.spans.length).toBeGreaterThan(5);
+    const sid = (snip: string) => task.spans.find((x: any) => x.text.includes(snip)).spanId;
+    const mk = (extra: any = {}) => ({ requestId: g.requestId, revision: task.revision, snapshot: task.snapshot, updates: [
+      { ref: "u1", owner: "Ilse Brandt", action: "Set up the sound desk", status: "open", blocker: extra.blocker ?? null, effective: "unblocked", confidence: "stated", quotes: [{ spanId: sid("sound desk is in Ilse Brandt's hands"), quote: "The sound desk is in Ilse Brandt's hands" }, { spanId: sid("power plan has arrived"), quote: "Ilse Brandt can set up the sound desk" }] },
+      { ref: "u2", owner: "Mateus Oliveira", action: "Print the programmes", status: "open", blocker: null, effective: "new", confidence: "stated", quotes: [{ spanId: sid("Mateus Oliveira volunteered"), quote: "Mateus Oliveira volunteered to print the programmes" }] },
+      { ref: "u3", owner: "Tobias Quist", action: "Book the stage lights", status: "done", blocker: null, effective: "completed", confidence: "stated", quotes: [{ spanId: sid("Tobias Quist booked"), quote: "Tobias Quist booked the stage lights this morning" }] },
+      { ref: "u4", owner: null, action: "Sign off the stage barriers", status: "done", blocker: null, effective: "unchanged", confidence: "stated", quotes: [{ spanId: sid("stage barriers are already"), quote: "The stage barriers are already signed off" }] },
+    ], coverage: task.spans.map((x: any) => { const ref = /sound desk|power plan|waiting for the venue/.test(x.text) ? "u1" : /Mateus/.test(x.text) ? "u2" : /Tobias/.test(x.text) ? "u3" : /barriers/.test(x.text) ? "u4" : null; return { spanId: x.spanId, role: ref ? "contributes" : "unrelated", refs: ref ? [ref] : [], reason: ref ? "accounts for an item" : "heading" }; }) });
+    const bad = (await s.call("submit_reader_result", mk({ blocker: "Waiting for the venue's power plan" }))).json; expect(bad.accepted).toBe(false); expect(bad.reasons.join(" ")).toMatch(/was cleared by a later passage/);
+    const good = (await s.call("submit_reader_result", mk())).json; expect(good).toMatchObject({ accepted: true, completion: "complete" });
+    await s.client.close(); const chat2 = await connect(t.token); const res = (await chat2.call("get_result", { id: g.resultId })).json;
+    expect(res.table.rows.map((r: any) => r.cells.join(" | "))).toEqual(["Ilse Brandt | Set up the sound desk | None reported", "Mateus Oliveira | Print the programmes | None reported"]); expect(res.ready).toBe(true);
+    expect(readerTestState(ctx)).toMatchObject({ accepted: expect.objectContaining({ client: expect.any(String) }), rejectedAttempts: 1 });
+    expect(all(ctx.db, "SELECT model_calls FROM jobs").every((j: any) => j.model_calls === 0)).toBe(true);
+  });
+});

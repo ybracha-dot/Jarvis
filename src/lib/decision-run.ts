@@ -190,6 +190,11 @@ export type TableJson = ReturnType<typeof tableJson>;
 export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?: boolean }, request: string, wish: TableSpec, o: { applied: string[]; unapplied: string[]; wantDraft?: boolean }): DecisionOut | { reason: string } {
   const ids = [...new Set(b.items.map((i) => i.id))]; const items = toItems(ctx, ids);
   const t = buildTaskTable(items, wish);
+  return renderTable(ctx, t, ids, items, request, wish, o, !!b.localOnly);
+}
+/** Render a task table (from the local reader or from a validated Claude reading) into a saved-result shape. Everything shown carries its quote. */
+export function renderTable(ctx: Ctx, t: TableAnalysis, ids: string[], items: ItemIn[], request: string, wish: TableSpec, o: { applied: string[]; unapplied: string[]; wantDraft?: boolean }, localOnly = false): DecisionOut | { reason: string } {
+  void request;
   if (!t.taskCount) return { reason: `No task could be read from the notes, so no ${wish.form === "checklist" ? "checklist" : "table"} was built and nothing was invented.${t.unparsed.length ? ` Sentences I did not understand: ${t.unparsed.slice(0, 4).map((u) => `“${u.text}”`).join(" ")}` : ""}` };
   const sources: SrcRef[] = []; const flags: any[] = [];
   const addSrc = (c: Cite, role: string) => { if (!sources.some((x) => x.itemId === c.src.itemId && x.quote === c.quote && x.role === role)) sources.push({ itemId: c.src.itemId, revision: c.src.revision, title: c.src.title, kind: c.src.kind, at: c.src.at, sourceLabel: c.src.sourceLabel, mode: c.src.mode, role, quote: c.quote }); };
@@ -210,7 +215,7 @@ export function composeTable(ctx: Ctx, b: { items: { id: string }[]; localOnly?:
   if (t.missingColumns.length) flags.push({ kind: "unfilled_column", text: `No note states ${t.missingColumns.join(", ")}, so those cells say “Not stated”.` });
   if (t.addedTaskColumn) flags.push({ kind: "task_column", text: "You did not ask for a Task column, but a row without the work it is about is not a handoff, so one was added first." });
   const headline = t.rows.length ? `${t.rows.length} open task${t.rows.length === 1 ? "" : "s"}: ${t.rows.map((r) => r.owner ?? "Unassigned").join(", ")}` : "No open tasks";
-  return { title: t.form === "checklist" ? "Checklist of open work" : "Handoff table", body: lines.join("\n"), summary: headline, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: tableJson(t, ids, headline), draft: o.wantDraft && t.rows.length ? ledgerDraft(t, ownerName(ctx)) : null, needsJudgment: false, localOnly: !!b.localOnly };
+  return { title: t.form === "checklist" ? "Checklist of open work" : "Handoff table", body: lines.join("\n"), summary: headline, sources, flags, applied: o.applied, unapplied: o.unapplied, analysis: tableJson(t, ids, headline), draft: o.wantDraft && t.rows.length ? ledgerDraft(t, ownerName(ctx)) : null, needsJudgment: false, localOnly };
 }
 /** An email-ready summary of the same rows, in the user's own name. Nothing is sent. */
 function ledgerDraft(t: TableAnalysis, me: string) {

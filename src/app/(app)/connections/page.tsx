@@ -32,7 +32,7 @@ export default function ConnectionsPage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <header><h1 className="text-2xl font-semibold tracking-tight">Connections</h1><p className="text-[15px] text-muted mt-1">Let ordinary Claude read and update your projects, and prove it works in both directions.</p></header>
-      <nav aria-label="On this page" className="flex gap-3 flex-wrap text-[14px]"><a className="text-accent underline underline-offset-2" href="#roundtrip">Prove it with Claude</a><a className="text-accent underline underline-offset-2" href="#blackboard">Blackboard</a><a className="text-accent underline underline-offset-2" href="#sources">What Jarvis can read</a></nav>
+      <nav aria-label="On this page" className="flex gap-3 flex-wrap text-[14px]"><a className="text-accent underline underline-offset-2" href="#reader">Let Claude read your notes</a><a className="text-accent underline underline-offset-2" href="#roundtrip">Prove it with Claude</a><a className="text-accent underline underline-offset-2" href="#blackboard">Blackboard</a><a className="text-accent underline underline-offset-2" href="#sources">What Jarvis can read</a></nav>
       <section aria-label="Status" className={cx("rounded-2xl border p-5 metal", claudeVerified ? "border-accent-dim bg-[#0b1c29]" : "border-line bg-surface")} data-testid="connection-status">
         <div className="flex items-center gap-2"><ShieldCheck className={cx("size-5", claudeVerified ? "text-accent" : "text-muted")} aria-hidden /><h2 className="text-[17px] font-medium">{claudeVerified ? "A round trip finished with clients that reported themselves as Claude" : testOnly ? "The connector works. It has only been tested with a local test client" : "Not verified with ordinary Claude yet"}</h2></div>
         <p className="text-[14px] text-muted mt-1.5">{claudeVerified ? "Jarvis cannot verify an account from a self-reported client name, but this is the write, change and fresh read you asked for. Details and timestamps are under the round trip." : testOnly ? "A test client proves the connector code works. It does not prove your own Claude account can reach this Jarvis. Run the round trip below from Claude." : "Local tests and the example workspace prove the connector code. Only a round trip from your own Claude account proves it reaches this Jarvis."}</p>
@@ -77,6 +77,7 @@ export default function ConnectionsPage() {
         <ul className="space-y-2">{srcs.data?.sources.map((s: any) => <SourceRow key={s.id} s={s} />)}{srcs.data?.sources.length === 0 && <li className="text-[15px] text-muted">Nothing connected yet. Import a note, a transcript or an email below{sess.data?.mode !== "personal" ? ", or load the sample workspace" : ""}.</li>}</ul>
         {sess.data?.mode !== "personal" && !srcs.data?.sources.some((s: any) => s.mode === "fixture") && <div className="mt-3"><SampleLoader /></div>}
         <ImportForm /></section>
+      <ReaderCard />
       <BlackboardCard />
       <RoundTripCard />
       <section aria-label="Disconnect"><SectionTitle>Disconnect</SectionTitle><Card className="p-4 text-[14px] space-y-1.5"><p>Revoke the token above. It stops working immediately, even in a Claude conversation that is already open.</p><p>Then remove the connector in Claude: Settings, Connectors, Jarvis, Remove. What was saved stays in Jarvis until you forget it.</p></Card></section>
@@ -110,6 +111,25 @@ const PROJECT_INSTRUCTION = `When I ask for something that depends on earlier wo
 Jarvis can only read what I have authorized. Never send anything on my behalf; Jarvis drafts, I decide.`;
 
 const BB_STATE: Record<string, { label: string; tone: "accent" | "amber" | "danger" | "neutral" }> = { ok: { label: "connected: last read succeeded", tone: "accent" }, needs_signin: { label: "needs your sign-in", tone: "amber" }, stale: { label: "stale", tone: "amber" }, failed: { label: "could not read", tone: "danger" }, pending: { label: "saved, not read yet", tone: "neutral" }, not_configured: { label: "not connected", tone: "neutral" } };
+function ReaderCard() {
+  const q = useQuery<any>("/reader/test", { poll: 4000 }); const [copied, setCopied] = useState(false);
+  const make = useAction(async () => { await api("/reader/test", { body: {} }); });
+  const st = q.data; if (!st) return null;
+  return (
+    <section aria-label="Let Claude read your notes" data-testid="reader-card" id="reader"><SectionTitle>Let Claude read your notes</SectionTitle>
+      <Card className="p-4 space-y-3">
+        <p className="text-[14px] text-muted">In a normal Claude chat with the Jarvis connector, ask what your team still owes. Claude reads the project's <b className="text-fg font-medium">shareable</b> notes and sends back owners, next actions, blockers and exact quotes. Jarvis checks every quote, whom it is about, the correction chain and that no passage was skipped, then writes the result itself and gives you a link. <b className="text-fg font-medium">Local-only notes are never sent to Claude.</b> No paid API is used.</p>
+        {!st.exists ? <div className="flex items-center gap-3 flex-wrap"><Button variant="primary" busy={make.busy} onClick={() => make.run()} data-testid="reader-create">Create a shareable test project</Button><span className="text-[14px] text-muted">Two invented notes, marked shareable. Your own notes are not touched.</span></div>
+          : <>
+            <p className="text-[14px]" data-testid="reader-state">Test project <b className="font-medium">{st.project}</b>: {st.shareableNotes} shareable notes, {st.passages} passages. {st.accepted ? <span className="text-accent" data-testid="reader-live">A Claude chat submitted a reading that Jarvis accepted ({fmtDateTime(st.accepted.at)}{st.accepted.client ? `, client “${st.accepted.client}”` : ""}). <Link className="underline underline-offset-2" href={st.accepted.link}>Open the saved result</Link>.</span> : <span className="text-amber" data-testid="reader-live">Live test pending: no Claude chat has run this yet.</span>}{st.rejectedAttempts > 0 && <span className="text-muted"> Jarvis rejected {st.rejectedAttempts} earlier attempt{st.rejectedAttempts === 1 ? "" : "s"} and saved nothing from them.</span>}</p>
+            <div><b className="text-[14px] font-medium">Paste this into a Claude chat that has the Jarvis connector:</b><pre className="mono text-[13px] whitespace-pre-wrap rounded-lg bg-bg border border-line p-2.5 mt-1 select-all" data-testid="reader-prompt">{st.prompt}</pre>
+              <Button size="sm" onClick={async () => { try { await navigator.clipboard.writeText(st.prompt); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* blocked */ } }}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />}{copied ? "Copied" : "Copy the prompt"}</Button></div>
+            <p className="text-[13px] text-muted">The connector must be added in Claude first (Settings → Connectors) with the token from this page. A Claude name that the connector reports is self-reported, so this card says “accepted a reading”, not “verified account”.</p>
+          </>}
+        {make.error && <ErrorBox error={make.error} />}
+      </Card></section>
+  );
+}
 function BlackboardCard() {
   const q = useQuery<any>("/blackboard", { poll: 4000 }); const [url, setUrl] = useState(""); const [check, setCheck] = useState<any>(null); const [msg, setMsg] = useState<string | null>(null);
   const test = useAction(async () => { setCheck(await api("/blackboard/check", { body: { url } })); });

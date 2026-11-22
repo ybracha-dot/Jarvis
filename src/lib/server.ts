@@ -27,6 +27,7 @@ import { listSources, getItem, importText, revokeSource, reauthorizeSource, forg
 import { startRoundTrip, roundTripState, editRoundTrip } from "./roundtrip";
 import { blackboardStatus, readFeed, saveFeed, removeFeed } from "./blackboard";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
+import { issueReaderTask, submitReaderResult, createReaderTestProject, readerTestState, readerHandoff } from "./reader";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
 import { createToken, listTokens, revokeToken, rotateToken, NewToken, startProbe, probeState, editProbe } from "./mcp-auth";
 import { officeState, cancelJob, getJob, TERMINAL } from "./jobs";
@@ -135,7 +136,7 @@ on("GET", "/evidence/items", (c, r) => ({ items: listItems(c, { projectId: r.que
 on("GET", "/evidence/items/:id", (c, r) => { const it = getItem(c, r.params.id); if (!it) throw new HttpError(404, "Not found"); return it; });
 on("GET", "/evidence/search", (c, r) => ({ hits: searchEvidence(c, tokens(r.query.get("q") ?? ""), { limit: 8 }) }));
 on("POST", "/evidence/import", (c, r) => {
-  const b = r.json(z.object({ kind: z.enum(SOURCE_KINDS), title: z.string().trim().min(1).max(160), text: z.string().min(1).max(200000), at: z.string().optional(), author: z.string().max(80).optional(), projectId: z.string().nullish(), projectName: z.string().trim().max(120).optional(), label: z.string().max(80).optional(), corrects: z.string().max(60).nullish(), localOnly: z.boolean().optional() }));
+  const b = r.json(z.object({ kind: z.enum(SOURCE_KINDS), title: z.string().trim().min(1).max(160), text: z.string().min(1).max(200000), at: z.string().optional(), author: z.string().max(80).optional(), projectId: z.string().nullish(), projectName: z.string().trim().max(120).optional(), label: z.string().max(80).optional(), corrects: z.string().max(60).nullish(), localOnly: z.boolean().optional(), shareable: z.boolean().optional() }));
   const pid = b.projectId ?? (b.projectName ? createProject(c, { name: b.projectName, kind: "project" }).id : null);
   if (b.corrects) { const orig = getItem(c, b.corrects); if (!orig || ("forgotten" in orig && orig.forgotten)) throw new HttpError(404, "The note you are correcting is not available"); }
   const out = importText(c, { ...b, projectId: pid }); return { ...out, projectId: pid };
@@ -157,6 +158,12 @@ on("POST", "/projects/events/:id/undo", (c, r) => undoEvent(c, r.params.id));
 on("GET", "/profile", (c) => ({ ownerName: getSetting<string>(c.db, "owner_name", "Yonathan") }));
 on("POST", "/profile", (c, r) => { const n = r.json(z.object({ ownerName: z.string().trim().min(1).max(60) })).ownerName; setSetting(c.db, "owner_name", n); return { ownerName: n }; });
 on("GET", "/roundtrip", (c) => ({ trip: roundTripState(c) }));
+// Claude reads the notes; Jarvis validates and saves. The same logic is behind the connector tools get_reader_task and submit_reader_result.
+on("GET", "/reader/test", (c) => readerTestState(c));
+on("POST", "/reader/test", (c) => { createReaderTestProject(c); return readerTestState(c); });
+on("POST", "/reader/task", (c, r) => issueReaderTask(c, r.json(z.object({ requestId: z.string().max(60) }).strict()).requestId));
+on("POST", "/reader/submit", (c, r) => submitReaderResult(c, r.json(z.any()), "Jarvis app session (not a Claude connector)"));
+on("GET", "/reader/handoff/:id", (c, r) => readerHandoff(c, r.params.id));
 on("POST", "/roundtrip", (c, r) => startRoundTrip(c, r.json(z.object({ project: z.string().min(2).max(120) }))));
 on("POST", "/roundtrip/:id/edit", (c, r) => editRoundTrip(c, r.params.id));
 on("GET", "/connector", (c) => ({ tokens: listTokens(c), probe: probeState(c), envToken: !!process.env.JARVIS_MCP_TOKEN, publicUrl: process.env.JARVIS_PUBLIC_URL ?? null, ingress: process.env.JARVIS_PUBLIC_MODE === "mcp-only" ? "mcp-only" : "full", mode: c.mode }));

@@ -761,6 +761,43 @@ async function journeyHandoff(browser: Browser) {
   await ctx.close();
 }
 
+async function journeyReader(browser: Browser) {
+  step("Claude reader: the entry point, a rejected reading that saves nothing, an accepted one opened from Today, and local-only notes that stay local");
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
+  const p = await ctx.newPage(); watch(p, "reader"); startWorker(300);
+  await p.goto(base + "/connections"); await p.getByTestId("reader-card").waitFor(); await p.getByTestId("reader-create").click(); await p.getByTestId("reader-prompt").waitFor();
+  const prompt = await p.getByTestId("reader-prompt").innerText(); ok(/get_reader_task/.test(prompt) && /submit_reader_result/.test(prompt) && /Claude reader test: rooftop concert/.test(prompt), "the card gives the exact chat prompt for the shareable test project");
+  ok(/Live test pending/.test(await p.getByTestId("reader-live").innerText()), "the live test is marked pending until a Claude chat submits a reading");
+  ok(/never sent to Claude/.test(await p.getByTestId("reader-card").innerText()), "the card says local-only notes are never sent");
+  const api2 = async (path: string, data: unknown) => (await (await p.request.post(base + "/api" + path, { data, headers: { origin: base } })).json());
+  const ask = await api2("/asks", { text: "What does my team still owe? One row per open item with Owner, Next action and Blocker. Leave closed items out.", projectHint: (await (await p.request.get(base + "/api/reader/test")).json()).projectId });
+  const task = await api2("/reader/task", { requestId: ask.requestId }); ok(task.eligible === true && task.spans.length >= 6, "the task lists the shareable passages with ids");
+  const sid = (snip: string) => task.spans.find((x: any) => x.text.includes(snip)).spanId;
+  const upd = (blocker: string | null) => ({ requestId: ask.requestId, revision: task.revision, snapshot: task.snapshot, client: "e2e mock Claude", updates: [
+    { ref: "u1", owner: "Ilse Brandt", action: "Set up the sound desk", status: "open", blocker, effective: "unblocked", confidence: "stated", quotes: [{ spanId: sid("sound desk is in Ilse Brandt's hands"), quote: "The sound desk is in Ilse Brandt's hands" }, { spanId: sid("power plan has arrived"), quote: "Ilse Brandt can set up the sound desk" }] },
+    { ref: "u2", owner: "Mateus Oliveira", action: "Print the programmes", status: "open", blocker: null, effective: "new", confidence: "stated", quotes: [{ spanId: sid("Mateus Oliveira volunteered"), quote: "Mateus Oliveira volunteered to print the programmes" }] },
+    { ref: "u3", owner: "Tobias Quist", action: "Book the stage lights", status: "done", blocker: null, effective: "completed", confidence: "stated", quotes: [{ spanId: sid("Tobias Quist booked"), quote: "Tobias Quist booked the stage lights this morning" }] },
+    { ref: "u4", owner: null, action: "Sign off the stage barriers", status: "done", blocker: null, effective: "unchanged", confidence: "stated", quotes: [{ spanId: sid("stage barriers are already"), quote: "The stage barriers are already signed off" }] } ],
+    coverage: task.spans.map((x: any) => { const ref = /sound desk|power plan|waiting for the venue/.test(x.text) ? "u1" : /Mateus/.test(x.text) ? "u2" : /Tobias/.test(x.text) ? "u3" : /barriers/.test(x.text) ? "u4" : null; return { spanId: x.spanId, role: ref ? "contributes" : "unrelated", refs: ref ? [ref] : [], reason: "accounts for an item" }; }) });
+  const bad = await api2("/reader/submit", upd("Waiting for the venue's power plan")); ok(bad.accepted === false && /cleared by a later passage/.test(bad.reasons.join(" ")), "a reading that keeps a cleared blocker is rejected with the reason");
+  await p.goto(base + `/results/${ask.resultId}`); await p.getByTestId("result-body").waitFor({ timeout: 30000 }); ok(!(await p.getByTestId("reader-meta").count()), "the rejected reading saved nothing");
+  const good = await api2("/reader/submit", upd(null)); ok(good.accepted === true && good.completion === "complete", "the correct reading is accepted and complete");
+  await p.goto(base + "/"); await p.getByRole("link", { name: /Handoff table/ }).first().click(); await p.getByTestId("handoff-table").waitFor();
+  const rows = await p.getByTestId("table-row").evaluateAll((els) => els.map((e) => Array.from(e.querySelectorAll("td")).slice(0, 3).map((t) => t.textContent).join(" | ")));
+  ok(rows.join(";") === "Ilse Brandt | Set up the sound desk | None reported;Mateus Oliveira | Print the programmes | None reported", `Today opens the saved result with both open rows (${rows.join(" ; ")})`);
+  ok(/Read by the app.s test endpoint/.test(await p.getByTestId("reader-meta").innerText()) && /Claude-assisted/.test(await p.getByTestId("exec-mode").innerText()), "the page says plainly this was a simulated submission through the test endpoint, and that Jarvis checked it");
+  ok((await p.getByTestId("result-status").innerText()).trim() === "Finished", "the status says Finished");
+  await shot(p, "50-reader-result-desktop.png");
+  await p.goto(base + "/connections"); await p.getByTestId("reader-live").waitFor(); ok(/accepted/.test(await p.getByTestId("reader-live").innerText()) && /earlier attempt/.test(await p.getByTestId("reader-state").innerText()), "Connections now records the accepted reading and the rejected attempt");
+  // Local-only notes stay local: unfamiliar wording gets an honest partial and the reason Claude is not offered.
+  const lp = await api2("/evidence/import", { kind: "note", title: "Private crew note", text: "Nadia Fontaine is the one to watch on lighting rehearsals, apparently, and the generator remains a mystery.", projectName: "Local only project", label: "Local notes", localOnly: true });
+  const lask = await api2("/asks", { text: "What does my team still owe? One row per open item with Owner, Next action and Blocker.", projectHint: lp.projectId });
+  const lt = await api2("/reader/task", { requestId: lask.requestId }); ok(lt.eligible === false && !/Nadia|generator/.test(JSON.stringify(lt)), "a local-only project issues no reading task and returns none of its text");
+  await p.goto(base + `/results/${lask.resultId}`); await p.getByTestId("reader-handoff").waitFor({ timeout: 40000 }); ok(/local-only/.test(await p.getByTestId("reader-handoff").innerText()), "the result explains that local-only notes stay in Jarvis and what would resolve it");
+  ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole run made zero model calls");
+  await ctx.close();
+}
+
 async function journeyPrivate(browser: Browser) {
   step("Private run: one note, one correction, one question (invented material)");
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
@@ -1248,6 +1285,7 @@ async function main() {
     else if (only === "plan") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "plan"); await journeyPlan(p, browser); await c.close(); }
     else if (only === "shuttle") { await journeyShuttle(browser); }
     else if (only === "handoff") { await journeyHandoff(browser); }
+    else if (only === "reader") { await journeyReader(browser); }
     else if (only === "private") { await journeyPrivate(browser); }
     else if (only === "blackboard") { await journeyBlackboard(browser); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
@@ -1270,6 +1308,7 @@ async function main() {
     await journeyPrivate(browser);
     await journeyShuttle(browser);
     await journeyHandoff(browser);
+    await journeyReader(browser);
     await journeyBlackboard(browser);
     await journeyRoundTrip(browser);
     await desktop.close();

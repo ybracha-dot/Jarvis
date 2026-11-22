@@ -46,6 +46,8 @@ function Result({ id }: { id: string }) {
       </section>
       {d.outcomes?.length > 0 && <section aria-label="What you asked for" data-testid="requested-parts"><SectionTitle>What you asked for{d.completion !== "complete" && <Badge tone="amber" className="ml-2" data-testid="partly-done">partly done</Badge>}</SectionTitle>
         <ul className="rounded-xl border border-line bg-surface divide-y divide-line">{d.outcomes.map((o: any) => <li key={o.id} className="px-4 py-3 flex gap-3 items-start" data-testid="requested-part" data-status={o.status}><Badge tone={o.status === "done" ? "accent" : o.status === "partial" ? "amber" : "danger"} className="shrink-0 mt-0.5">{o.status === "done" ? "done" : o.status === "partial" ? "partly done" : "not done"}</Badge><div className="min-w-0"><p className="text-[15px] break-words">{o.text}</p><p className="text-[14px] text-muted break-words">{o.detail}</p></div></li>)}</ul></section>}
+      {d.analysis?.reader && <p className="text-[14px] text-muted" data-testid="reader-meta">Read by {d.analysis.reader.source}{d.analysis.reader.client ? ` (client “${d.analysis.reader.client}”)` : ""}: {d.analysis.reader.passages} passages, {d.analysis.reader.updates} items. Jarvis checked every quote and the correction chain before saving this. The client name is self-reported.</p>}
+      {d.completion && d.completion !== "complete" && d.version > 0 && <ReaderHandoff id={d.id} />}
       {blockedJob && <Card className="p-4 space-y-2" data-testid="result-question"><b className="text-[15px] text-amber">Jarvis needs one answer</b><p className="text-[15px]">{r.blockers[0]}</p><BlockedAsk /></Card>}
       {d.stale && <Notice>This version is out of date: {d.stale} Ask again to rebuild it from what is still authorized.</Notice>}
       {d.body && <section aria-label={KIND[d.kind]} className="rounded-2xl border border-line bg-surface metal p-5 md:p-6 space-y-1" data-testid="result-body">
@@ -82,6 +84,12 @@ export { ExternalLink, FileText };
 
 const STATUS: Record<string, { tone: "accent" | "amber" | "danger" | "neutral"; label: string }> = { ok: { tone: "accent", label: "meets it" }, violated: { tone: "danger", label: "does not meet it" }, unknown: { tone: "amber", label: "cannot tell yet" }, unconfirmed: { tone: "amber", label: "unconfirmed" } };
 const VERDICT: Record<string, { tone: "accent" | "amber" | "danger" | "neutral"; label: string }> = { works: { tone: "accent", label: "works" }, fails: { tone: "danger", label: "does not work" }, depends: { tone: "amber", label: "depends on something unconfirmed" } };
+function ReaderHandoff({ id }: { id: string }) {
+  const q = useQuery<any>(`/reader/handoff/${id}`); const h = q.data; const [copied, setCopied] = useState(false); if (!h) return null;
+  return h.available
+    ? <Card className="p-4 space-y-2" data-testid="reader-handoff"><b className="text-[15px] font-medium">Let Claude finish this</b><p className="text-[14px] text-muted">Jarvis's own reader could not settle everything. {h.shareableNotes} shareable note{h.shareableNotes === 1 ? "" : "s"} can be read by Claude{h.localOnlyNotes ? `; ${h.localOnlyNotes} local-only stay${h.localOnlyNotes === 1 ? "s" : ""} in Jarvis` : ""}. Paste this into a Claude chat with the Jarvis connector:</p><pre className="mono text-[13px] whitespace-pre-wrap rounded-lg bg-bg border border-line p-2.5 select-all" data-testid="reader-handoff-prompt">{h.prompt}</pre><Button size="sm" onClick={async () => { try { await navigator.clipboard.writeText(h.prompt); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* blocked */ } }}>{copied ? "Copied" : "Copy the prompt"}</Button></Card>
+    : <Card className="p-4" data-testid="reader-handoff"><b className="text-[15px] font-medium">What would resolve this</b><p className="text-[14px] text-muted mt-1">{h.reason}</p></Card>;
+}
 function TableView({ a }: { a: any }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = async (kind: string, text: string) => { try { await navigator.clipboard.writeText(text); setCopied(kind); setTimeout(() => setCopied(null), 1500); } catch { /* blocked */ } };

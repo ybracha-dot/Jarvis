@@ -271,6 +271,16 @@ UPDATE requests SET dedup_key = json_array(
   dedup_key
 );
 `,
+  /* 9 Claude reader: explicitly shareable sources, issued reading tasks, validated submissions */ `
+ALTER TABLE evidence_sources ADD COLUMN shareable INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE reader_tasks(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, request_id TEXT NOT NULL, revision INTEGER NOT NULL, snapshot TEXT NOT NULL, spans TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(request_id, revision, snapshot));
+CREATE TABLE reader_submissions(
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, request_id TEXT NOT NULL, revision INTEGER NOT NULL, snapshot TEXT NOT NULL, payload_hash TEXT NOT NULL, status TEXT NOT NULL,
+  reasons TEXT NOT NULL DEFAULT '[]', result_version INTEGER, client TEXT, created_at TEXT NOT NULL);
+CREATE INDEX reader_submissions_req ON reader_submissions(request_id, revision, status);
+`,
 ];
 
 const cache = new Map<string, DB>();
