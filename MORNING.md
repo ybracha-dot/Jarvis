@@ -1,8 +1,48 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Project scope fix and the handoff table** (this round), **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Let Claude read the notes, and make completion verifiable** (this round), **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
 
-# Project scope fix and the handoff table (latest)
+# Let Claude read the notes, and make completion verifiable (latest)
+
+Baseline `507c465`. Paid model calls stayed off in every run (zero model calls). Everything below is synthetic.
+
+## Your first prompt for your own Claude account (the live test is **pending** until you run it)
+Open **Connections → Let Claude read your notes → Create a shareable test project** (two invented notes, marked shareable; your own notes are untouched), then paste the card's prompt into a Claude chat that has the Jarvis connector. It reads:
+
+> Use my Jarvis connector. I want a handoff for the Jarvis project “Claude reader test: rooftop concert”: what does my team still owe? Do this in order. (1) Call submit_goal with project “Claude reader test: rooftop concert” and the text “What does my team still owe? One row per open item with Owner, Next action and Blocker. Leave closed items out.” and note the requestId it returns. (2) Call get_reader_task with that requestId and read every passage; the newest note corrects the older one. (3) Call submit_reader_result with your updates (owner, action, status, blocker, exact quotes with their spanId) and a coverage entry for every passage. (4) If Jarvis rejects anything, fix it and resubmit; never invent a quote. (5) Reply with the Jarvis result link and the table Jarvis saved.
+
+*Success looks like:* the card flips from “Live test pending” to “A Claude chat submitted a reading that Jarvis accepted (time, client name)” with a link; the result opens from **Today** with two rows (Ilse Brandt: set up the sound desk; Mateus Oliveira: print the programmes; both blockers cleared), a source link on each row, the mode “Claude-assisted”, and **Finished**. Tobias Quist’s lights and the stage barriers are shown as left out. The same link opens in a fresh chat via `get_result`. The client name is self-reported, so the card says “accepted a reading”, never “verified account”. If the connector is not added yet, add it first (Settings → Connectors) with the token on the same page.
+
+## What was built
+- **Local notes stay local.** Only notes imported as explicitly **shareable** are ever offered to Claude; local-only notes are withheld (the reply says how many, never what they say). Your existing notes keep their privacy setting. A new import option makes a shareable source.
+- **Two connector tools** (existing auth): `get_reader_task` gives one request revision’s shareable notes as numbered passages with stable ids and a snapshot id; `submit_reader_result` takes structured updates (owner, action, status, blocker, due, how it changed, confidence, exact quotes with passage ids) plus what was done with every passage. `submit_goal` tells Claude the reader is available.
+- **Jarvis keeps the authority to save.** It rejects (saving nothing, keeping any earlier result) a wrong schema, a stale request revision, notes that changed after the reading, an unissued passage, a quote that is not in its passage, a quote about someone else, a passage with no coverage entry, a passage set aside that describes work for someone with no update, a blocker a later passage clears, an item a later passage closes, duplicates, and a different second reading for the same revision. A replay returns the same version. It renders the table itself and saves it as a new version of the **same** result id; the earlier version is kept. Anything Claude marks uncertain or unresolved makes the result an honest partial, with the passage shown above the table.
+- **Offline path.** A sentence that names someone who owns a task, or any passage in a correction that names a person, can no longer be skipped silently; it is listed and the job says it finished partly. The supplied regression (`tests/independent-showcase.test.ts`) fails on `507c465` and passes now with both rows, each cited to the correction.
+- **Handoff offered where it helps:** a result the local reader could not finish shows either the exact prompt (shareable notes) or why Claude cannot be used (local-only notes) and what would resolve it.
+
+## Verification
+- **Written before any output was seen, in code:** the supplied regression; the Signal Hall scenario with a shareable source through a simulated connector: the correct two-row reading is accepted and reopened through the normal result page; a candidate that drops Leila, one that keeps her old blocker and one that attaches Amara’s quote to Leila are each rejected, with the earlier result untouched. Replay, stale revision, stale notes, invented quotes and local-only isolation each have a test.
+- **Checks run:** 328 unit tests; the full browser suite on the final build, 336 checks, 0 problems, including a new journey (entry point, a rejected reading that saves nothing, an accepted one opened from Today, a local-only project that issues no task); typecheck; production build.
+- **One real bug found by that browser run and fixed:** `/try` stamped the first note at noon of the chosen day and the correction at the server clock, so before noon the correction was dated before the original and was applied first. The first note now uses the current time when the date is today.
+
+## Frozen evaluation on fresh notes (read once, before any tuning)
+An independent agent wrote six fresh cases and their expected rows first, ran the same notes on both paths, and played the part of the Claude chat on path B. **This is not your Claude account and not Claude Desktop.** First attempts:
+
+| | USABLE | HONEST PARTIAL | FALSE “FINISHED” | REJECTED by Jarvis |
+|---|---|---|---|---|
+| Path A, local reader (6 cases) | 0 | 3 | 3 (one stale row; one next action “Not stated”; two firm rows right but ambiguous items dropped silently) | – |
+| Path B, an LLM reading, Jarvis validating (6 cases) | 3 | 1 (ambiguity surfaced honestly) | 0 among accepted results | 2, **both rejections wrong** |
+
+- Path B’s two wrong rejections: a passage that only names a person with no task was refused as “unrelated”; and “delivery confirmed for Monday but nothing has arrived yet” was read as clearing a blocker. After one resubmit all six matched the expected rows, but one of those resubmits added an invented item to get past the first rule.
+- **Tuned afterwards, so not re-measured:** both false rejections (a passage naming a non-assignee is now accepted with a visible note; negated or future “arrived/confirmed” does not clear a blocker), verb forms like “rewrite”, a trailing “but”, due dates shown in the Next action cell when there is no due column, and unplaced “needs to be set / maybe / TBD” passages now flagged. Regression tests cover each.
+- **Honest reading of the numbers:** the local reader is still wording-limited (0 of 6 first attempts usable; it never invented a row but twice presented a stale one as final). The Claude path read all six correctly once Jarvis’s own rules stopped getting in the way. That is evidence about the validator, **not** about how well Claude reads your notes; only a live Claude chat can show that.
+
+## Still needs you
+1. Run the prompt above in your Claude account and tell me whether the card flips and the table is right.
+2. Then try one of your real notes: import a **shareable** copy for the Claude path; the original stays local.
+3. Real Blackboard and the earlier owner trial remain pending.
+
+# Project scope fix and the handoff table (previous)
 
 Baseline `4a3a7a4`. Paid model calls stayed off in every run (zero model calls).
 

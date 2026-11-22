@@ -13,7 +13,7 @@ export default function TryPage() {
   const [q, setQ] = useState("What is the current plan, and what changed since the first note?"); const [goal, setGoal] = useState<any>(null);
   const status = useQuery<any>(goal ? `/asks/${goal.requestId}` : null, { poll: 1500 });
   const sw = useAction(async () => { await api("/mode", { body: { mode: "personal" } }); window.location.href = "/try"; });
-  const add1 = useAction(async () => { setN1(await api("/evidence/import", { body: { kind: "note", title: s1.title, text: s1.text, at: new Date(`${s1.date}T12:00:00`).toISOString(), projectName: s1.project, label: "Notes I imported", localOnly: true } })); });
+  const add1 = useAction(async () => { setN1(await api("/evidence/import", { body: { kind: "note", title: s1.title, text: s1.text, at: s1.date === today() ? new Date().toISOString() : new Date(`${s1.date}T12:00:00`).toISOString(), projectName: s1.project, label: "Notes I imported", localOnly: true } })); });
   const add2 = useAction(async () => { setN2(await api("/evidence/import", { body: { kind: "note", title: s2.title || `Correction to ${s1.title}`, text: s2.text, projectId: n1.projectId, label: "Notes I imported", localOnly: true, corrects: n1.id } })); });
   const ask = useAction(async () => { setGoal(await api("/asks", { body: { text: q, projectHint: n1.projectId } })); });
   const st = status.data; const waiting = st && !st.ready && st.status === "queued";

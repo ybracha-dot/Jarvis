@@ -92,7 +92,7 @@ describe("validating a submission", () => {
   it("REJECTS a candidate that drops Leila (her passages set aside as unrelated), and saves nothing", async () => {
     const { ctx, goal } = await setup(); await work(ctx); const before: any = resultView(ctx, goal.resultId); const t = task(ctx, goal); const g = good(t);
     const bad = { ...g, updates: g.updates.filter((u) => u.ref !== "u1"), coverage: g.coverage.map((c) => (c.refs.includes("u1") ? { ...c, role: "unrelated", refs: [] } : c)) };
-    const r = submitReaderResult(ctx, bad, "mock-claude"); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/names [^.]*leila[^.]*, who has no update/i);
+    const r = submitReaderResult(ctx, bad, "mock-claude"); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/describes work for [^.]*leila[^.]*, who has no update/i);
     const v: any = resultView(ctx, goal.resultId); expect(v.latestVersion).toBe(before.latestVersion); expect(v.analysis.rows.map((x: any) => x.owner).sort()).toEqual(["Amara Chen", "Leila Park"]);   // the local result is untouched
   });
   it("REJECTS a candidate that keeps Leila's old blocker although a later passage says the artwork arrived", async () => {
@@ -140,6 +140,26 @@ describe("validating a submission", () => {
   it("never reads a local-only project: a submission for it is rejected because no task could have been issued", async () => {
     const { ctx, goal } = await setup({ localOnly: true });
     const r = submitReaderResult(ctx, { requestId: goal.requestId, revision: 1, snapshot: "0".repeat(16), updates: [], coverage: [] }); expect(r.accepted).toBe(false);
+  });
+});
+
+// Findings from the frozen evaluation (an LLM playing Claude on fresh notes): Jarvis rejected two correct readings. A passage that merely names someone with no task
+// ("Hiroshi Tanaka only attended the kickoff") was refused as an "unrelated" passage, and "delivery confirmed for Monday but nothing has arrived yet" was read as clearing the blocker.
+describe("validator false positives found by the frozen evaluation", () => {
+  it("a passage that names a person who has no task can be set aside as unrelated; it is accepted with a visible note, not rejected", async () => {
+    const { ctx, goal, project } = await setup(); importText(ctx, { kind: "note", projectId: project.id, shareable: true, title: "Kickoff", text: "Hiroshi Tanaka only attended the kickoff.", at: "2026-11-21T09:00:00.000Z" });
+    const t = task(ctx, goal); const g = good(t); const extra = t.spans.find((x) => x.text.includes("Hiroshi"))!;
+    const r = submitReaderResult(ctx, { ...g, coverage: [...g.coverage, { spanId: extra.spanId, role: "unrelated", refs: [], reason: "attendance only" }] }, "mock-claude");
+    expect(r).toMatchObject({ accepted: true }); expect((resultView(ctx, goal.resultId) as any).body).toMatch(/Claude set aside “Hiroshi Tanaka only attended the kickoff\.”/);
+  });
+  it("a blocker that a later passage says is NOT yet resolved stays valid", async () => {
+    const ctx = memCtx("2026-11-21T12:00:00-05:00", "personal"); const project = createProject(ctx, { name: "Device pilot" }); const src = { kind: "note", projectId: project.id, shareable: true } as any;
+    const a = importText(ctx, { ...src, title: "Pilot", text: "Kwabena Mensah will test the app on the pilot devices. He is waiting for the test devices to be delivered.", at: "2026-11-20T12:00:00.000Z" });
+    importText(ctx, { ...src, title: "Pilot update", text: "The delivery has been confirmed for Monday but nothing has arrived yet.", at: "2026-11-21T12:00:00.000Z", corrects: a.id });
+    const goal = submitGoal(ctx, { text: ASK, projectHint: project.id, origin: "claude" }); const t = task(ctx, goal);
+    const r = submitReaderResult(ctx, { requestId: t.requestId, revision: t.revision, snapshot: t.snapshot, updates: [{ ref: "u1", owner: "Kwabena Mensah", action: "Test the app on the pilot devices", status: "open", blocker: "Waiting for the test devices (delivery confirmed for Monday, not yet arrived)", effective: "updated", confidence: "stated", quotes: [q(t, "Kwabena Mensah will test", "Kwabena Mensah will test the app on the pilot devices"), q(t, "nothing has arrived yet", "nothing has arrived yet")] }],
+      coverage: t.spans.map((x) => ({ spanId: x.spanId, role: "contributes", refs: ["u1"], reason: "about the pilot devices" })) });
+    expect(r).toMatchObject({ accepted: true }); expect((resultView(ctx, goal.resultId) as any).analysis.rows[0].cells[2]).toMatch(/delivery confirmed for Monday/);
   });
 });
 

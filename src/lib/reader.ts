@@ -69,6 +69,9 @@ const STOPW = new Set("the and for with from that this have has had are was were
 const keyWords = (t: string) => [...new Set(ASCII(t).match(/[a-z]{4,}/g) ?? [])].filter((w) => !STOPW.has(w)).map((w) => w.replace(/(?:ing|ed|es|s)$/, ""));
 const CLEAR_CUE = /\b(?:arrived|arrives|cleared|clearing|clears|unblocked|no longer (?:blocked|waiting)|received|resolved|delivered|came in|is here|are here|has landed|got it|came through|confirmed|sent)\b/i;
 const DONE_CUE = /\b(?:is complete|are complete|completed|is done|are done|finished|signed off|has been (?:ordered|booked|sent|completed)|collected|picked up|handed in|wrapped up)\b/i;
+const NEG_CLEAR = /\b(?:not yet|nothing|hasn'?t|haven'?t|has not|have not|yet to|still (?:waiting|not)|no sign)\b[^.]{0,40}\b(?:arrived|received|delivered|cleared|here|come in|came in|sent)\b|\bnot (?:yet )?(?:arrived|received|delivered|cleared)\b|\bconfirmed for\b|\bis expected\b|\bwill (?:arrive|be delivered|come)\b|\bexpected (?:on|by)\b/i;
+const clearing = (t: string) => CLEAR_CUE.test(t) && !NEG_CLEAR.test(t);
+const WORK_CUE = /\b(?:will|volunteer\w*|assigned|owns?|handles?|responsible|in [A-Z][\w'’ -]{1,30} hands|needs? to|has to|must|waiting|taking over|takes? over|handed|due|by \d|clearing|cleared|to (?:book|send|prepare|print|release|set up|finish|write|order|deliver|fix|check|collect|arrange|call|email))\b/i;
 const nameTokens = (owner: string) => ASCII(owner).match(/[a-z]{3,}/g) ?? [];
 const mentions = (text: string, owner: string) => { const t = ASCII(text); return nameTokens(owner).some((tok) => new RegExp(`(?<![a-z])${tok}(?![a-z])`).test(t)); };
 
@@ -105,7 +108,7 @@ export function submitReaderResult(ctx: Ctx, raw: unknown, client?: string): Rea
     if (u.status === "open" && !u.owner && u.confidence === "stated") reasons.push(`${u.ref}: an open item with no owner cannot be “stated”; mark it uncertain or give the owner.`);
   }
   // Coverage: every passage once, with a role that fits.
-  const cov = new Map<string, z.infer<typeof Coverage>>();
+  const setAsideNotes: string[] = []; const cov = new Map<string, z.infer<typeof Coverage>>();
   for (const c of p.coverage) { if (!byId.has(c.spanId)) { reasons.push(`Coverage names ${c.spanId}, which was not issued.`); continue; } if (cov.has(c.spanId)) reasons.push(`Passage ${c.spanId} has two coverage entries.`); cov.set(c.spanId, c); }
   const missing = spans.filter((s) => !cov.has(s.id)); if (missing.length) reasons.push(`${missing.length} passage${missing.length === 1 ? " has" : "s have"} no coverage entry: ${missing.slice(0, 4).map((s) => `${s.id} “${s.text.slice(0, 50)}”`).join("; ")}${missing.length > 4 ? "; …" : ""}.`);
   const upd = new Map(p.updates.map((u) => [u.ref, u]));
@@ -117,15 +120,16 @@ export function submitReaderResult(ctx: Ctx, raw: unknown, client?: string): Rea
     if (c.role === "closed" && !c.refs.some((r2) => { const u = upd.get(r2); return u && u.status !== "open"; })) reasons.push(`${c.spanId} is marked closed but no done or cancelled update accounts for it.`);
     if ((c.role === "unrelated" || c.role === "closed") && !c.refs.length || c.role === "unrelated") {
       const named = (ASCII(sp.text).match(/[a-z]{3,}/g) ?? []).filter((w) => persons.has(w) && !ownerToks.has(w));
-      if (named.length) reasons.push(`${c.spanId} is marked ${c.role} but names ${[...new Set(named)].join(", ")}, who has no update. A passage that names an assignee cannot be set aside: add their update or mark it unresolved.`);
-      else if (CLEAR_CUE.test(sp.text) || /\b(?:instead|no longer|replaces?|moved to|handed|reassign|corrected|now due)\b/i.test(sp.text)) reasons.push(`${c.spanId} is marked ${c.role} but it changes or clears something (“${sp.text.slice(0, 70)}”). Say which item it affects, or mark it unresolved.`);
+      if (named.length && WORK_CUE.test(sp.text)) reasons.push(`${c.spanId} is marked ${c.role} but it describes work for ${[...new Set(named)].join(", ")}, who has no update. A passage that names an assignee cannot be set aside: add their update or mark it unresolved.`);
+      else if (named.length) setAsideNotes.push(`Claude set aside “${sp.text.slice(0, 90)}” (${c.reason}). It names ${[...new Set(named)].join(", ")}, so check it was not a task.`);
+      else if (clearing(sp.text) || /\b(?:instead|no longer|replaces?|moved to|handed|reassign|corrected|now due)\b/i.test(sp.text)) reasons.push(`${c.spanId} is marked ${c.role} but it changes or clears something (“${sp.text.slice(0, 70)}”). Say which item it affects, or mark it unresolved.`);
     }
   }
   // Compare the proposed facts with the correction chain: a later passage that clears the blocker or closes the item beats an earlier claim.
   const spanItemAt = (id: string) => byId.get(id)?.at ?? "";
   for (const u of p.updates) {
     const lastSupport = u.quotes.map((q) => spanItemAt(q.spanId)).sort().pop() ?? "";
-    if (u.status === "open" && u.blocker) { const bk = keyWords(u.blocker); const claim = spans.filter((sp) => /\b(?:waiting|blocked|stuck|pending|needs?|before (?:she|he|they|it) can)\b/i.test(sp.text) && bk.some((w) => keyWords(sp.text).includes(w))).map((sp) => sp.at).sort()[0] ?? lastSupport; for (const sp of spans) if (sp.at > claim || sp.at > lastSupport || (sp.at >= lastSupport && !u.quotes.some((q) => q.spanId === sp.id) && sp.correctsTitle)) if (CLEAR_CUE.test(sp.text) && bk.some((w) => keyWords(sp.text).includes(w))) { reasons.push(`${u.ref}: the blocker “${u.blocker}” was cleared by a later passage (“${sp.text.slice(0, 90)}”, ${sp.id}). Show it as cleared (blocker null) unless something else still blocks it.`); break; } }
+    if (u.status === "open" && u.blocker) { const bk = keyWords(u.blocker); const claim = spans.filter((sp) => /\b(?:waiting|blocked|stuck|pending|needs?|before (?:she|he|they|it) can)\b/i.test(sp.text) && bk.some((w) => keyWords(sp.text).includes(w))).map((sp) => sp.at).sort()[0] ?? lastSupport; for (const sp of spans) if (sp.at > claim || sp.at > lastSupport || (sp.at >= lastSupport && !u.quotes.some((q) => q.spanId === sp.id) && sp.correctsTitle)) if (clearing(sp.text) && bk.some((w) => keyWords(sp.text).includes(w))) { reasons.push(`${u.ref}: the blocker “${u.blocker}” was cleared by a later passage (“${sp.text.slice(0, 90)}”, ${sp.id}). Show it as cleared (blocker null) unless something else still blocks it.`); break; } }
     if (u.status === "open") { const ak = keyWords(u.action); for (const sp of spans) if (sp.at > lastSupport && DONE_CUE.test(sp.text) && ak.filter((w) => keyWords(sp.text).includes(w)).length >= Math.min(2, ak.length) && mentionsTask(sp.text, u)) { reasons.push(`${u.ref}: a later passage says it is finished (“${sp.text.slice(0, 90)}”, ${sp.id}), but you list it as open.`); break; } }
   }
   if (reasons.length) return rejectWith(ctx, p, reasons, client, "Nothing was saved and any earlier result is unchanged. Fix these and resubmit the whole reading.");
@@ -141,7 +145,7 @@ export function submitReaderResult(ctx: Ctx, raw: unknown, client?: string): Rea
     cites: u.quotes.map((q): Cite => ({ src: srcOf(q.spanId), quote: q.quote.trim(), role: u.effective === "new" ? "task and owner" : u.effective === "reassigned" ? "reassigned" : u.effective === "unblocked" ? "unblocked" : u.effective === "completed" ? "completed" : u.effective === "cancelled" ? "cancelled" : "updated" })),
     history: u.effective === "reassigned" && u.previousOwner ? [`Reassigned from ${u.previousOwner} to ${u.owner ?? "no one"}`] : [],
   }));
-  const notes = [...soft, ...unresolved.map((c) => `Claude could not place this passage: “${byId.get(c.spanId)!.text}” (${c.reason}).`)];
+  const notes = [...setAsideNotes, ...soft, ...unresolved.map((c) => `Claude could not place this passage: “${byId.get(c.spanId)!.text}” (${c.reason}).`)];
   const unparsed = unresolved.map((c) => ({ text: byId.get(c.spanId)!.text, src: srcOf(c.spanId) as any }));
   const t = tableFromTasks(tasks, notes, unparsed, (o) => o ?? "Unassigned", wish);
   const ids = [...new Set(spans.map((s) => s.itemId))];
