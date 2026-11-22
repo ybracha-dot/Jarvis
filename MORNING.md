@@ -1,8 +1,53 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Reader field check: quantities and who submitted** (this round), **Let Claude read the notes, and make completion verifiable**, **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Handoff completeness: Finished means every open assignment is accounted for** (this round), **Reader field check: quantities and who submitted**, **Let Claude read the notes, and make completion verifiable**, **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
 
-# Reader field check: quantities and who submitted (latest)
+# Handoff completeness: Finished means every open assignment is accounted for (latest)
+
+Baseline `0057ddf`; code commit `6a1094531f1387e142f4ec1307a948f82d3a1703`. Paid model calls stayed off (zero model calls). Everything here is synthetic; nothing ran in your Claude account.
+
+## Before (reproduced first, nothing edited yet)
+Project **Print night**, one shareable note “Three assigned jobs”, a real stdio connector process, a fresh demo database per candidate, a second SDK client reopening the saved result. First outputs are kept, read-only, in `/tmp/claude-0/handoff-first/before-fix-0057ddf.json`.
+
+| Candidate | Before | After |
+|---|---|---|
+| Three rows, each with its own quote and coverage | Finished, a fresh client reopens all three | **Unchanged**: Finished, the same three rows |
+| Only Rina's row; every passage's coverage says `contributes`, `refs:["u0"]` | **Accepted, “Finished”, one row, no banner**; Omar and June gone without a word | **Rejected, nothing saved.** The status stays “Waiting for a worker”; a fresh client sees no table |
+| Three rows, Rina's action “Print 400 invitations” | Rejected (no count in her passage) | **Unchanged**: rejected |
+
+The one-row reading was schema-valid, every passage ID present, every reference pointing at a real update. Counting IDs could not catch it. Cause: coverage was only checked for existence and role, so “this passage contributes to u0” was believed without asking whether the passage said anything about u0, and nothing looked at the notes independently to see who was assigned what.
+
+## The change (`src/lib/reader.ts`, `src/lib/ledger.ts`)
+1. **A coverage claim has to be supported.** A passage listed as `contributes` or `updates_earlier` for an update must be quoted by it, name its owner (or previous owner), or share its work words. If it names someone else and none of those hold, the reading is rejected: “Omar Reyes will collect the badges.” is marked contributes u0, but it does not name Rina Patel or the work in that claim (“Print the invitations”). A passage that names nobody (“She is waiting for the proofs”) is fine when it sits in a note the update cites or corrects one. A later correction in different words is fine too: it is cited, or it names the owner.
+2. **Every clear open assignment must be accounted for.** Jarvis reads the issued passages itself (its task ledger, plus any sentence whose subject is a person who has no update, like “Dana Whitfield has volunteered to write the run sheet”, which the ledger cannot parse). Each open assignment needs an update that quotes its passage (or matches its owner and work), or its passage must be marked `unresolved`. The rejection names the passage and says which claim to repair: “2 open assignments are not accounted for: … assigns work to Omar Reyes, but none of your updates accounts for it. Add an update that quotes it, or mark the passage unresolved if you cannot tell what it means.”
+3. **Honest partial is allowed.** The same one-row reading with Omar's and June's passages marked `unresolved` is accepted as a partial: not Finished, and the two passages are listed in the result as things Claude could not place. Jarvis never creates a row for them.
+4. **By work item, not by head count.** Two tasks of one owner both need an update (one row alone is rejected, two are accepted). Two passages about one revised task can be one row (the update cites both). A colleague in background prose (“designed by Tomas Vega last month”) is not an assignee. Done and cancelled work stays out of the open list and needs no row, but must be closed by a done/cancelled update.
+5. **A month word used as a first name is a person.** “June Park will reserve the projector” was invisible to the ledger and to the set-aside rule (June is a month). It is now treated as a name when a surname and a verb follow.
+6. **The earlier good version is kept.** A rejected submission saves nothing; a different reading after an accepted one is refused outright (“a different reading was already accepted for this revision”).
+
+## What the UI shows
+- Result page for the one-row candidate: the request stays “Waiting for a worker to pick it up”, no table, no Finished. Nothing partial is dressed up. (Screenshots: `/tmp/claude-0/handoff-verify/shots/`.)
+- Result page for the three-row candidate: Finished, three cited rows. After a complete reading a later incomplete one cannot change it (browser check: still two rows, still Finished).
+- **Connections → test project card** now has “Why the last attempt was rejected”, listing the first reasons. For a project that is not the test project, the reasons come back to the caller (Claude) in the tool response; Jarvis's own pages do not yet show them. That is a gap I did not close.
+
+## The separate connector retrieval
+A second, fresh stdio client (`second-sdk-client`) calls `get_result` on the saved ID: three-row candidate → status “Finished”, three rows; one-row candidate → “Waiting for a worker to pick it up”, no rows; 400 candidate → same, no rows. A late third client submitting the incomplete reading after the complete one is rejected, and a fourth fresh client still reads Finished with all three rows. Run through a real production server (`next start`), the note imported through the app's import endpoint, the real connector and a browser: `/tmp/claude-0/handoff-verify/verify.json`.
+
+## One unfamiliar note, first output recorded separately
+Note: “Priya Nair is confirming the caterer, but she is waiting for the final headcount from Dana Whitfield. Marcus Webb will send the floor plan to the venue. Dana Whitfield has volunteered to write the run sheet. Lena Ortiz owns the signage and has it in hand.” (`/tmp/claude-0/handoff-first/unfamiliar-FIRST-*.json`, read-only.) First run: the complete four-row reading was accepted and Finished (Priya's blocker kept, since it was never cleared); the reading that dropped Marcus and Dana was rejected for Marcus **but not for Dana**: her sentence was filed under the blocker's wording and the ledger could not parse “has volunteered to”, so it slipped through that run. Fixed with rule 2's sentence-subject check; the case is now a regression test (`UNFAMILIAR WORDING`). The re-run is in `after-fix/`. This is a measurement of one note, not a claim of general recall: the oracle is still rules, so wording it cannot recognise can still pass. The honest escape (`unresolved`) exists, but nothing forces Claude to use it for a sentence Jarvis cannot see.
+
+## Tests
+- `tests/reader-completeness.test.ts` (12): correct reading, incomplete reading, honest partial, set-aside-as-unrelated, same-owner two tasks, linked correction in different words, correction dropped from the claim, background colleague plus closed/cancelled, unfamiliar wording, preservation, invented row, and the real stdio connector with fresh clients. Against `0057ddf` production code, 5 of these fail; with the change all pass.
+- **The garden-party and concert tests were adjusted, not the rule.** Their harness attached every passage to one update; they now submit full, correctly attributed readings (a shared `concertReading` helper, and a fresh-project harness where a candidate replaces only its own owner's update). Their quantity assertions are unchanged and focused (including the reasons: later-passage 48, invented 60, someone else's number). No fixture is forgiven.
+- **Reproducible harness:** stdio launchers use `process.execPath` with `["--import","tsx", path.resolve("scripts/mcp-server.ts")]` (`tests/api.test.ts`, `tests/reader-connector.test.ts`, `tests/reader-completeness.test.ts`). Default tests no longer write to `/tmp/claude-0/...`; reports are opt-in (`JARVIS_TEST_REPORT=1`, optional `JARVIS_TEST_REPORT_DIR`) and go to a fresh per-run temp directory, so routine runs cannot overwrite first-attempt evidence.
+- **Run:** typecheck clean; 352 unit tests (31 files) pass; production build; the full browser suite 342 checks, 0 problems (reader journey adds: the incomplete reading rejected naming Mateus's passage, Connections showing why, the earlier result unchanged); the real-server run above. Not run: anything in your Claude account, the HTTP connector against a live Claude Desktop.
+
+## For Yonathan (the pilot you already have, unchanged)
+1. Use this commit (`6a1094531f1387e142f4ec1307a948f82d3a1703`) in its own folder; stop the old copy on port 3000; `npm ci && npm run dev`, and `npm run worker` in a second Terminal. If the folder changed, update the Claude Desktop connector paths (server script, data dir, loader and tsconfig) and restart Desktop.
+2. Connections → Let Claude read your notes → Create a shareable test project; paste the prompt on the card into a Claude Desktop chat and ask for the result ID and link.
+3. In a new chat: “Use my Jarvis connector and call get_result for ID [ID]. Show me the saved table and sources.” Expected: Ilse Brandt (sound desk) and Mateus Oliveira (programmes), no blocker, no programme count. When both chats agree and the card reads “Reading accepted through the local connector.”, press “I ran this in my own Claude Desktop”. This stays **pending** until you do. If Claude's first reading is rejected, the card's “Why the last attempt was rejected” shows what it was told.
+
+# Reader field check: quantities and who submitted (previous)
 
 Baseline `48a54b7` (the commit the field check reproduced on; the tip was unchanged when I started). Paid model calls stayed off (zero model calls). Everything here is synthetic.
 
