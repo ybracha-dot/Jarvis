@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { memCtx } from "./helpers";
+import { memCtx, concertReading } from "./helpers";
 import { createProject } from "@/lib/projects";
 import { importText } from "@/lib/evidence";
 import { resultView, submitGoal } from "@/lib/assistant";
@@ -58,7 +58,7 @@ describe("quantities need evidence about the same item (paired)", () => {
   });
   it("dates, times and years are not quantities, and numbers in a blocker are checked too", async () => {
     const a = await project("Sandra Koval will order name badges by 12 December. She is waiting for the 3 proofs from the printer.");
-    expect(submit(a.ctx, reading(a.t, "Sandra Koval", "Order the name badges at 9:30 on 12 December 2026", ["Sandra Koval will order name badges by 12 December."], null))).toMatchObject({ accepted: true });
+    const ra: any = submit(a.ctx, reading(a.t, "Sandra Koval", "Order the name badges at 9:30 on 12 December 2026", ["Sandra Koval will order name badges by 12 December."], null)); expect(ra).toMatchObject({ accepted: true });
     const b = await project("Sandra Koval will order name badges. She is waiting for the proofs from the printer.");
     const r = submit(b.ctx, reading(b.t, "Sandra Koval", "Order the name badges", ["Sandra Koval will order name badges.", "She is waiting for the proofs from the printer."], "Waiting for 3 proofs from the printer")); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/says 3/);
   });
@@ -82,21 +82,19 @@ describe("who submitted a reading: what was observed, what the user confirmed, h
     const ctx = memCtx("2026-11-21T12:00:00-05:00", "personal"); const tp = createReaderTestProject(ctx);
     expect(() => confirmReader(ctx)).toThrow(/nothing to confirm/);
     const g = submitGoal(ctx, { text: ASK, projectHint: tp.projectId, origin: "claude" }); const t: any = issueReaderTask(ctx, g.requestId);
-    const sp = (s: string) => t.spans.find((x: any) => x.text.includes(s)).spanId;
-    const rd = { requestId: g.requestId, revision: t.revision, snapshot: t.snapshot, updates: [{ ref: "u1", owner: "Ilse Brandt", action: "Set up the sound desk", status: "open", blocker: null, effective: "unblocked", confidence: "stated", quotes: [{ spanId: sp("sound desk is in Ilse"), quote: "The sound desk is in Ilse Brandt's hands" }] }], coverage: t.spans.map((x: any) => ({ spanId: x.spanId, role: "contributes", refs: ["u1"], reason: "accounts for an item" })) };
+    const rd = concertReading(t);
     expect(submitReaderResult(ctx, rd, { client: "Jarvis app test endpoint", origin: "app-test" }).accepted).toBe(true);
     let st: any = readerTestState(ctx); expect(st.toolAccepted).toMatchObject({ origin: "app-test", viaConnector: false, label: expect.stringMatching(/test endpoint \(a simulation/) }); expect(st.userConfirmed).toBeNull(); expect(() => confirmReader(ctx)).toThrow(/Only a reading that arrived through the connector/);
     // a connector reading on a new revision of the same project
     const g2 = submitGoal(ctx, { text: ASK + " Keep it short.", projectHint: tp.projectId, origin: "claude" }); const t2: any = issueReaderTask(ctx, g2.requestId);
-    const rd2 = { ...rd, requestId: g2.requestId, revision: t2.revision, snapshot: t2.snapshot, updates: [{ ...rd.updates[0], quotes: [{ spanId: t2.spans.find((x: any) => x.text.includes("sound desk is in Ilse")).spanId, quote: "The sound desk is in Ilse Brandt's hands" }] }], coverage: t2.spans.map((x: any) => ({ spanId: x.spanId, role: "contributes", refs: ["u1"], reason: "accounts for an item" })) };
+    const rd2 = concertReading(t2);
     expect(submitReaderResult(ctx, rd2, { client: null, origin: "connector", transport: "stdio" }).accepted).toBe(true);
     st = readerTestState(ctx); expect(st.toolAccepted).toMatchObject({ origin: "connector", transport: "stdio", client: null, viaConnector: true, label: "Reading accepted through the local connector. The client reported no name." }); expect(st.userConfirmed).toBeNull();
     st = confirmReader(ctx, "ran it in Claude Desktop on my Mac"); expect(st.userConfirmed).toMatchObject({ note: "ran it in Claude Desktop on my Mac" }); expect(st.reading).toMatchObject({ completion: expect.any(String) }); expect(st.toolAccepted.label).not.toMatch(/Claude account|confirmed/);
   });
   it("a reading saved before origin tracking keeps an honest 'origin not recorded' label", async () => {
     const ctx = memCtx("2026-11-21T12:00:00-05:00", "personal"); const tp = createReaderTestProject(ctx); const g = submitGoal(ctx, { text: ASK, projectHint: tp.projectId, origin: "claude" }); const t: any = issueReaderTask(ctx, g.requestId);
-    const sid = t.spans.find((x: any) => x.text.includes("sound desk is in Ilse")).spanId;
-    submitReaderResult(ctx, { requestId: g.requestId, revision: t.revision, snapshot: t.snapshot, updates: [{ ref: "u1", owner: "Ilse Brandt", action: "Set up the sound desk", status: "open", blocker: null, effective: "new", confidence: "stated", quotes: [{ spanId: sid, quote: "The sound desk is in Ilse Brandt's hands" }] }], coverage: t.spans.map((x: any) => ({ spanId: x.spanId, role: "contributes", refs: ["u1"], reason: "accounts for an item" })) });
+    submitReaderResult(ctx, concertReading(t));
     expect((readerTestState(ctx) as any).toolAccepted.label).toMatch(/origin not recorded/);
   });
 });

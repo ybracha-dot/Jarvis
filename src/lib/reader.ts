@@ -9,7 +9,7 @@ import { Ctx, all, get, run, tx, sha, uid, logActivity } from "./db";
 import { HttpError } from "./decisions";
 import { splitSentences } from "./extract";
 import { toItems, renderTable } from "./decision-run";
-import { personNames, tableFromTasks, TaskRow, TableSpec, Cite } from "./ledger";
+import { personNames, buildLedger, tableFromTasks, TaskRow, TableSpec, Cite } from "./ledger";
 import { parseOutcomes, scoreOutcomes, completionOf, completionLine } from "./requested-parts";
 import { saveResult, receipt } from "./assistant";
 import { deepLinkBase } from "./capture";
@@ -190,6 +190,45 @@ export function submitReaderResult(ctx: Ctx, raw: unknown, metaIn?: Meta | strin
       else if (clearing(sp.text) || /\b(?:instead|no longer|replaces?|moved to|handed|reassign|corrected|now due)\b/i.test(sp.text)) reasons.push(`${c.spanId} is marked ${c.role} but it changes or clears something (“${sp.text.slice(0, 70)}”). Say which item it affects, or mark it unresolved.`);
     }
   }
+  // Does the passage a claim leans on actually support it? A coverage entry is a claim ("this passage contributes to u0"), not evidence.
+  const supports = (sp: Span, u: z.infer<typeof Update>) => {
+    if (u.quotes.some((q) => q.spanId === sp.id) || [u.owner, u.previousOwner].some((o) => !!o && mentions(sp.text, o))) return true;
+    const w = keyWords(sp.text); if ([...keyWords(u.action), ...keyWords(u.blocker ?? "")].some((k) => w.includes(k))) return true;
+    // A passage that names someone else and neither names this owner nor shares the work belongs to that other person.
+    const mine = new Set([...nameTokens(u.owner ?? ""), ...nameTokens(u.previousOwner ?? "")]);
+    if ((ASCII(sp.text).match(/[a-z]{3,}/g) ?? []).some((x) => persons.has(x) && !mine.has(x))) return false;
+    // Names nobody (“She is waiting for the proofs”): fine when it sits in a note the update cites, or is a correction of one.
+    const cited = u.quotes.map((q) => byId.get(q.spanId)).filter(Boolean) as Span[];
+    return cited.some((c) => c.itemId === sp.itemId || (!!sp.correctsTitle && sp.correctsTitle === c.title) || (!!c.correctsTitle && c.correctsTitle === sp.title));
+  };
+  for (const c of cov.values()) {
+    if (c.role !== "contributes" && c.role !== "updates_earlier") continue;
+    const sp = byId.get(c.spanId)!; const targets = c.refs.map((r2) => upd.get(r2)).filter(Boolean) as z.infer<typeof Update>[];
+    if (targets.length && !targets.some((u) => supports(sp, u))) reasons.push(`${c.spanId} (“${sp.text.slice(0, 80)}”) is marked ${c.role} ${c.refs.join(", ")}, but it does not name ${targets.map((u) => u.owner ?? "the item").join(" or ")} or the work in ${targets.length === 1 ? "that claim" : "those claims"} (${targets.map((u) => `“${u.action}”`).join("; ")}). Add an update for what this passage says, or mark it unresolved.`);
+  }
+  // Work items: every clear open assignment in the issued passages needs an update that cites its passage (or matches its owner and work), or an explicit "unresolved".
+  const covSpans = (quote: string) => spans.filter((sp) => norm(sp.text).includes(norm(quote)) || norm(quote).includes(norm(sp.text)));
+  const unaccounted = new Map<string, string>(); const ledger = buildLedger(items);
+  const flag = (sp: Span, who: string) => { if (!unaccounted.has(sp.id)) unaccounted.set(sp.id, `${sp.id} (“${sp.text.slice(0, 90)}”) assigns work to ${who}, but none of your updates accounts for it. Add an update that quotes it, or mark the passage unresolved if you cannot tell what it means.`); };
+  for (const t of ledger.tasks) {
+    if (t.done || t.cancelled || !t.owner) continue;
+    const taskSpans = [...new Set(t.cites.flatMap((ci) => covSpans(ci.quote)))]; if (!taskSpans.length) continue;
+    const ownerWords = t.owner.split("+").flatMap((x) => nameTokens(x)); const tk = [...t.key];
+    const matches = (u: z.infer<typeof Update>) => u.quotes.some((q) => taskSpans.some((sp) => sp.id === q.spanId)) || ((!!u.owner && ownerWords.some((w) => mentions(u.owner!, w)) || !!u.previousOwner && ownerWords.some((w) => mentions(u.previousOwner!, w))) && (() => { const ak = keyWords(u.action).map((x) => x.slice(0, 5)); return tk.some((k) => ak.includes(k.slice(0, 5))); })());
+    if (p.updates.some(matches)) continue;
+    if (taskSpans.every((sp) => cov.get(sp.id)?.role === "unresolved")) continue;
+    flag(taskSpans[0], ledger.disp(t.owner));
+  }
+  // Wording the task ledger cannot parse still counts: a sentence whose subject is a person who has no update at all and which describes work for them (“Dana Whitfield has volunteered to write the run sheet”).
+  const allOwners = new Set(p.updates.flatMap((u) => [...nameTokens(u.owner ?? ""), ...nameTokens(u.previousOwner ?? "")]));
+  for (const sp of spans) {
+    const m = /^((?:[A-ZÀ-Ý][\p{L}'’-]+)(?:\s+(?:(?:de|van|der|von|di|da|al|el|le|la|du)\s+)?[A-ZÀ-Ý][\p{L}'’-]+){0,2}(?:\s+and\s+[A-ZÀ-Ý][\p{L}'’-]+(?:\s+[A-ZÀ-Ý][\p{L}'’-]+)?)?)\s+(?:will|is|are|has|have|volunteered|owns|handles|must|needs? to|agreed to|can|should)\b(.*)$/u.exec(sp.text);
+    if (!m || !WORK_CUE.test(sp.text)) continue;
+    const who = nameTokens(m[1]).filter((x) => persons.has(x)); if (!who.length || who.some((x) => allOwners.has(x))) continue;
+    if (cov.get(sp.id)?.role === "unresolved") continue;
+    flag(sp, m[1].trim());
+  }
+  if (unaccounted.size) reasons.push(`${unaccounted.size} open assignment${unaccounted.size === 1 ? " is" : "s are"} not accounted for: ${[...unaccounted.values()].join(" ")}`);
   // Quantities: every number in an action or blocker must be stated by a passage this update cites, for the same unit, about this owner, and not replaced by a later passage.
   const ownerOf = (u: z.infer<typeof Update>): string[] => [...nameTokens(u.owner ?? "")];
   for (const u of p.updates) for (const field of [["action", u.action], ["blocker", u.blocker ?? ""]] as [string, string][]) {
@@ -270,13 +309,15 @@ export function readerTestState(ctx: Ctx) {
   const proj = findProject(ctx, TEST_PROJECT); if (!proj) return { exists: false as const, project: TEST_PROJECT, prompt: readerPrompt(TEST_PROJECT) };
   const acc = get(ctx.db, "SELECT s.*, r.result_id FROM reader_submissions s JOIN requests r ON r.id=s.request_id WHERE s.owner_id=? AND s.status='accepted' AND r.project_id=? ORDER BY s.created_at DESC, s.rowid DESC LIMIT 1", ctx.owner, proj.id);
   const rej = get(ctx.db, "SELECT COUNT(*) n FROM reader_submissions s JOIN requests r ON r.id=s.request_id WHERE s.owner_id=? AND s.status='rejected' AND r.project_id=?", ctx.owner, proj.id);
+  const lastRej = get(ctx.db, "SELECT s.reasons, s.created_at FROM reader_submissions s JOIN requests r ON r.id=s.request_id WHERE s.owner_id=? AND s.status='rejected' AND r.project_id=? ORDER BY s.created_at DESC, s.rowid DESC LIMIT 1", ctx.owner, proj.id);
+  const lastRejection = lastRej ? { at: lastRej.created_at as string, reasons: (JSON.parse(String(lastRej.reasons)) as string[]).slice(0, 4).map((x) => x.slice(0, 400)) } : null;
   const e = eligibleSpans(ctx, proj.id as string);
   // Three separate observations. (1) What the tool call was: where the reading arrived from, as Jarvis saw it. (2) Whether the user confirmed a manual round trip in their own account. (3) How good the saved reading is by Jarvis's own checks.
   const toolAccepted = acc ? { at: acc.created_at as string, origin: (acc.origin as string | null) ?? null, transport: (acc.transport as string | null) ?? null, client: (acc.client as string | null) ?? null, label: originLabel(acc.origin as string | null, acc.transport as string | null, acc.client as string | null), link: `/results/${acc.result_id}`, version: acc.result_version as number, submissionId: acc.id as string, viaConnector: acc.origin === "connector" } : null;
   const userConfirmed = acc && acc.confirmed_at ? { at: acc.confirmed_at as string, note: (acc.confirmed_note as string | null) ?? null } : null;
   const rc = acc ? receipt(ctx, acc.request_id as string) : null;
   const reading = rc ? { completion: rc.completion, status: rc.plain, parts: (rc.parts ?? []).map((o: any) => ({ part: o.text, status: o.status, detail: o.detail })) } : null;
-  return { exists: true as const, project: TEST_PROJECT, projectId: proj.id as string, prompt: readerPrompt(TEST_PROJECT), shareableNotes: e.items.length, passages: e.spans.length, toolAccepted, userConfirmed, reading, rejectedAttempts: (rej?.n as number) ?? 0 };
+  return { exists: true as const, project: TEST_PROJECT, projectId: proj.id as string, prompt: readerPrompt(TEST_PROJECT), shareableNotes: e.items.length, passages: e.spans.length, toolAccepted, userConfirmed, reading, rejectedAttempts: (rej?.n as number) ?? 0, lastRejection };
 }
 /** The user says they ran the prompt in their own Claude account. Recorded apart from the tool call and from the quality of the reading. */
 export function confirmReader(ctx: Ctx, note?: string) {

@@ -134,7 +134,7 @@ describe("agent adapter and MCP tools", () => {
     const dir = tmpDataDir();
     const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
     const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
-    const transport = new StdioClientTransport({ command: "npx", args: ["tsx", path.resolve("scripts/mcp-server.ts")], env: { ...process.env as any, JARVIS_DATA_DIR: dir } });
+    const transport = new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", path.resolve("scripts/mcp-server.ts")], env: { ...process.env as any, JARVIS_DATA_DIR: dir } });
     const client = new Client({ name: "smoke", version: "1" });
     await client.connect(transport);
     try {

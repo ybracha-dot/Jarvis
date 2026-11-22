@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import path from "node:path";
-import { tmpDataDir } from "./helpers";
+import { tmpDataDir, writeReport } from "./helpers";
 import { closeDb, makeCtx } from "@/lib/db";
 import { createReaderTestProject, readerTestState } from "@/lib/reader";
 import { resultView } from "@/lib/assistant";
@@ -12,7 +12,7 @@ import { resultView } from "@/lib/assistant";
 it("local connector: an invented quantity is rejected, the supported reading is accepted, a second client reopens it, and the origin is reported as observed", async () => {
   closeDb("demo"); closeDb("personal"); const dir = tmpDataDir(); const tp = createReaderTestProject(makeCtx("demo")); closeDb("demo");
   const { Client } = await import("@modelcontextprotocol/sdk/client/index.js"); const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
-  const open = async (name: string) => { const c = new Client({ name, version: "1" }); await c.connect(new StdioClientTransport({ command: "npx", args: ["tsx", path.resolve("scripts/mcp-server.ts")], env: { ...(process.env as any), JARVIS_DATA_DIR: dir, JARVIS_MCP_MODE: "demo" } })); return c; };
+  const open = async (name: string) => { const c = new Client({ name, version: "1" }); await c.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", path.resolve("scripts/mcp-server.ts")], env: { ...(process.env as any), JARVIS_DATA_DIR: dir, JARVIS_MCP_MODE: "demo" } })); return c; };
   const call = async (c: any, name: string, args: any) => JSON.parse((await c.callTool({ name, arguments: args })).content[0].text);
   const c1 = await open("local-sdk-client");
   const g = await call(c1, "submit_goal", { text: "What does my team still owe? One row per open item with Owner, Next action and Blocker. Leave closed items out.", project: tp.project });
@@ -33,5 +33,5 @@ it("local connector: an invented quantity is rejected, the supported reading is 
   expect(v.mode).toMatch(/^Reader submission: Reading accepted through the local connector\./); expect(v.analysis.reader).toMatchObject({ origin: "connector", transport: "stdio", client: "local-sdk-client 1" });
   expect(st.toolAccepted).toMatchObject({ origin: "connector", transport: "stdio", client: "local-sdk-client 1", viaConnector: true, label: expect.stringMatching(/^Reading accepted through the local connector\. The client reports itself as “local-sdk-client 1” \(self-reported\)\. That name looks like a test client\.$/) });
   expect(st.userConfirmed).toBeNull(); expect(st.reading).toMatchObject({ completion: "complete" }); expect(JSON.stringify(st)).not.toMatch(/A Claude chat has submitted/);
-  require("node:fs").mkdirSync("/tmp/claude-0/readerfix", { recursive: true }); require("node:fs").writeFileSync("/tmp/claude-0/readerfix/after-fix.json", JSON.stringify({ B: { accepted: B.accepted, reasons: B.reasons }, A: { accepted: A.accepted, completion: A.completion }, rows: res.table.rows.map((r: any) => r.cells.join(" | ")), status: res.status, mode: v.mode, readerMeta: v.analysis.reader, state: { toolAccepted: st.toolAccepted, userConfirmed: st.userConfirmed, reading: st.reading?.completion } }, null, 2));
+  writeReport("connector-after-fix", { B: { accepted: B.accepted, reasons: B.reasons }, A: { accepted: A.accepted, completion: A.completion }, rows: res.table.rows.map((r: any) => r.cells.join(" | ")), status: res.status, mode: v.mode, readerMeta: v.analysis.reader, state: { toolAccepted: st.toolAccepted, userConfirmed: st.userConfirmed, reading: st.reading?.completion } });
 }, 180000);

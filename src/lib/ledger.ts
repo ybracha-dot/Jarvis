@@ -41,11 +41,19 @@ export function partBase(w: string): string { const x = w.toLowerCase(); if (IRR
 const nounSubject2 = (t: string) => t.split(/\s+/).length <= 9 && !/\b(?:will|would|can|could|should|must|once|when|after|until|because|if|unless|then|going to|plans? to|is|are|was|were|which|that|who)\b/i.test(t);
 const PARTICLES = new Set(["up", "out", "off", "over", "down", "in", "on", "back"]);
 
+/** "June Park will reserve the projector": a month word followed by a capitalised surname and a verb is a person (June, May, April, August), not a date. */
+const MONTH_WORD = /^(?:January|February|March|April|May|June|July|August|September|October|November|December)$/;
+export function monthFirstNames(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of text.matchAll(/(?<![\wÀ-ÿĀ-ſḀ-ỿ])([A-Z][a-z]{2,8})\s+(?!(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b)[A-ZÀ-ÝĀ-ſḀ-ỿ][A-Za-zà-ÿĀ-ſḀ-ỿ-]{1,20}\s+(?:will|is|are|has|have|must|should|can|owns|handles|volunteered|agreed|needs|to)\b/g)) if (MONTH_WORD.test(m[1])) out.add(m[1]);
+  return out;
+}
 export function buildLedger(items: ItemIn[]): { tasks: TaskRow[]; notes: string[]; unparsed: { text: string; src: Src }[]; disp: (o: string | null) => string } {
   const tasks: TaskRow[] = []; const notes: string[] = []; const unparsed: { text: string; src: Src }[] = []; let n = 0;
   const corpus = items.flatMap((it) => it.sentences.map((s) => s.text)).join(" ");
   const lower = new Set((corpus.match(/\b[a-z]{3,}\b/g) ?? []));
-  const isName1 = (w: string) => /^[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?$/.test(w) && !NOT_NAMES.has(w) && !lower.has(w.toLowerCase().split("-")[0]);
+  const monthNames = monthFirstNames(corpus);
+  const isName1 = (w: string) => /^[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}(?:-[A-Za-zà-ÿĀ-ſḀ-ỿ]+)?$/.test(w) && (!NOT_NAMES.has(w) || monthNames.has(w)) && !lower.has(w.toLowerCase().split("-")[0]);
   const isName = (w: string) => w.split("+").every(isName1);
   const nameWords = new Set<string>(); for (const w of corpus.match(/(?<![\wÀ-ÿĀ-ſḀ-ỿ])[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}(?:-[a-zà-ÿĀ-ſḀ-ỿ]+)?\b/g) ?? []) if (isName1(w)) nameWords.add(w.toLowerCase());
   // "Hanneke de Vries" is "Hanneke" while parsing and "Hanneke de Vries" when shown; "Ingrid and Tomasz will ..." is one shared owner.
@@ -276,7 +284,7 @@ export function checklistMarkdown(t: TableAnalysis): string {
 
 /** People named in the notes: capitalised words never written in lower case, seen somewhere other than the start of a sentence or as a possessive owner. */
 export function personNames(items: ItemIn[]): Set<string> {
-  const lower = new Set((items.flatMap((it) => it.sentences.map((x) => x.text)).join(" ").match(/\b[a-z]{3,}\b/g) ?? [])); const out = new Set<string>();
-  for (const it of items) for (const sn of it.sentences) { const re = /(?<![\wÀ-ÿĀ-ſḀ-ỿ])[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}(?:-[a-zà-ÿĀ-ſḀ-ỿ]+)?/g; let m: RegExpExecArray | null; while ((m = re.exec(sn.text))) { const w = m[0]; const first = m.index === 0; if (NOT_NAMES.has(w) || lower.has(w.toLowerCase().split("-")[0])) continue; if (!first || /^[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ-]+\s+(?:will|is|are|has|have|must|should|can|owns|handles|volunteered)\b/.test(sn.text)) out.add(w.toLowerCase()); } }
+  const lower = new Set((items.flatMap((it) => it.sentences.map((x) => x.text)).join(" ").match(/\b[a-z]{3,}\b/g) ?? [])); const out = new Set<string>(); const monthNames = monthFirstNames(items.flatMap((it) => it.sentences.map((x) => x.text)).join(" "));
+  for (const it of items) for (const sn of it.sentences) { const re = /(?<![\wÀ-ÿĀ-ſḀ-ỿ])[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ]{1,15}(?:-[a-zà-ÿĀ-ſḀ-ỿ]+)?/g; let m: RegExpExecArray | null; while ((m = re.exec(sn.text))) { const w = m[0]; const first = m.index === 0; if ((NOT_NAMES.has(w) && !monthNames.has(w)) || lower.has(w.toLowerCase().split("-")[0])) continue; if (!first || /^[A-ZÀ-ÝĀ-ſḀ-ỿ][a-zà-ÿĀ-ſḀ-ỿ-]+\s+(?:will|is|are|has|have|must|should|can|owns|handles|volunteered)\b/.test(sn.text)) out.add(w.toLowerCase()); } }
   return out;
 }
