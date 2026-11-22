@@ -1,4 +1,5 @@
 "use client";
+import { SharingPanel } from "@/components/SharingPanel";
 import { useState } from "react";
 import Link from "next/link";
 import { KeyRound, RefreshCw, Ban, Copy, Check, ShieldCheck, CircleDashed, CircleCheck } from "lucide-react";
@@ -78,6 +79,7 @@ export default function ConnectionsPage() {
         {sess.data?.mode !== "personal" && !srcs.data?.sources.some((s: any) => s.mode === "fixture") && <div className="mt-3"><SampleLoader /></div>}
         <ImportForm /></section>
       <ReaderCard />
+      <SharingGate />
       <BlackboardCard />
       <RoundTripCard />
       <section aria-label="Disconnect"><SectionTitle>Disconnect</SectionTitle><Card className="p-4 text-[14px] space-y-1.5"><p>Revoke the token above. It stops working immediately, even in a Claude conversation that is already open.</p><p>Then remove the connector in Claude: Settings, Connectors, Jarvis, Remove. What was saved stays in Jarvis until you forget it.</p></Card></section>
@@ -180,3 +182,6 @@ function RoundTripCard() {
       </Card></section>
   );
 }
+
+/** The sharing controls matter only in the private workspace: the example workspace is synthetic. */
+function SharingGate() { const sess = useQuery<any>("/session"); if (sess.data?.mode !== "personal") return null; return <SharingPanel />; }

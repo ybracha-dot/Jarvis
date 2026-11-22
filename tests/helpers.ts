@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openDb, makeCtx, Ctx } from "@/lib/db";
+import { sourcesSharing, setSourceSharing } from "@/lib/share";
 
 /** Fresh in-memory demo workspace with a fixed clock. */
 export function memCtx(clock = "2026-11-16T08:00:00-05:00", mode: "demo" | "personal" = "demo"): Ctx {
@@ -37,3 +38,6 @@ export function concertReading(t: any, programmes = "Print the programmes") {
     { ref: "u4", owner: null, action: "Sign off the stage barriers", status: "done", blocker: null, effective: "unchanged", confidence: "stated", quotes: [{ spanId: sid("stage barriers are already"), quote: "The stage barriers are already signed off" }] }],
     coverage: t.spans.map((x: any) => { const ref = /sound desk|power plan|waiting for the venue/.test(x.text) ? "u1" : /Mateus/.test(x.text) ? "u2" : /Tobias/.test(x.text) ? "u3" : /barriers/.test(x.text) ? "u4" : null; return { spanId: x.spanId, role: ref ? "contributes" : "unrelated", refs: ref ? [ref] : [], reason: "accounts for an item" }; }) };
 }
+
+/** The explicit choice, made for the whole workspace: the test models a user who let Claude read every source. Without it the private workspace refuses Claude (see tests/share.test.ts). */
+export function shareAll(ctx: Ctx) { for (const s of sourcesSharing(ctx)) if (!s.shared) setSourceSharing(ctx, s.id, true); }

@@ -120,12 +120,15 @@ export function replay(ctx: Ctx, name: FixtureName) {
   return out;
 }
 
+// Children before parents. Notes, projects, results, what Claude may read and every brief are erased with the workspace, not left behind.
+const EVIDENCE_TABLES = ["brief_runs", "brief_feedback", "claude_grants", "share_log", "reader_submissions", "reader_tasks", "result_drafts", "result_versions", "results", "request_reads", "request_revisions", "requests", "evidence_facts", "evidence_revisions", "evidence_items", "feed_state", "evidence_sources", "roundtrips", "connection_probes", "project_events", "project_facts", "projects"];
 const TABLES = ["quiz_answers", "quiz_attempts", "document_versions", "documents", "messages", "conversations", "attachments", "job_events", "job_steps", "jobs", "specialist_templates", "captures", "skill_uses", "skill_corrections", "skills", "council_sessions", "goal_observations", "goals", "checkpoints", "practice_results", "time_logs", "advisor_sources", "commitment_events", "commitments", "student_record", "deliveries", "inbox", "decisions", "requirements", "task_events", "task_due_history", "blocks", "tasks", "source_revisions", "source_status", "sources", "courses", "notes", "runs", "activity", "schedule_runs", "import_previews", "settings"];
 
 /** Erase this workspace's data (not its watched inbox files). Demo reset and personal erase share this and each only touches its own directory. */
 export function wipe(ctx: Ctx) {
   for (const d of ["vault", "skills", "attachments"]) fs.rmSync(path.join(/*turbopackIgnore: true*/ modeDir(ctx.mode), d), { recursive: true, force: true });
-  tx(ctx.db, () => { ctx.db.exec("DELETE FROM notes_fts"); for (const t of TABLES) ctx.db.exec(`DELETE FROM ${t}`); });
+  // Erasing the private workspace removes everything in it. The example workspace's reset keeps its replayable evidence, as it always did.
+  tx(ctx.db, () => { ctx.db.exec("DELETE FROM notes_fts"); if (ctx.mode === "personal") ctx.db.exec("DELETE FROM evidence_fts"); for (const t of [...(ctx.mode === "personal" ? EVIDENCE_TABLES : []), ...TABLES]) ctx.db.exec(`DELETE FROM ${t}`); });
 }
 
 export function resetDemo(ctx: Ctx) {

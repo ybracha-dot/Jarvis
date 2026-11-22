@@ -8,6 +8,7 @@ A general-purpose chief of staff. You say or type an outcome (for example "Get m
 npm install
 npm run dev          # http://127.0.0.1:3000
 npm run worker       # in a second terminal: runs the background jobs and checks Blackboard every 15 minutes
+                     # the private morning brief and its five-minute Mac check: docs/PRIVATE-MORNING.md
 ```
 
 **With one real note (about three minutes, nothing leaves your Mac):** open <http://127.0.0.1:3000/try>. Paste one note you choose, add a later correction, ask what was decided. You get a cited answer saved under your project, with the correction winning and the original wording one click away. No key, no login, no model call.

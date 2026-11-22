@@ -251,3 +251,13 @@ export function linkedCorrections(ctx: Ctx, ids: string[]): { id: string; why: s
   }
   return out;
 }
+
+/** A later correction to a note, kept in the same source as the original so it has the same privacy. The original stays, labelled superseded where the correction restates a date. */
+export function addCorrection(ctx: Ctx, itemId: string, text: string, at?: string) {
+  const it = get(ctx.db, "SELECT i.*, s.revoked_at srev FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.id=? AND i.owner_id=?", itemId, ctx.owner);
+  if (!it || it.tombstone) throw new HttpError(404, "Note not found"); if (it.srev) throw new HttpError(409, "That note's source was revoked."); if (it.kind === "calendar") throw new HttpError(422, "A calendar event is changed in the calendar, not here.");
+  if (!text.trim() || text.length > 20000) throw new HttpError(422, "Write what changed.");
+  const when = at ?? ctx.now().toISOString(); const title = String(it.title).startsWith("Correction to ") ? String(it.title) : `Correction to ${it.title}`;
+  const r = ingestItem(ctx, { sourceId: it.source_id as string, externalId: sha(`correction|${itemId}|${text}`).slice(0, 16), kind: it.kind as string, title, at: when, body: text.trim(), projectId: it.project_id as string | null, corrects: itemId });
+  return { ...r, correctsId: itemId };
+}

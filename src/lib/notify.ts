@@ -1,6 +1,7 @@
 // Delivery levels, quiet hours, inbox and outbox. Deterministic. No external sends unless a channel is explicitly enabled.
 import { Ctx, all, get, run, getSetting, uid, logActivity } from "./db";
-import { parseLocal, localDate, addDays, DEFAULT_TZ, fmtDateTime } from "./time";
+import { parseLocal, localDate, addDays, dayOfWeek, DEFAULT_TZ, fmtDateTime } from "./time";
+import { weeklyEntries } from "./planner";
 
 export type Level = "interrupt" | "brief" | "silent";
 export interface ChannelConfig { inbox: boolean; capture: boolean; push: boolean; sms: boolean }
@@ -39,6 +40,15 @@ export function quietUntil(ctx: Ctx, at: Date): Date | null {
       let e = parseLocal(base, q.end, tz);
       if (e <= s) e = parseLocal(addDays(base, 1), q.end, tz);
       if (at >= s && at < e) consider(e);
+    }
+  }
+  // Prayer and Shabbat boundaries the user entered. Classes are busy time, not quiet time.
+  for (const w of weeklyEntries(ctx)) {
+    if (!w.quiet) continue;
+    for (const base of [addDays(day, -2), addDays(day, -1), day]) {
+      if (!w.days.includes(dayOfWeek(base))) continue;
+      const ws = parseLocal(base, w.start, tz), we = parseLocal(addDays(base, w.spansDays ?? 0), w.end, tz);
+      if (at >= ws && at < we) consider(we);
     }
   }
   return latest;

@@ -1,10 +1,13 @@
 // Deterministic capacity planner. Zero model calls.
 import { Ctx, all, getSetting } from "./db";
-import { parseLocal, localDate, addDays, minutesBetween, DEFAULT_TZ } from "./time";
+import { parseLocal, localDate, addDays, dayOfWeek, minutesBetween, DEFAULT_TZ } from "./time";
 
 export interface Interval { start: number; end: number; label?: string; kind?: string }
 export interface Chunk { start: string; end: string; minutes: number }
 
+/** Times the user supplied that repeat every week: classes, prayer, Shabbat. Jarvis does not compute any of these. days: 0 = Sunday. spansDays: 1 when the interval ends the next day (Friday evening to Saturday night). */
+export interface WeeklyEntry { label: string; kind: "class" | "prayer" | "shabbat" | "other"; days: number[]; start: string; end: string; spansDays?: number; quiet?: boolean }
+export const weeklyEntries = (ctx: Ctx): WeeklyEntry[] => getSetting<WeeklyEntry[]>(ctx.db, "weekly_busy", []);
 export interface PlannerSettings {
   dayStart: string; dayEnd: string; bufferMin: number; minChunk: number; maxChunk: number; dueBufferMin: number;
   protectedDaily: { start: string; end: string; label: string }[];
@@ -44,12 +47,14 @@ export function busyIntervals(ctx: Ctx, from: Date, to: Date, opts: { excludeTas
     const a = new Date(p.start).getTime(), b = new Date(p.end).getTime();
     if (b > from.getTime() && a < to.getTime()) out.push({ start: a, end: b, label: p.label, kind: "protected" });
   }
-  let d = addDays(localDate(from, s.tz), -1);
+  let d = addDays(localDate(from, s.tz), -2);
   const last = addDays(localDate(to, s.tz), 1);
+  const weekly = weeklyEntries(ctx);
   while (d <= last) {
     for (const p of s.protectedDaily) {
       out.push({ start: parseLocal(d, p.start, s.tz).getTime(), end: parseLocal(d, p.end, s.tz).getTime(), label: p.label, kind: "protected" });
     }
+    for (const w of weekly) if (w.days.includes(dayOfWeek(d))) out.push({ start: parseLocal(d, w.start, s.tz).getTime(), end: parseLocal(addDays(d, w.spansDays ?? 0), w.end, s.tz).getTime(), label: w.label, kind: "protected" });
     d = addDays(d, 1);
   }
   return out;

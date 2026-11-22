@@ -9,6 +9,7 @@ import Link from "next/link";
 import { VoiceDock } from "@/components/VoiceDock";
 import { DecisionList } from "@/components/DecisionDrawer";
 import { displayName } from "@/components/OfficeScene";
+import { BriefCard } from "@/components/BriefCard";
 
 const CHANGE_LABEL: Record<string, string> = { due_moved: "Due date", requirement_added: "Requirement", requirement_waived: "Waived", conflict: "Conflict", stale_source: "Older source", due_established: "Due date" };
 function groupChanges(rows: any[]) {
@@ -48,6 +49,8 @@ export default function TodayPage() {
     <div className={cx("grid gap-8", pendingCount > 0 ? "xl:grid-cols-[minmax(0,1fr)_340px]" : "")}>
     <div className="space-y-6 min-w-0">
       {q.stale && <ErrorBox error="Could not refresh. Showing what was last loaded." onRetry={q.reload} />}
+
+      {!demo && <BriefCard />}
 
       <VoiceDock />
 

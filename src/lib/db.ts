@@ -287,6 +287,18 @@ ALTER TABLE reader_submissions ADD COLUMN transport TEXT;
 ALTER TABLE reader_submissions ADD COLUMN confirmed_at TEXT;
 ALTER TABLE reader_submissions ADD COLUMN confirmed_note TEXT;
 `,
+  /* 11 the morning brief: one run per occurrence, the corrections you make, what Claude may read and what it was shown */ `
+CREATE TABLE brief_runs(
+  occurrence_key TEXT PRIMARY KEY, kind TEXT NOT NULL, view TEXT NOT NULL DEFAULT 'full', built_at TEXT NOT NULL, result_id TEXT NOT NULL, request_id TEXT NOT NULL,
+  baseline INTEGER NOT NULL DEFAULT 0, snapshot TEXT NOT NULL, summary TEXT, inputs TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'ok', model_calls INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX brief_runs_time ON brief_runs(view, built_at);
+CREATE TABLE brief_feedback(id TEXT PRIMARY KEY, obligation_key TEXT NOT NULL, kind TEXT NOT NULL, value TEXT, note TEXT, created_at TEXT NOT NULL, undone_at TEXT);
+CREATE TABLE claude_grants(id TEXT PRIMARY KEY, kind TEXT NOT NULL, ref_id TEXT NOT NULL, granted_at TEXT NOT NULL, revoked_at TEXT, parent_ref TEXT, note TEXT);
+CREATE INDEX claude_grants_ref ON claude_grants(kind, ref_id);
+CREATE TABLE share_log(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, event TEXT NOT NULL, ref_kind TEXT, ref_id TEXT, tool TEXT, client TEXT, detail TEXT);
+ALTER TABLE schedule_runs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE schedule_runs ADD COLUMN detail TEXT;
+`,
 ];
 
 const cache = new Map<string, DB>();

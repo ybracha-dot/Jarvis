@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { tmpDataDir } from "./helpers";
+import { shareAll, tmpDataDir } from "./helpers";
 import { closeDb, makeCtx, all } from "@/lib/db";
 import { createToken, listTokens, revokeToken, rotateToken, verifyToken, startProbe, probeState, editProbe } from "@/lib/mcp-auth";
 
@@ -90,7 +90,7 @@ describe("the same work from ordinary Claude (official MCP client over the authe
   const work = async (ctx: any) => { let t = 1_000_000; await processQueue(ctx, { workerId: "w", handlers: HANDLERS, clock: () => new Date(t), leaseMs: 1000 }); };
   const PITCH = "Pick up where we left off on the pitch and draft my follow-up.";
   it("submit from Claude, return a receipt at once, retrieve the finished result in a fresh chat, with links that open the same records", async () => {
-    const ctx = fresh(); loadWorkspaceFixtures(ctx); const t = createToken(ctx, { label: "Claude" });
+    const ctx = fresh(); loadWorkspaceFixtures(ctx); shareAll(ctx); const t = createToken(ctx, { label: "Claude" });
     const s = await connect(t.token);
     const rc = (await s.call("submit_goal", { text: PITCH, dedupKey: "chat-9:msg-1" })).json;
     expect(rc).toMatchObject({ status: "queued", ready: false, duplicate: false }); expect(rc.links.result).toMatch(/^\/results\/res_/);
@@ -105,7 +105,7 @@ describe("the same work from ordinary Claude (official MCP client over the authe
     const hits = (await fresh2.call("search_evidence", { query: "Confirming Wednesday sponsor follow-up" })).json.hits; expect(hits.map((h: any) => h.title)).toContain("Re: Lantern Club sponsor pitch follow-up"); expect(JSON.stringify(hits)).not.toMatch(/Sam Ortiz|50,000/);
   });
   it("start by voice, close the tab, then change it from Claude: one request, one current draft, the instruction applied, a late old result refused", async () => {
-    const ctx = fresh(); loadWorkspaceFixtures(ctx); const t = createToken(ctx, { label: "Claude" });
+    const ctx = fresh(); loadWorkspaceFixtures(ctx); shareAll(ctx); const t = createToken(ctx, { label: "Claude" });
     const voice: any = handleUtterance(ctx, { text: PITCH, via: "voice" }); await work(ctx);                           // simulated microphone: the page is then closed
     const s = await connect(t.token);
     const listed = (await s.call("get_goal", {})).json.goals; expect(listed).toHaveLength(1); const rid = listed[0].requestId; expect(rid).toBe(voice.reply.data.requestId);
@@ -121,7 +121,7 @@ describe("the same work from ordinary Claude (official MCP client over the authe
     const tools = (await s.client.listTools()).tools.map((x) => x.name); expect(tools.some((n) => /send|email|post|publish/.test(n))).toBe(false);   // nothing can be sent
   });
   it("a read-only token can retrieve results but cannot submit, revise, cancel or share; share_excerpt becomes a citable, forgettable source", async () => {
-    const ctx = fresh(); loadWorkspaceFixtures(ctx); const ro = createToken(ctx, { label: "ro", scopes: ["read"] }); const rw = createToken(ctx, { label: "rw" });
+    const ctx = fresh(); loadWorkspaceFixtures(ctx); shareAll(ctx); const ro = createToken(ctx, { label: "ro", scopes: ["read"] }); const rw = createToken(ctx, { label: "rw" });
     const r = await connect(ro.token); expect((await r.call("submit_goal", { text: PITCH })).isError).toBe(true); expect((await r.call("share_excerpt", { excerpt: "A".repeat(20), origin: "Chat" })).isError).toBe(true);
     expect((await r.call("get_result", {})).isError).toBe(false);
     const w = await connect(rw.token); const sh = (await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "Lantern Club", dedupKey: "x1" })).json;
@@ -164,8 +164,8 @@ describe("a calculation plus a draft, from ordinary Claude (local test client, n
   it("submit_goal returns at once; a fresh chat's get_result carries the verified answer, the draft to Jo, and a status for each requested part", async () => {
     const ctx = fresh(); const t = createToken(ctx, { label: "Claude" });
     const proj = createProject(ctx, { name: "Archive shuttle", kind: "project" });
-    const n1 = importText(ctx, { kind: "note", title: "Archive shuttle", text: "Archive shuttle on December 4: 23 volunteers must arrive by 10:30. One van has eight passenger seats. It takes 20 minutes to drive from campus to the archive and 20 minutes to drive back. There is no loading time. Jo originally offered an 08:40 departure from campus.", at: "2026-11-10T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", localOnly: true });
-    importText(ctx, { kind: "note", title: "Archive shuttle update", text: "Update for the December 4 archive shuttle: the earliest departure from campus is now 09:00. This replaces the 08:40 departure. The capacity, travel times and arrival deadline are unchanged.", at: "2026-11-14T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", localOnly: true, corrects: n1.id });
+    const n1 = importText(ctx, { kind: "note", title: "Archive shuttle", text: "Archive shuttle on December 4: 23 volunteers must arrive by 10:30. One van has eight passenger seats. It takes 20 minutes to drive from campus to the archive and 20 minutes to drive back. There is no loading time. Jo originally offered an 08:40 departure from campus.", at: "2026-11-10T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", shareable: true });
+    importText(ctx, { kind: "note", title: "Archive shuttle update", text: "Update for the December 4 archive shuttle: the earliest departure from campus is now 09:00. This replaces the 08:40 departure. The capacity, travel times and arrival deadline are unchanged.", at: "2026-11-14T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", shareable: true, corrects: n1.id });
     const s = await connect(t.token);
     const rc = (await s.call("submit_goal", { text: "Can one van get everyone to the archive by 10:30? Show when the last group arrives and draft a short reply to Jo.", project: "Archive shuttle" })).json;
     expect(rc).toMatchObject({ status: "queued", ready: false });
@@ -184,7 +184,7 @@ describe("a calculation plus a draft, from ordinary Claude (local test client, n
 describe("a handoff table from ordinary Claude (local test client, not a real account)", () => {
   it("the same request text in two projects returns two different results, each with its own table, per-row sources and requested-part status", async () => {
     const ctx = fresh(); const t = createToken(ctx, { label: "Claude" });
-    const mk = (name: string, a: string, b: string, titles: [string, string]) => { const proj = createProject(ctx, { name, kind: "project" }); const n1 = importText(ctx, { kind: "note", title: titles[0], text: a, at: "2026-11-10T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", localOnly: true }); importText(ctx, { kind: "note", title: titles[1], text: b, at: "2026-11-14T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", localOnly: true, corrects: n1.id }); };
+    const mk = (name: string, a: string, b: string, titles: [string, string]) => { const proj = createProject(ctx, { name, kind: "project" }); const n1 = importText(ctx, { kind: "note", title: titles[0], text: a, at: "2026-11-10T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", shareable: true }); importText(ctx, { kind: "note", shareable: true, title: titles[1], text: b, at: "2026-11-14T15:00:00.000Z", projectId: proj.id, label: "Notes I imported", corrects: n1.id }); };
     mk("Lantern exhibit", "Lantern exhibit handoff. Mara owns caption proofing and needs the final photo credits before she can send the proof. Theo was assigned to book the label printer. The wall measurements are finished.", "Update for the Lantern exhibit: Inez has taken over the printer booking from Theo and can book it now. Mara is still waiting for the final photo credits. The wall measurements are complete.", ["Lantern team handoff", "Lantern crew update"]);
     mk("Maple exhibit", "Maple exhibit handoff. Suri owns the venue agreement and needs the insurance certificate before she can sign it. Bo was assigned to book the projector. The floor plan is finished.", "Update for the Maple exhibit: Ravi has taken over the projector booking from Bo and can book it now. Suri is still waiting for the insurance certificate. The floor plan is complete.", ["Maple team handoff", "Maple crew update"]);
     const ASK = "Turn these notes into a handoff table I can paste into our shared doc. Give each open task one row with the owner, next action, and blocker. Leave completed work out.";

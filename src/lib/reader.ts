@@ -81,6 +81,8 @@ const keyWords = (t: string) => [...new Set(ASCII(t).match(/[a-z]{4,}/g) ?? [])]
 const CLEAR_CUE = /\b(?:arrived|arrives|cleared|clearing|clears|unblocked|no longer (?:blocked|waiting)|received|resolved|delivered|came in|is here|are here|has landed|got it|came through|confirmed|sent)\b/i;
 const DONE_CUE = /\b(?:is complete|are complete|completed|is done|are done|finished|signed off|has been (?:ordered|booked|sent|completed)|collected|picked up|handed in|wrapped up)\b/i;
 const NEG_CLEAR = /\b(?:not yet|nothing|hasn'?t|haven'?t|has not|have not|yet to|still (?:waiting|not)|no sign)\b[^.]{0,40}\b(?:arrived|received|delivered|cleared|here|come in|came in|sent)\b|\bnot (?:yet )?(?:arrived|received|delivered|cleared)\b|\bconfirmed for\b|\bis expected\b|\bwill (?:arrive|be delivered|come)\b|\bexpected (?:on|by)\b/i;
+/** Words by which a note admits doubt about the claim itself, as opposed to explaining the evidence. */
+const DOUBT_NOTE = /\b(?:not (?:sure|certain|clear)|unsure|unclear|uncertain|ambiguous|ambiguity|might|maybe|perhaps|possibly|probably|assum\w*|guess\w*|could be|may be|may have|conflict\w*|disagree\w*|unconfirmed|cannot tell|can'?t tell|appears to|seems to|inferred|unverified)\b/i;
 const clearing = (t: string) => CLEAR_CUE.test(t) && !NEG_CLEAR.test(t);
 const WORK_CUE = /\b(?:will|volunteer\w*|assigned|owns?|handles?|responsible|in [A-Z][\w'’ -]{1,30} hands|needs? to|has to|must|waiting|taking over|takes? over|handed|due|by \d|clearing|cleared|to (?:book|send|prepare|print|release|set up|finish|write|order|deliver|fix|check|collect|arrange|call|email))\b/i;
 const nameTokens = (owner: string) => ASCII(owner).match(/[a-z]{3,}/g) ?? [];
@@ -253,8 +255,14 @@ export function submitReaderResult(ctx: Ctx, raw: unknown, metaIn?: Meta | strin
   if (reasons.length) return rejectWith(ctx, p, reasons, meta, "Nothing was saved and any earlier result is unchanged. Fix these and resubmit the whole reading.");
 
   // Accepted: Jarvis renders the artifact itself from the validated updates.
-  const soft: string[] = [];
-  for (const u of p.updates) if (u.confidence !== "stated" || u.note) soft.push(`${u.owner ?? "No owner"}: ${u.action} was ${u.confidence === "stated" ? "noted" : u.confidence} by Claude${u.note ? ` (${u.note})` : ""}.`);
+  // Two different things: a doubt (Claude says it inferred or is unsure; a note that voices uncertainty) makes the reading partial.
+  // A plain explanatory note about where the evidence came from is commentary: it is shown, and it changes nothing about completion.
+  const soft: string[] = []; const commentary: string[] = [];
+  for (const u of p.updates) {
+    const doubtful = u.confidence !== "stated" || (!!u.note && DOUBT_NOTE.test(u.note));
+    if (doubtful) soft.push(`${u.owner ?? "No owner"}: ${u.action} was ${u.confidence === "stated" ? "flagged as uncertain" : u.confidence} by Claude${u.note ? ` (${u.note})` : ""}.`);
+    else if (u.note) commentary.push(`${u.owner ?? "No owner"}: ${u.action}. ${u.note}`);
+  }
   const unresolved = [...cov.values()].filter((c) => c.role === "unresolved");
   const asked = parseOutcomes(String(r.text), { project: true }); const wish: TableSpec = asked.find((o) => o.kind === "table")?.table ?? { columns: [], rowUnit: null, excludeDone: true };
   const srcOf = (spanId: string) => itemById.get(byId.get(spanId)!.itemId)!;
@@ -273,6 +281,7 @@ export function submitReaderResult(ctx: Ctx, raw: unknown, metaIn?: Meta | strin
   let outcomes = scoreOutcomes(asked.length ? asked : [{ id: "o1", kind: "table", text: "A table of what is still open", recipient: null, table: wish }], { analysis: out.analysis, draft: out.draft, kind: "answer", body: out.body, flags: out.flags });
   if (soft.length) outcomes = outcomes.map((o) => (o.kind === "table" && o.status === "done" ? { ...o, status: "partial" as const, detail: `The table is built and every quote checked, but Claude marked part of it inferred or uncertain: ${soft.slice(0, 2).join(" ")}` } : o));
   if (soft.length) (out.flags as any[]).push({ kind: "reader_uncertain", text: `Claude marked these as less than certain: ${soft.join(" ")}` });
+  if (commentary.length) { out.body += `\n\n**Notes on the evidence** (explanatory, not doubts)\n\n${commentary.map((c) => `- ${c}`).join("\n")}`; (out.analysis as any).commentary = commentary; }
   const label = originLabel(meta.origin, meta.transport, client ?? p.client ?? null);
   (out.analysis as any).reader = { client: client ?? p.client ?? null, origin: meta.origin ?? null, transport: meta.transport ?? null, label, snapshot: p.snapshot, passages: spans.length, updates: p.updates.length, unresolved: unresolved.length };
   const saved = tx(ctx.db, () => {

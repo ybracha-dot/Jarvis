@@ -4,13 +4,14 @@ import crypto from "node:crypto";
 import { Ctx, get, run, uid, all } from "./db";
 import { HttpError } from "./decisions";
 import { createProject, findProject, projectContext, editFact } from "./projects";
+import { setProjectSharing } from "./share";
 import { classifyClient } from "./client-context";
 
 const KEY = "roundtrip-check";
 const code = () => `RT-${crypto.randomBytes(2).toString("hex").toUpperCase()}`;
 export function startRoundTrip(ctx: Ctx, o: { project: string }) {
   const name = o.project.trim(); if (name.length < 2) throw new HttpError(422, "Give the project a name.");
-  const p = findProject(ctx, name) ?? createProject(ctx, { name, kind: "project" }); const c = code(); const id = uid("rt");
+  const p = findProject(ctx, name) ?? createProject(ctx, { name, kind: "project" }); if (ctx.mode === "personal") setProjectSharing(ctx, p.id, true);   /* a connection check the user started: that project is shared on purpose */ const c = code(); const id = uid("rt");
   run(ctx.db, "INSERT INTO roundtrips(id,owner_id,code,project_id,project_name,value_a,value_b,created_at) VALUES(?,?,?,?,?,?,?,?)", id, ctx.owner, c, p.id, p.name, `ALPHA-${c}`, `BRAVO-${c}`, ctx.now().toISOString());
   return roundTripState(ctx, id)!;
 }

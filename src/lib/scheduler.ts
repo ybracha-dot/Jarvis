@@ -13,6 +13,7 @@ import { listCommitments } from "./commitments";
 import { planWork } from "./planner";
 import { Router, RouterError } from "./router";
 import { submitGoal, capabilities } from "./assistant";
+import { runBrief } from "./brief";
 
 export interface Occurrence { key: string; kind: "morning" | "afternoon" | "weekly"; at: Date }
 export const inboxDir = (ctx: Ctx) => path.join(modeDir(ctx.mode), "inbox");
@@ -64,6 +65,7 @@ export function scanInbox(ctx: Ctx): ScanResult {
   return res;
 }
 
+export const briefEnabled = (ctx: Ctx) => getSetting<boolean>(ctx.db, "brief_enabled", false);
 export interface CheckResult { key: string; kind: string; scan: ScanResult; resurfaced: number; briefed: boolean; message: string }
 
 export async function runCheck(ctx: Ctx, occ: { key: string; kind: string }, transports: Record<string, Transport> = defaultTransports): Promise<CheckResult> {
@@ -73,7 +75,10 @@ export async function runCheck(ctx: Ctx, occ: { key: string; kind: string }, tra
   const created = (get(ctx.db, "SELECT COUNT(*) n FROM decisions")!.n as number) - before;
   const pending = listDecisions(ctx);
   let briefed = false; let message = "";
-  if (occ.kind === "morning") {
+  if (occ.kind === "morning" && briefEnabled(ctx)) {
+    // The same builder as an on-demand request. One result per occurrence: a retry or a second worker finds it already saved.
+    const b = runBrief(ctx, { occurrenceKey: occ.key, kind: "scheduled" }); message = b.summary ?? "Brief saved."; briefed = true;
+  } else if (occ.kind === "morning") {
     message = pending.length ? `${pending.length} decision${pending.length > 1 ? "s" : ""} waiting. ${pending[0].title}.` : "Nothing needs you. On track.";
     enqueue(ctx, { eventKey: `brief:${occ.key}`, level: "brief", title: "Morning brief", body: message }); briefed = true;
   } else if (occ.kind === "afternoon") {
@@ -105,34 +110,52 @@ export function weeklyFindings(ctx: Ctx) {
   return out;
 }
 
-export interface TickResult { ran: CheckResult[]; missed: string[]; skipped?: string }
+export interface TickResult { ran: CheckResult[]; missed: string[]; skipped?: string; retried?: string[] }
 
-/** Run due occurrences. After downtime, catch up once: only the newest missed cycle runs, the others are recorded as missed. */
+/** Run due occurrences. After downtime, catch up once: only the newest missed cycle runs, the others are recorded as missed.
+ *  Each occurrence is claimed by one atomic insert before any work starts, so a second worker, a restart or a duplicate delivery finds it taken and does nothing. */
 export async function tick(ctx: Ctx, transports: Record<string, Transport> = defaultTransports): Promise<TickResult> {
   if (!getSetting(ctx.db, "scheduler_enabled", ctx.mode === "demo")) return { ran: [], missed: [], skipped: "Schedules are off. Turn them on in Settings." };
   if (getSetting(ctx.db, "scheduler_paused", false)) return { ran: [], missed: [], skipped: "Paused" };
   const now = ctx.now();
+  // A quiet interval the user entered (prayer, Shabbat) pauses scheduled work. The cursor stays put, so what came due runs once, after the interval ends.
+  if (ctx.mode === "personal" && briefEnabled(ctx)) { const q = quietUntil(ctx, now); if (q) return { ran: [], missed: [], skipped: `Quiet time you set, until ${fmtDateTime(q.toISOString())}. Scheduled work waits.` }; }
   const cursor = new Date(getSetting<string>(ctx.db, "scheduler_cursor", new Date(now.getTime() - 86400000).toISOString()));
   const due = occurrencesBetween(ctx, cursor, now);
   setSetting(ctx.db, "scheduler_cursor", now.toISOString());
-  if (!due.length) return { ran: [], missed: [] };
+  // Runs that were claimed but never finished (the worker died), or failed, are retried a few times.
+  const retry = all(ctx.db, "SELECT occurrence_key, kind, scheduled_for, attempts FROM schedule_runs WHERE (status='failed' OR (status='running' AND ran_at<?)) AND attempts<3 AND scheduled_for>? ORDER BY scheduled_for", new Date(now.getTime() - 5 * 60000).toISOString(), new Date(now.getTime() - 36 * 3600000).toISOString());
   const latestByKind = new Map<string, Occurrence>();
   for (const o of due) latestByKind.set(o.kind, o);
   const toRun = new Set([...latestByKind.values()].map((o) => o.key));
-  const ran: CheckResult[] = []; const missed: string[] = [];
-  for (const o of due) {
-    if (get(ctx.db, "SELECT 1 x FROM schedule_runs WHERE occurrence_key=?", o.key)) continue;
-    if (!toRun.has(o.key)) {
-      run(ctx.db, "INSERT OR IGNORE INTO schedule_runs(occurrence_key,kind,scheduled_for,ran_at,status,summary,missed) VALUES(?,?,?,?,?,?,1)", o.key, o.kind, o.at.toISOString(), now.toISOString(), "missed", "Skipped: caught up with a later run");
-      missed.push(o.key); continue;
+  const ran: CheckResult[] = []; const missed: string[] = []; const retried: string[] = [];
+  const work = [...retry.map((r) => ({ o: { key: r.occurrence_key as string, kind: r.kind as Occurrence["kind"], at: new Date(r.scheduled_for as string) }, again: true as const, attempts: Number(r.attempts) })), ...due.map((o) => ({ o, again: false as const, attempts: 0 }))];
+  for (const { o, again, attempts } of work) {
+    if (!again) {
+      if (!toRun.has(o.key)) {
+        run(ctx.db, "INSERT OR IGNORE INTO schedule_runs(occurrence_key,kind,scheduled_for,ran_at,status,summary,missed,detail) VALUES(?,?,?,?,?,?,1,?)", o.key, o.kind, o.at.toISOString(), now.toISOString(), "missed", "Skipped: caught up with a later run", `Nothing ran for this slot (${fmtDateTime(o.at.toISOString())}); a later check caught up.`);
+        missed.push(o.key); continue;
+      }
+      const claim = run(ctx.db, "INSERT OR IGNORE INTO schedule_runs(occurrence_key,kind,scheduled_for,ran_at,status,summary,missed,attempts) VALUES(?,?,?,?,?,?,0,1)", o.key, o.kind, o.at.toISOString(), now.toISOString(), "running", "Running", );
+      if (Number(claim.changes) === 0) continue;                       // someone else has it, or it already ran
+    } else {
+      const claim = run(ctx.db, "UPDATE schedule_runs SET status='running', ran_at=?, attempts=attempts+1 WHERE occurrence_key=? AND attempts=? AND (status='failed' OR status='running')", now.toISOString(), o.key, attempts);
+      if (Number(claim.changes) === 0) continue;
+      retried.push(o.key);
     }
-    const r = await runCheck(ctx, o, transports);
-    run(ctx.db, "INSERT OR IGNORE INTO schedule_runs(occurrence_key,kind,scheduled_for,ran_at,status,summary,missed) VALUES(?,?,?,?,?,?,0)", o.key, o.kind, o.at.toISOString(), now.toISOString(), "ok", r.message);
-    ran.push(r);
-    // The morning brief is a scheduled goal run by the same executor as anything you type. Only when there is something to read; nothing connected means no job.
-    if (o.kind === "morning") { try { if (capabilities(ctx).some((c) => c !== "draft_local")) submitGoal(ctx, { text: "Get me ready for today", origin: "schedule", dedupKey: `schedule:${o.key}` }); } catch { /* a brief must never break the scheduler */ } }
+    const lateMin = Math.round((now.getTime() - o.at.getTime()) / 60000);
+    const lateNote = lateMin > 10 ? `Ran ${lateMin >= 120 ? `${Math.floor(lateMin / 60)} h ${lateMin % 60} min` : lateMin >= 60 ? `${Math.floor(lateMin / 60)} h ${lateMin % 60} min` : `${lateMin} min`} after its ${fmtDateTime(o.at.toISOString())} slot: the computer or the worker was not running then. Caught up once.` : null;
+    try {
+      const r = await runCheck(ctx, o, transports);
+      run(ctx.db, "UPDATE schedule_runs SET status='ok', summary=?, detail=? WHERE occurrence_key=?", r.message, lateNote, o.key);
+      ran.push(r);
+      // Without the brief builder, the morning check still asks the general assistant to get ready for the day. Only when there is something to read.
+      if (o.kind === "morning" && !briefEnabled(ctx)) { try { if (capabilities(ctx).some((c) => c !== "draft_local")) submitGoal(ctx, { text: "Get me ready for today", origin: "schedule", dedupKey: `schedule:${o.key}` }); } catch { /* a brief must never break the scheduler */ } }
+    } catch (e: any) {
+      run(ctx.db, "UPDATE schedule_runs SET status='failed', summary=?, detail=? WHERE occurrence_key=?", "Failed", `This check failed and will be retried: ${String(e?.message ?? e).slice(0, 200)}`, o.key);
+    }
   }
-  return { ran, missed };
+  return { ran, missed, retried };
 }
 
 /** Manual check. Same pipeline. Deduplicated by occurrence so a double click is harmless. */

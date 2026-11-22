@@ -4,6 +4,7 @@ import { Download } from "lucide-react";
 import { api, useQuery, useAction } from "@/components/api";
 import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Notice, Field, inputCls, cx } from "@/components/ui";
 import { fmtDateTime } from "@/lib/time";
+import { BriefSettings } from "@/components/BriefSettings";
 
 export default function SettingsPage() {
   const q = useQuery<any>("/settings"); const sess = useQuery<any>("/session"); const sched = useQuery<any>("/scheduler"); const router = useQuery<any>("/router");
@@ -21,6 +22,7 @@ export default function SettingsPage() {
     <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
     {msg && <Notice tone="accent">{msg}</Notice>}{(save.error || pause.error || claude.error || wipe.error || tick.error) && <ErrorBox error={(save.error || pause.error || claude.error || wipe.error || tick.error)!} />}
     <section><SectionTitle>Workspace</SectionTitle><Card className="p-4 text-sm space-y-1"><p><Badge tone={demo ? "amber" : "accent"}>{demo ? "Example" : "Private"}</Badge> <span className="ml-1">{sess.data.label}</span></p><p className="text-muted">Data folder: <Mono className="break-all">{sess.data.dataDir}</Mono>. The example and private workspaces use separate folders and databases.</p></Card></section>
+    {!demo && <BriefSettings />}
     <section><SectionTitle>Schedule</SectionTitle><Card className="p-4 space-y-3">
       {s && <p className="text-sm" data-testid="scheduler-message">{s.message}</p>}
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-[#67d4ff]" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} />Run scheduled checks{!demo && " (off by default for a private workspace)"}</label>

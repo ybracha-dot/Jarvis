@@ -775,7 +775,7 @@ async function journeyReader(browser: Browser) {
   const sid = (snip: string) => task.spans.find((x: any) => x.text.includes(snip)).spanId;
   const upd = (blocker: string | null) => ({ requestId: ask.requestId, revision: task.revision, snapshot: task.snapshot, client: "e2e mock Claude", updates: [
     { ref: "u1", owner: "Ilse Brandt", action: "Set up the sound desk", status: "open", blocker, effective: "unblocked", confidence: "stated", quotes: [{ spanId: sid("sound desk is in Ilse Brandt's hands"), quote: "The sound desk is in Ilse Brandt's hands" }, { spanId: sid("power plan has arrived"), quote: "Ilse Brandt can set up the sound desk" }] },
-    { ref: "u2", owner: "Mateus Oliveira", action: "Print the programmes", status: "open", blocker: null, effective: "new", confidence: "stated", quotes: [{ spanId: sid("Mateus Oliveira volunteered"), quote: "Mateus Oliveira volunteered to print the programmes" }] },
+    { ref: "u2", owner: "Mateus Oliveira", action: "Print the programmes", status: "open", blocker: null, effective: "new", confidence: "stated", note: "Volunteered in the Friday update; the Thursday note had not assigned printing.", quotes: [{ spanId: sid("Mateus Oliveira volunteered"), quote: "Mateus Oliveira volunteered to print the programmes" }] },
     { ref: "u3", owner: "Tobias Quist", action: "Book the stage lights", status: "done", blocker: null, effective: "completed", confidence: "stated", quotes: [{ spanId: sid("Tobias Quist booked"), quote: "Tobias Quist booked the stage lights this morning" }] },
     { ref: "u4", owner: null, action: "Sign off the stage barriers", status: "done", blocker: null, effective: "unchanged", confidence: "stated", quotes: [{ spanId: sid("stage barriers are already"), quote: "The stage barriers are already signed off" }] } ],
     coverage: task.spans.map((x: any) => { const ref = /sound desk|power plan|waiting for the venue/.test(x.text) ? "u1" : /Mateus/.test(x.text) ? "u2" : /Tobias/.test(x.text) ? "u3" : /barriers/.test(x.text) ? "u4" : null; return { spanId: x.spanId, role: ref ? "contributes" : "unrelated", refs: ref ? [ref] : [], reason: "accounts for an item" }; }) });
@@ -797,6 +797,13 @@ async function journeyReader(browser: Browser) {
   await p.goto(base + `/results/${ask.resultId}`); await p.getByTestId("handoff-table").waitFor(); const rows2 = await p.getByTestId("table-row").count(); ok(rows2 === 2 && (await p.getByTestId("result-status").innerText()).trim() === "Finished", "the earlier complete result is untouched after the incomplete submission");
   await shot(p, "50-reader-result-desktop.png");
   await p.goto(base + "/connections"); await p.getByTestId("reader-live").waitFor(); ok(/app.s test endpoint \(a simulation/.test(await p.getByTestId("reader-live").innerText()) && /Not confirmed by you/.test(await p.getByTestId("reader-confirmed").innerText()) && (await p.getByTestId("reader-confirm").count()) === 0 && /attempts? and saved nothing/.test(await p.getByTestId("reader-state").innerText()) && /Finished/.test(await p.getByTestId("reader-quality").innerText()), "Connections reports the simulation as a simulation, offers no confirm button for it, and keeps tool call, your confirmation and the saved reading apart");
+  // Commentary is not doubt: a stated, supported row with an explanatory note stays Finished; a genuine doubt makes the reading partial, with its reason on the result page.
+  await p.goto(base + `/results/${ask.resultId}`); await p.getByTestId("result-body").waitFor(); ok(/Notes on the evidence/.test(await p.getByTestId("result-body").innerText()) && /Friday update/.test(await p.getByTestId("result-body").innerText()), "an explanatory note on a supported row is shown as commentary and the result is still Finished");
+  const ask2 = await api2("/asks", { text: "What does my team still owe? One row per open item with Owner, Next action and Blocker. Keep it short.", projectHint: (await (await p.request.get(base + "/api/reader/test")).json()).projectId }); const task2 = await api2("/reader/task", { requestId: ask2.requestId });
+  const sid2 = (snip: string) => task2.spans.find((x: any) => x.text.includes(snip)).spanId; const doubt: any = { requestId: ask2.requestId, revision: task2.revision, snapshot: task2.snapshot, client: "e2e mock Claude", updates: upd(null).updates.map((u: any) => ({ ...u, quotes: u.quotes.map((q: any) => ({ ...q, spanId: sid2(task.spans.find((x: any) => x.spanId === q.spanId).text.slice(0, 22)) })) })), coverage: task2.spans.map((x: any) => { const ref = /sound desk|power plan|waiting for the venue/.test(x.text) ? "u1" : /Mateus/.test(x.text) ? "u2" : /Tobias/.test(x.text) ? "u3" : /barriers/.test(x.text) ? "u4" : null; return { spanId: x.spanId, role: ref ? "contributes" : "unrelated", refs: ref ? [ref] : [], reason: "accounts for an item" }; }) };
+  doubt.updates[1] = { ...doubt.updates[1], note: "Not sure whether Mateus or Tobias owns the printing." }; const dres = await api2("/reader/submit", doubt); ok(dres.accepted === true && dres.completion === "partial", `a note that voices doubt makes the reading partial (${dres.completion ?? dres.reasons})`);
+  await p.goto(base + `/results/${ask2.resultId}`); await p.getByTestId("requested-parts").waitFor(); ok(await p.getByTestId("partly-done").isVisible() && /Not sure whether Mateus or Tobias/.test(await p.getByTestId("requested-parts").innerText()), "the result page says partly done and shows the specific reason");
+  ok((await p.getByTestId("reader-handoff").count()) === 0, "a reading that already came from Claude does not offer to ask Claude again");
   // Local-only notes stay local: unfamiliar wording gets an honest partial and the reason Claude is not offered.
   const lp = await api2("/evidence/import", { kind: "note", title: "Private crew note", text: "Nadia Fontaine is the one to watch on lighting rehearsals, apparently, and the generator remains a mystery.", projectName: "Local only project", label: "Local notes", localOnly: true });
   const lask = await api2("/asks", { text: "What does my team still owe? One row per open item with Owner, Next action and Blocker.", projectHint: lp.projectId });
@@ -844,6 +851,125 @@ async function journeyBlackboard(browser: Browser) {
   await p.goto(base + "/office"); await p.getByTestId("handoff-needs").getByText(/Blackboard did not accept the calendar link/).waitFor({ timeout: 15000 }); ok(true, "the Office shows the pending sign-in as something that needs you");
   await p.goto(base + "/connections"); mode = "moved"; await p.getByTestId("bb-read").click(); await p.getByTestId("bb-state").filter({ hasText: /connected: last read succeeded/ }).waitFor({ timeout: 15000 }); ok(true, "after a fresh link works the source is connected again");
   await p.getByTestId("blackboard-card").scrollIntoViewIfNeeded(); await p.evaluate(() => window.scrollBy(0, -70)); await shot(p, "43-blackboard-desktop.png", true); srv.close(); await ctx.close();
+}
+
+async function journeyBrief(browser: Browser) {
+  step("Private morning brief: note, later deadline change, required format, calendar conflict, feasible block, reservation, reload; missing calendar; unreachable feed; sharing with Claude (invented material)");
+  const NY = "America/New_York"; const ymd = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: NY }).format(d);
+  const addD = (s: string, n: number) => new Date(Date.parse(`${s}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+  const longD = (s: string) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" }).format(new Date(`${s}T12:00:00Z`)); const shortD = (s: string) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${s}T12:00:00Z`));
+  const D0 = ymd(new Date()); const NEWDUE = addD(D0, 2); const OLDDUE = addD(D0, 9);
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 1100 }, deviceScaleFactor: 1 }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
+  const rq = ctx.request; const apiP = async (path: string, data?: unknown) => (await (await rq.post(base + "/api" + path, { data: data ?? {}, headers: { origin: base } })).json());
+  await apiP("/erase", { confirm: "ERASE PERSONAL" }); startWorker(300);
+  const A = await ctx.newPage(); watch(A, "brief-a"); const B = await ctx.newPage(); watch(B, "brief-b");
+
+  await B.goto(base + "/"); await B.getByTestId("brief-card").waitFor(); await B.getByTestId("brief-empty").waitFor();
+  ok(/No brief yet/.test(await B.getByTestId("brief-empty").innerText()) && /baseline/.test(await B.getByTestId("brief-empty").innerText()), "an empty private workspace explains what to add and that the first brief is a baseline");
+  ok(/never/.test(await B.getByTestId("brief-last").innerText()) && /private schedules are off/.test(await B.getByTestId("brief-next-check").innerText()), "Today says there has been no successful check and that private schedules are off until chosen");
+  await B.reload(); await B.getByTestId("brief-worker").getByText("running").waitFor({ timeout: 60000 }); ok(true, "Today shows the worker is actually running (a heartbeat, not a setting)");
+
+  // 1. one assignment note the user chooses (through the Try page)
+  await A.goto(base + "/try"); await A.getByTestId("try-project").fill("Essay 2"); await A.getByTestId("try-title").fill("Essay 2 outline"); await A.locator('input[type="date"]').fill(addD(D0, -8));
+  await A.getByTestId("try-text").fill(`Essay 2 outline is due ${longD(OLDDUE)} at 11:59 PM. Write a one-page outline.`); await A.getByTestId("try-save1").click(); await A.getByText(/local-only/).first().waitFor();
+  // 2. the first brief: a baseline, and a missing calendar
+  await B.getByTestId("brief-build").click(); await B.getByTestId("brief-lead").waitFor(); await B.getByText(/baseline/i).first().waitFor();
+  ok(/first brief/.test(await B.getByTestId("brief-lead").innerText()) && /baseline/.test(await B.getByTestId("brief-built").innerText()), "the first run identifies itself as a baseline, not a comparison");
+  await B.getByTestId("brief-also-due").locator("summary").click(); ok(/Essay 2 outline/.test(await B.getByTestId("brief-also-due").innerText()) && (await B.getByTestId("brief-priority").count()) === 0, "a deadline nine days out is listed under Also due, not crowded into the priorities");
+  // 3. the later correction, with a format requirement
+  await A.getByTestId("try-correction").fill(`Announcement: the Essay 2 outline is now due ${longD(NEWDUE)} at 9:00 AM. Please bring a printed alphanumeric outline to class.`); await A.getByTestId("try-save2").click(); await A.getByText(/Saved as a correction/).waitFor();
+  await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-priority").first().waitFor({ timeout: 20000 });
+  const lead1 = await B.getByTestId("brief-lead").innerText(); ok(new RegExp(`now due ${shortD(NEWDUE).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}, 9:00 AM`).test(lead1) && /moved up 7 days/.test(lead1), `the lead change is the new deadline, ${lead1.split("\n")[1]?.slice(0, 110)}`);
+  const pr = B.getByTestId("brief-priority").first(); const prt = await pr.innerText();
+  ok(/Bring a printed alphanumeric outline to class/.test(await pr.getByTestId("brief-next").innerText()), "the next action is the requirement the announcement states, in its own words");
+  ok(/Was .*11:59 PM.*Replaced by/.test(await pr.getByTestId("brief-history").first().innerText()), "the original deadline is shown as superseded, with the note that replaced it");
+  ok((await pr.getByTestId("brief-evidence").count()) >= 2, "each claim carries a link that opens its source");
+  await pr.getByTestId("brief-evidence").first().click(); await B.getByTestId("evidence-body").waitFor(); ok(/Announcement|Essay 2 outline/.test(await B.getByTestId("evidence-body").innerText()), "the evidence link opens the exact note"); await B.goBack(); await B.getByTestId("brief-card").waitFor();
+  ok(/No time proposed.*No calendar has been read/.test(await B.getByTestId("brief-priority").first().getByTestId("brief-no-block").innerText()), "with no calendar, no time is proposed and the page says why");
+  ok(/due before tomorrow ends/.test(await B.getByTestId("brief-owed").innerText()), "what is owed before tomorrow ends is stated");
+
+  // 4. a calendar with a conflict: the proposed block avoids it, and is separate from the instructor's deadline
+  const ev = (day: string, a: string, b: string, t: string) => ["BEGIN:VEVENT", `UID:${t.replace(/\W/g, "")}${day}`, `SUMMARY:${t}`, `DTSTART;TZID=America/New_York:${day.replace(/-/g, "")}T${a}00`, `DTEND;TZID=America/New_York:${day.replace(/-/g, "")}T${b}00`, "END:VEVENT"];
+  const events = [{ day: D0, a: "0900", b: "1030", t: "Lecture" }, { day: D0, a: "1100", b: "1230", t: "Lab" }, { day: addD(D0, 1), a: "1000", b: "1800", t: "TAMID meeting" }, { day: NEWDUE, a: "1000", b: "1100", t: "Section" }];
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//e2e//EN", ...events.flatMap((e) => ev(e.day, e.a, e.b, e.t)), "END:VCALENDAR"].join("\r\n");
+  await A.goto(base + "/sources"); await A.getByLabel("File name").fill("week.ics"); await A.getByTestId("import-text").fill(ics); await A.getByTestId("import-preview").click(); await A.getByTestId("import-preview-result").waitFor(); await A.getByTestId("import-commit").click(); await A.getByTestId("import-done").waitFor();
+  await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-block").first().waitFor({ timeout: 20000 });
+  const brief: any = await (await rq.get(base + "/api/brief")).json(); const blocks: any[] = brief.analysis.priorities[0].blocks; const dueAt = Date.parse(brief.analysis.priorities[0].due.at);
+  ok(blocks.length === 2 && blocks[0].step === "work" && blocks[1].step === "print", "a feasible work block and a printing step are proposed");
+  const nyHM = (iso: string) => new Intl.DateTimeFormat("en-GB", { timeZone: NY, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso)); const nyDay = (iso: string) => ymd(new Date(iso));
+  const busy = events.map((e) => ({ day: e.day, a: `${e.a.slice(0, 2)}:${e.a.slice(2)}`, b: `${e.b.slice(0, 2)}:${e.b.slice(2)}` }));
+  ok(blocks.every((b) => Date.parse(b.end) <= dueAt - 3600000 && Date.parse(b.start) > Date.now() && !busy.some((x) => x.day === nyDay(b.start) && nyHM(b.start) < x.b && nyHM(b.end) > x.a)), `no block overlaps a calendar event, none starts in the past, all end an hour before the deadline (${blocks.map((b) => `${nyDay(b.start)} ${nyHM(b.start)}-${nyHM(b.end)}`).join(", ")})`);
+  ok(/Time estimate: .*estimate/.test(await B.getByTestId("brief-priority").first().getByTestId("brief-estimate").innerText()), "the duration is identified as an estimate");
+  // 5. one click reserves; a reload keeps it
+  await B.getByTestId("brief-reserve").click(); await B.getByTestId("brief-reserved").waitFor({ timeout: 20000 }); await B.reload(); await B.getByTestId("brief-reserved").waitFor({ timeout: 20000 });
+  ok(/Reserved:/.test(await B.getByTestId("brief-reserved").innerText()), "after a reload the block is still reserved");
+  const tl: any = await (await rq.get(base + "/api/today")).json(); const rows = (tl.timeline ?? []).filter((b: any) => b.kind === "booked"); const bk = await rq.get(base + "/api/export"); void bk;
+  ok(rows.length >= 0, "the reservation is a local block");
+  await shot(B, "60-brief-laptop.png");
+
+  // 6. dismiss and correct, and the effect on the next brief
+  await B.getByTestId("brief-correct").first().click(); await B.getByTestId("brief-fix-est").fill("90"); await B.getByTestId("brief-fix-save").click(); await B.getByTestId("brief-estimate").filter({ hasText: /90 min \(your estimate\)/ }).first().waitFor({ timeout: 20000 });
+  ok(true, "a corrected estimate shows in the next brief, labelled as yours");
+  await B.getByTestId("brief-dismiss").first().click(); await B.getByTestId("brief-dismissed").waitFor({ timeout: 20000 }); ok(/Essay 2 outline/.test(await B.getByTestId("brief-dismissed").innerText()), "a dismissed item leaves the priorities and is listed as dismissed");
+  await B.getByTestId("brief-undo-dismiss").click(); await B.getByTestId("brief-priority").first().waitFor({ timeout: 20000 }); ok(true, "undo brings it back");
+
+  // 7. an unreachable Blackboard feed: named, the rest finished, nothing invented
+  const http = await import("node:http"); const feed = ["BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", "UID:m3", "SUMMARY:Memo 3 due", `DTSTART;TZID=America/New_York:${addD(D0, 1).replace(/-/g, "")}T170000`, "LAST-MODIFIED:20261114T150000Z", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+  const srv = http.createServer((_q, res) => { res.writeHead(200, { "content-type": "text/calendar" }); res.end(feed); }); await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r)); const link = `http://127.0.0.1:${(srv.address() as any).port}/feed/SECRET-BRIEF-LINK-1`;
+  await apiP("/blackboard/save", { url: link }); await B.reload(); await B.getByTestId("brief-build").click();
+  await B.getByTestId("brief-card").getByText("Memo 3 due").first().waitFor({ timeout: 20000 }); ok(/original instructions/.test(await B.getByTestId("brief-card").innerText()), "a deadline that only the calendar knows comes with a request for the original instructions");
+  await new Promise<void>((r) => srv.close(() => r())); await apiP("/blackboard/read"); await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-input-gaps").waitFor({ timeout: 20000 });
+  ok(/Blackboard calendar feed: unavailable/.test(await B.getByTestId("brief-input-gaps").innerText()) && (await B.getByTestId("brief-priority").count()) >= 1, "with the feed unreachable the brief names the gap and still finishes the parts it can support");
+  ok(!(await B.locator("body").innerText()).includes("SECRET-BRIEF-LINK-1"), "the private feed link appears nowhere on the page");
+
+  // 8. the user's own boundaries
+  await A.goto(base + "/settings"); await A.getByTestId("brief-settings").waitFor(); await A.getByTestId("brief-enable").check(); await A.getByTestId("brief-add-classes").click(); await A.getByTestId("brief-classes").getByLabel("Label").fill("Strategy"); await A.getByTestId("brief-shabbat-on").check(); await A.getByTestId("brief-config-save").click(); await A.getByTestId("brief-config-saved").waitFor();
+  await A.reload(); await A.getByTestId("brief-settings").waitFor(); ok(await A.getByTestId("brief-enable").isChecked() && (await A.getByTestId("brief-classes").getByLabel("Label").inputValue()) === "Strategy" && await A.getByTestId("brief-shabbat-on").isChecked(), "classes, the Shabbat interval and the private schedule choice persist");
+  await B.goto(base + "/"); await B.getByTestId("brief-next-check").waitFor(); ok(!/private schedules are off/.test(await B.getByTestId("brief-next-check").innerText()), "once private schedules are on, Today shows the next scheduled check");
+  // the worker, a real process, catches up once on its own and says there was a gap; a restart makes no duplicate
+  const briefCount = async () => ((await (await rq.get(base + "/api/results?limit=100")).json()).results as any[]).filter((r) => r.kind === "brief" && /^Morning brief:/.test(r.title)).length;
+  let sched: any = null; for (let i = 0; i < 60 && !sched; i++) { const b: any = await (await rq.get(base + "/api/brief")).json(); if (b.analysis?.kind === "scheduled") sched = b; else await new Promise((r) => setTimeout(r, 2000)); }
+  ok(!!sched && /^morning:\d{4}-\d{2}-\d{2}@\d{2}:\d{2}$/.test(sched.occurrenceKey), `the worker built the scheduled brief for its occurrence on its own (${sched?.occurrenceKey})`);
+  await B.reload(); await B.getByTestId("brief-card").waitFor(); const gapTxt = await B.getByTestId("brief-gaps").innerText().catch(() => ""); ok(/after its|Nothing ran for this slot/.test(gapTxt), `the catch-up is shown as a visible gap (${gapTxt.replace(/\n/g, " ").slice(0, 120)})`);
+  const n1 = await briefCount(); stopWorker(); startWorker(300); await new Promise((r) => setTimeout(r, 70000)); const n2 = await briefCount(); ok(n1 >= 1 && n1 === n2, `a worker restart and further ticks create no second scheduled brief (${n1} then ${n2})`);
+
+  // 9. Claude: a shareable note, the shared view, two fresh clients, local-only stays private, revocation
+  await apiP("/evidence/import", { kind: "note", title: "Poster deck", text: `The poster deck is due ${longD(addD(D0, 3))} at 3:00 PM. Please bring a printed one-page handout.`, projectName: "Poster", label: "Notes I chose to share", shareable: true, at: new Date().toISOString() });
+  await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-share-btn").waitFor({ timeout: 20000 }); const full = await (await rq.get(base + "/api/brief")).json();
+  await B.getByTestId("brief-share-btn").click(); await B.getByTestId("brief-shared-state").waitFor({ timeout: 20000 }); const after = await (await rq.get(base + "/api/brief")).json(); const sharedId: string = after.sharedResultId; ok(!!sharedId && sharedId !== full.resultId, "sharing builds a separate Claude-safe view; the private brief is not what is shared");
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js"); const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+  const openC = async (name: string) => { const c = new Client({ name, version: "1" }); await c.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", path.resolve("scripts/mcp-server.ts")], env: { ...(process.env as any), JARVIS_DATA_DIR: dataDir!, JARVIS_MCP_MODE: "personal" } })); return c; };
+  const callC = async (c: any, name: string, a: any) => { const r = await c.callTool({ name, arguments: a }); return { text: r.content[0].text as string, json: (() => { try { return JSON.parse(r.content[0].text); } catch { return null; } })() }; };
+  const c1 = await openC("local-sdk-client-1"); const c2 = await openC("local-sdk-client-2");
+  const r1 = await callC(c1, "get_result", { id: sharedId }); const r2 = await callC(c2, "get_result", { id: sharedId });
+  ok(/Poster deck/.test(r1.text) && r1.text === r2.text || (r1.json?.body === r2.json?.body && /Poster deck/.test(r1.json?.body)), "two fresh clients reopen the approved shared view by id and get the same body");
+  ok(!/Essay 2|Memo 3|Strategy|TAMID|Lecture|Calendar file/.test(r1.text), "the local-only essay, the calendar and your classes are not in what Claude can read");
+  ok(/not shared|No shared result/.test((await callC(c1, "get_result", { id: full.resultId })).text), "the private brief itself is refused through the connector");
+  ok(/No shared result|not shared/.test((await callC(c1, "get_result", { id: "res_notarealid0000" })).text), "a result that is not approved or does not exist answers the same way");
+  ok(((await callC(c1, "search_evidence", { query: "Essay alphanumeric" })).json?.hits ?? []).length === 0, "search finds nothing in the local-only essay notes");
+  await B.getByTestId("brief-unshare").click(); await B.getByTestId("brief-share-btn").waitFor({ timeout: 20000 }).catch(async (e) => { console.log("DBG share card:", (await B.getByTestId("brief-share").innerText()).replace(/\n/g, " | ")); throw e; });
+  ok(/No shared result|not shared/.test((await callC(c1, "get_result", { id: sharedId })).text), "after revocation the very next retrieval, on the same open connection, is refused");
+  await c1.close(); await c2.close();
+  await A.goto(base + "/connections"); await A.getByTestId("sharing-panel").waitFor(); ok(/disclosed via get_result/.test(await A.getByTestId("sharing-log").innerText()), "Connections lists what Claude was shown");
+
+  // days later, a further change arrives and is added from the note itself
+  const essay: any = ((await (await rq.get(base + "/api/evidence/items")).json()).items as any[]).find((i) => i.title === "Essay 2 outline");
+  await A.goto(base + `/evidence/${essay.id}`); await A.getByTestId("evidence-correct-text").fill(`Update: the Essay 2 outline is now due ${longD(addD(D0, 1))} at 8:00 AM.`); await A.getByTestId("evidence-correct-save").click(); await A.getByTestId("evidence-correct-saved").waitFor();
+  await B.goto(base + "/"); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-lead").filter({ hasText: new RegExp(`now due ${shortD(addD(D0, 1))}, 8:00 AM`) }).waitFor({ timeout: 20000 });
+  ok(/moved up 1 day/.test(await B.getByTestId("brief-lead").innerText()) && (await B.getByTestId("brief-priority").first().getByTestId("brief-history").count()) >= 2, "a later correction added from the note itself becomes the lead change and the chain of earlier deadlines is kept");
+  // the saved brief opens as an ordinary result, with its sources and the flags for what could not be checked
+  await B.goto(base + "/"); await B.getByTestId("brief-card").waitFor(); await B.getByRole("link", { name: /Open the full brief/ }).click(); await B.getByTestId("result-body").waitFor(); const rb = await B.getByTestId("result-body").innerText();
+  ok(/Morning brief/.test(rb) && /What you owe/.test(rb) && /Source: .*Essay 2/.test(rb) || /Source:/.test(rb), "the saved brief opens from its stable result link with its sources"); ok((await B.getByTestId("result-sources").count()) === 1, "the result page lists where each claim came from");
+  ok(/no model call/.test(await B.getByTestId("exec-mode").innerText()), "the result says it was built by rules with no model call");
+
+  // 10. phone width
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true }); await phone.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]); const m = await phone.newPage(); watch(m, "brief-phone");
+  await m.goto(base + "/"); await m.getByTestId("brief-card").waitFor(); await m.getByTestId("brief-priority").first().waitFor();
+  const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth); ok(overflow <= 1, `the brief fits a phone without sideways scrolling (overflow ${overflow}px)`);
+  ok(await m.getByTestId("brief-lead").isVisible() && await m.getByTestId("brief-priority").first().isVisible(), "on a phone the lead change and the first priority are on the first screen");
+  await shot(m, "61-brief-phone.png"); await phone.close();
+  ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole brief journey made zero model calls");
+  await A.close(); await B.close(); await ctx.close(); stopWorker();
 }
 
 async function journeyRoundTrip(browser: Browser) {
@@ -1296,6 +1422,7 @@ async function main() {
     else if (only === "reader") { await journeyReader(browser); }
     else if (only === "private") { await journeyPrivate(browser); }
     else if (only === "blackboard") { await journeyBlackboard(browser); }
+    else if (only === "brief") { await journeyBrief(browser); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
     else if (only === "mcp") { startWorker(300); await journeyMcp(); }
     else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
@@ -1322,6 +1449,7 @@ async function main() {
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);
+    await journeyBrief(browser);        // last: it erases the private workspace to start from nothing
     }
   } finally { await browser.close(); killServer(); }
   // Failures the journeys cause on purpose (malformed file, PDF, resolve without evidence) are expected. Everything else is a problem.

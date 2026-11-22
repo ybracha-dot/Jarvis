@@ -23,10 +23,14 @@ import { ingestRevision } from "./ingest";
 import { captureToJarvis, CaptureInput, undoCapture, captureReceipt, recallFromJarvis } from "./capture";
 import { outcomes } from "./outcomes";
 import { submitGoal, GoalInput as AssistantGoalInput, receipt as goalReceipt, reviseRequest, refreshRequest, cancelRequest, resumeRequest, resultView, editDraft, listResults, listRequests, readsFor } from "./assistant";
-import { listSources, getItem, importText, revokeSource, reauthorizeSource, forgetItem, searchEvidence, listItems, tokens, SOURCE_KINDS } from "./evidence";
+import { addCorrection, listSources, getItem, importText, revokeSource, reauthorizeSource, forgetItem, searchEvidence, listItems, tokens, SOURCE_KINDS } from "./evidence";
 import { startRoundTrip, roundTripState, editRoundTrip } from "./roundtrip";
 import { blackboardStatus, readFeed, saveFeed, removeFeed } from "./blackboard";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
+import { briefToday, briefNow, briefFeedback, reserveBrief, shareBrief, unshareBrief } from "./brief";
+import { getBriefConfig, saveBriefConfig } from "./brief-config";
+import { sharingState, setSourceSharing, setProjectSharing, grantResult, revokeResult, resultAccess } from "./share";
+import { availabilityCoverage } from "./calendar-cover";
 import { issueReaderTask, submitReaderResult, createReaderTestProject, readerTestState, readerHandoff, confirmReader } from "./reader";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
 import { createToken, listTokens, revokeToken, rotateToken, NewToken, startProbe, probeState, editProbe } from "./mcp-auth";
@@ -141,6 +145,7 @@ on("POST", "/evidence/import", (c, r) => {
   if (b.corrects) { const orig = getItem(c, b.corrects); if (!orig || ("forgotten" in orig && orig.forgotten)) throw new HttpError(404, "The note you are correcting is not available"); }
   const out = importText(c, { ...b, projectId: pid }); return { ...out, projectId: pid };
 });
+on("POST", "/evidence/items/:id/correct", (c, r) => addCorrection(c, r.params.id, r.json(z.object({ text: z.string().min(1).max(20000) }).strict()).text));
 on("POST", "/evidence/sources/:id/revoke", (c, r) => revokeSource(c, r.params.id));
 on("POST", "/evidence/sources/:id/authorize", (c, r) => reauthorizeSource(c, r.params.id));
 on("POST", "/evidence/items/:id/forget", (c, r) => { r.json(z.object({ confirm: z.literal(true) })); return forgetItem(c, r.params.id); });
@@ -205,6 +210,22 @@ on("GET", "/export", (c) => {
 });
 
 on("GET", "/today", (c) => today(c));
+// The morning brief: the same builder answers a click and a schedule.
+on("GET", "/brief", (c) => { const b = briefToday(c, schedulerStatus(c)); return { ...b, config: getBriefConfig(c), sharedClaudeCanRead: b.sharedResultId ? resultAccess(c, b.sharedResultId).allowed : false, coverage: availabilityCoverage(c) }; });
+on("POST", "/brief/run", (c) => { const out = briefNow(c); return { ...out, brief: briefToday(c, schedulerStatus(c)) }; });
+on("POST", "/brief/feedback", (c, r) => { const b = r.json(z.object({ key: z.string().max(120), kind: z.enum(["dismiss", "undismiss", "due", "estimate", "done", "undo"]), value: z.union([z.string().max(60), z.number()]).nullish(), note: z.string().max(300).nullish() }).strict()); briefFeedback(c, b); const out = briefNow(c); return { ok: true, ...out, brief: briefToday(c, schedulerStatus(c)) }; });
+on("POST", "/brief/reserve", (c, r) => { const b = r.json(z.object({ key: z.string().max(120), blocks: z.array(z.object({ start: z.string(), end: z.string() })).max(4).optional() }).strict()); const out = reserveBrief(c, b); const rebuilt = briefNow(c); return { ...out, resultId: rebuilt.resultId }; });
+on("GET", "/brief/config", (c) => getBriefConfig(c));
+on("POST", "/brief/config", (c, r) => saveBriefConfig(c, r.json(z.any())));
+on("GET", "/sharing", (c) => sharingState(c));
+on("POST", "/sharing/sources/:id", (c, r) => setSourceSharing(c, r.params.id, r.json(z.object({ share: z.boolean() }).strict()).share));
+on("POST", "/sharing/projects/:id", (c, r) => setProjectSharing(c, r.params.id, r.json(z.object({ share: z.boolean() }).strict()).share));
+on("POST", "/sharing/results/:id", (c, r) => {
+  const share = r.json(z.object({ share: z.boolean() }).strict()).share; const isFullBrief = !!get(c.db, "SELECT 1 x FROM brief_runs WHERE result_id=? AND view='full'", r.params.id);
+  if (isFullBrief) return share ? shareBrief(c, r.params.id) : unshareBrief(c, r.params.id);            // a brief mixes private and shareable evidence: Claude gets a separate view
+  if (!share) return revokeResult(c, r.params.id);
+  return { ...grantResult(c, r.params.id), sharedResultId: r.params.id };
+});
 on("GET", "/decisions", (c, r) => ({ decisions: listDecisions(c, (r.query.get("state") ?? "pending").split(",")) }));
 on("GET", "/decisions/:id", (c, r) => { const d = decisionDetail(c, r.params.id); if (!d) throw new HttpError(404, "Decision not found"); return { ...d, memory: d.task ? mem.notesUsedFor(c, { external_id: d.task.external_id as string, course_ext: (get(c.db, "SELECT external_id e FROM courses WHERE id=?", d.task.course_id)?.e as string) }) : mem.notesUsedFor(c, null) }; });
 on("POST", "/decisions/:id/reserve", (c, r) => reserve(c, r.params.id, r.json(ReserveInput)));
