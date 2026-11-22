@@ -79,9 +79,9 @@ describe("issuing a reading task", () => {
 describe("validating a submission", () => {
   it("accepts the correct two-row reading, renders the artifact itself, saves it as version 2 of the SAME result and reopens through the normal result page", async () => {
     const { ctx, goal, a, b } = await setup(); await work(ctx); const before: any = resultView(ctx, goal.resultId); const t = task(ctx, goal);
-    const r = submitReaderResult(ctx, good(t), "mock-claude"); expect(r).toMatchObject({ accepted: true, version: before.latestVersion + 1, resultId: goal.resultId, completion: "complete" });
+    const r = submitReaderResult(ctx, good(t), { client: "mock-claude", origin: "simulation" }); expect(r).toMatchObject({ accepted: true, version: before.latestVersion + 1, resultId: goal.resultId, completion: "complete" });
     const v: any = resultView(ctx, goal.resultId); expect(v.latestVersion).toBe(before.latestVersion + 1); expect(v.version).toBe(v.latestVersion);
-    expect(v.mode).toMatch(/Claude-assisted/); expect(v.analysis.rows.map((x: any) => x.owner)).toEqual(["Leila Park", "Amara Chen"]);
+    expect(v.mode).toMatch(/Reader submission: Reading accepted from an automated test \(a simulation\)/); expect(v.analysis.rows.map((x: any) => x.owner)).toEqual(["Leila Park", "Amara Chen"]);
     expect(v.analysis.rows[0].cells).toEqual(["Leila Park", "Release the badge proof", "None reported"]); expect(v.analysis.rows[1].cells).toEqual(["Amara Chen", "Prepare the check-in sheet", "None reported"]);
     for (const row of v.analysis.rows) expect(row.cites.some((c: any) => c.itemId === b.id && c.quote)).toBe(true); expect(v.analysis.rows[0].cites.some((c: any) => c.itemId === a.id)).toBe(true);
     expect(v.analysis.leftOut.filter((l: any) => l.reason === "complete").map((l: any) => l.text).sort()).toEqual(["Arrange projector pickup", "Sign off the stage map"]);
@@ -92,18 +92,18 @@ describe("validating a submission", () => {
   it("REJECTS a candidate that drops Leila (her passages set aside as unrelated), and saves nothing", async () => {
     const { ctx, goal } = await setup(); await work(ctx); const before: any = resultView(ctx, goal.resultId); const t = task(ctx, goal); const g = good(t);
     const bad = { ...g, updates: g.updates.filter((u) => u.ref !== "u1"), coverage: g.coverage.map((c) => (c.refs.includes("u1") ? { ...c, role: "unrelated", refs: [] } : c)) };
-    const r = submitReaderResult(ctx, bad, "mock-claude"); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/describes work for [^.]*leila[^.]*, who has no update/i);
+    const r = submitReaderResult(ctx, bad, { client: "mock-claude", origin: "simulation" }); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/describes work for [^.]*leila[^.]*, who has no update/i);
     const v: any = resultView(ctx, goal.resultId); expect(v.latestVersion).toBe(before.latestVersion); expect(v.analysis.rows.map((x: any) => x.owner).sort()).toEqual(["Amara Chen", "Leila Park"]);   // the local result is untouched
   });
   it("REJECTS a candidate that keeps Leila's old blocker although a later passage says the artwork arrived", async () => {
     const { ctx, goal } = await setup(); const t = task(ctx, goal); const g = good(t);
     const bad = { ...g, updates: g.updates.map((u) => (u.ref === "u1" ? { ...u, blocker: "Waiting for the sponsor artwork", effective: "updated", quotes: [q(t, "badge proof is in Leila Park's hands", "the badge proof is in Leila Park's hands"), q(t, "She is waiting for the sponsor artwork", "She is waiting for the sponsor artwork before she can release it")] } : u)) };
-    const r = submitReaderResult(ctx, bad, "mock-claude"); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/blocker “Waiting for the sponsor artwork” was cleared by a later passage/);
+    const r = submitReaderResult(ctx, bad, { client: "mock-claude", origin: "simulation" }); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/blocker “Waiting for the sponsor artwork” was cleared by a later passage/);
   });
   it("REJECTS a candidate that attaches Amara's exact quote to Leila", async () => {
     const { ctx, goal } = await setup(); const t = task(ctx, goal); const g = good(t);
     const bad = { ...g, updates: g.updates.map((u) => (u.ref === "u1" ? { ...u, quotes: [q(t, "Amara Chen volunteered", "Amara Chen volunteered to prepare the check-in sheet")] } : u)) };
-    const r = submitReaderResult(ctx, bad, "mock-claude"); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/none of the quotes names Leila Park/);
+    const r = submitReaderResult(ctx, bad, { client: "mock-claude", origin: "simulation" }); expect(r.accepted).toBe(false); expect(r.reasons.join(" ")).toMatch(/none of the quotes names Leila Park/);
   });
   it("REJECTS invented evidence: a quote that is not in the passage, a passage that was never issued, a missing coverage entry, and a schema violation", async () => {
     const { ctx, goal } = await setup(); const t = task(ctx, goal); const g = good(t);
@@ -123,7 +123,7 @@ describe("validating a submission", () => {
   });
   it("is idempotent on replay (same result, no second version) and refuses a different second reading for the same revision", async () => {
     const { ctx, goal } = await setup(); await work(ctx); const t = task(ctx, goal); const g = good(t);
-    const first = submitReaderResult(ctx, g, "mock-claude"); const again = submitReaderResult(ctx, g, "mock-claude");
+    const first = submitReaderResult(ctx, g, { client: "mock-claude", origin: "simulation" }); const again = submitReaderResult(ctx, g, { client: "mock-claude", origin: "simulation" });
     expect(again).toMatchObject({ accepted: true, replay: true, version: first.version, resultId: first.resultId }); expect((resultView(ctx, goal.resultId) as any).latestVersion).toBe(first.version);
     const other = submitReaderResult(ctx, { ...g, updates: g.updates.map((u) => (u.ref === "u2" ? { ...u, action: "Prepare the check-in sheets" } : u)) }); expect(other.accepted).toBe(false); expect(other.reasons.join(" ")).toMatch(/different reading was already accepted/);
   });

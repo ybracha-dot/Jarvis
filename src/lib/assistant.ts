@@ -134,7 +134,7 @@ export function receipt(ctx: Ctx, requestId: string) {
   const job = r.job_id ? getJob(ctx, r.job_id as string) : null; const res = get(ctx.db, "SELECT version, state, kind FROM results WHERE id=?", r.result_id);
   const blockers: string[] = []; if (job?.status === "blocked") blockers.push(job.result?.ask?.question ?? job.error ?? "Needs your answer");
   const kids = job ? all(ctx.db, "SELECT status, result, error FROM jobs WHERE root_id=? AND status='blocked'", job.root_id ?? job.id) : []; for (const k of kids) { const q = k.result ? JSON.parse(k.result as string)?.ask?.question : null; if (q) blockers.push(q); }
-  const viaReader = !!get(ctx.db, "SELECT 1 x FROM result_versions WHERE result_id=? AND version=? AND mode LIKE 'Claude-assisted%'", r.result_id, res?.version ?? 0);
+  const viaReader = !!get(ctx.db, "SELECT 1 x FROM result_versions WHERE result_id=? AND version=? AND (mode LIKE 'Claude-assisted%' OR mode LIKE 'Reader submission%')", r.result_id, res?.version ?? 0);
   const status = (viaReader && !blockers.length ? "done" : (job?.status ?? "queued")) as string; const done = status === "done" && (res?.version as number) > 0;
   const quotesOnly = done && !!get(ctx.db, "SELECT 1 x FROM result_versions WHERE result_id=? AND version=? AND flags LIKE '%\"kind\":\"extractive\"%'", r.result_id, res!.version);
   const parts: OutcomeStatus[] = done ? JSON.parse(String(get(ctx.db, "SELECT outcomes FROM result_versions WHERE result_id=? AND version=?", r.result_id, res!.version)?.outcomes ?? "[]")) : []; const completion = quotesOnly && !parts.length ? "quotes_only" : completionOf(parts);

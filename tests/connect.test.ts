@@ -207,7 +207,7 @@ import { createReaderTestProject, readerTestState } from "@/lib/reader";
 describe("Claude reads the notes over the connector (local test client)", () => {
   it("submit_goal -> get_reader_task -> a bad then a good submit_reader_result -> a fresh chat reads the same saved result", async () => {
     const ctx = fresh(); const t = createToken(ctx, { label: "Claude" }); const tp = createReaderTestProject(ctx);
-    expect(readerTestState(ctx)).toMatchObject({ exists: true, shareableNotes: 2, accepted: null, live: expect.stringMatching(/Pending/) }); expect(tp.prompt).toMatch(/get_reader_task/);
+    expect(readerTestState(ctx)).toMatchObject({ exists: true, shareableNotes: 2, toolAccepted: null, userConfirmed: null, reading: null }); expect(tp.prompt).toMatch(/get_reader_task/);
     const s = await connect(t.token); const g = (await s.call("submit_goal", { text: "What does my team still owe? One row per open item with Owner, Next action and Blocker. Leave closed items out.", project: tp.project })).json;
     expect(g.readerAvailable).toBe(true); const task = (await s.call("get_reader_task", { requestId: g.requestId })).json; expect(task.eligible).toBe(true); expect(task.spans.length).toBeGreaterThan(5);
     const sid = (snip: string) => task.spans.find((x: any) => x.text.includes(snip)).spanId;
@@ -221,7 +221,7 @@ describe("Claude reads the notes over the connector (local test client)", () => 
     const good = (await s.call("submit_reader_result", mk())).json; expect(good).toMatchObject({ accepted: true, completion: "complete" });
     await s.client.close(); const chat2 = await connect(t.token); const res = (await chat2.call("get_result", { id: g.resultId })).json;
     expect(res.table.rows.map((r: any) => r.cells.join(" | "))).toEqual(["Ilse Brandt | Set up the sound desk | None reported", "Mateus Oliveira | Print the programmes | None reported"]); expect(res.ready).toBe(true);
-    expect(readerTestState(ctx)).toMatchObject({ accepted: expect.objectContaining({ client: expect.any(String) }), rejectedAttempts: 1 });
+    expect(readerTestState(ctx)).toMatchObject({ toolAccepted: expect.objectContaining({ origin: "connector", transport: "http", client: expect.stringContaining("ordinary-claude-emulator"), label: expect.stringMatching(/Reading accepted through the HTTP connector\..*self-reported.*looks like a test client/) }), userConfirmed: null, rejectedAttempts: 1, reading: expect.objectContaining({ completion: "complete" }) });
     expect(all(ctx.db, "SELECT model_calls FROM jobs").every((j: any) => j.model_calls === 0)).toBe(true);
   });
 });

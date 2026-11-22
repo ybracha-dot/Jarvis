@@ -27,7 +27,7 @@ import { listSources, getItem, importText, revokeSource, reauthorizeSource, forg
 import { startRoundTrip, roundTripState, editRoundTrip } from "./roundtrip";
 import { blackboardStatus, readFeed, saveFeed, removeFeed } from "./blackboard";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
-import { issueReaderTask, submitReaderResult, createReaderTestProject, readerTestState, readerHandoff } from "./reader";
+import { issueReaderTask, submitReaderResult, createReaderTestProject, readerTestState, readerHandoff, confirmReader } from "./reader";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
 import { createToken, listTokens, revokeToken, rotateToken, NewToken, startProbe, probeState, editProbe } from "./mcp-auth";
 import { officeState, cancelJob, getJob, TERMINAL } from "./jobs";
@@ -162,7 +162,8 @@ on("GET", "/roundtrip", (c) => ({ trip: roundTripState(c) }));
 on("GET", "/reader/test", (c) => readerTestState(c));
 on("POST", "/reader/test", (c) => { createReaderTestProject(c); return readerTestState(c); });
 on("POST", "/reader/task", (c, r) => issueReaderTask(c, r.json(z.object({ requestId: z.string().max(60) }).strict()).requestId));
-on("POST", "/reader/submit", (c, r) => submitReaderResult(c, r.json(z.any()), "Jarvis app session (not a Claude connector)"));
+on("POST", "/reader/submit", (c, r) => submitReaderResult(c, r.json(z.any()), { client: "Jarvis app test endpoint", origin: "app-test" }));
+on("POST", "/reader/confirm", (c, r) => confirmReader(c, r.json(z.object({ note: z.string().max(300).optional() }).strict()).note));
 on("GET", "/reader/handoff/:id", (c, r) => readerHandoff(c, r.params.id));
 on("POST", "/roundtrip", (c, r) => startRoundTrip(c, r.json(z.object({ project: z.string().min(2).max(120) }))));
 on("POST", "/roundtrip/:id/edit", (c, r) => editRoundTrip(c, r.params.id));

@@ -1,8 +1,9 @@
 // Who is calling the connector, as the client reports itself. Carried through a request so tools can record it without a global.
 import { AsyncLocalStorage } from "node:async_hooks";
-const als = new AsyncLocalStorage<{ client: string | null; tokenLabel: string | null }>();
-export const withClient = <T>(c: { client: string | null; tokenLabel: string | null }, fn: () => T): T => als.run(c, fn);
-export const currentClient = () => als.getStore() ?? { client: null, tokenLabel: null };
+export type ClientCtx = { client: string | null; tokenLabel: string | null; transport?: "stdio" | "http" | null };
+const als = new AsyncLocalStorage<ClientCtx>();
+export const withClient = <T>(c: ClientCtx, fn: () => T): T => als.run(c, fn);
+export const currentClient = (): ClientCtx => als.getStore() ?? { client: null, tokenLabel: null, transport: null };
 /** What Jarvis can honestly say about a caller. The name is self-reported, so it is never proof of an account. */
 export function classifyClient(name: string | null): { kind: "claude" | "test" | "unknown"; label: string } {
   if (!name) return { kind: "unknown", label: "unknown client" };

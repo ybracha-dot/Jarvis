@@ -33,7 +33,7 @@ async function handle(req: Request): Promise<Response> {
   let client: string | null = null;
   try { const j: any = await req.clone().json(); if (j?.method === "initialize" && j?.params?.clientInfo?.name) { client = `${String(j.params.clientInfo.name).slice(0, 40)}${j.params.clientInfo.version ? ` ${String(j.params.clientInfo.version).slice(0, 20)}` : ""}`; if (stored) rememberClient(mode, stored.id, client); } } catch { /* not JSON: the transport will answer */ }
   if (!client && stored) client = lastClient(mode, stored.id);
-  const server = buildMcpServer(mode, (name) => { if (["save_to_jarvis", "submit_goal", "revise_goal", "resume_goal", "share_excerpt"].includes(name)) kick(mode); }, scopes);
+  const server = buildMcpServer(mode, (name) => { if (["save_to_jarvis", "submit_goal", "revise_goal", "resume_goal", "share_excerpt"].includes(name)) kick(mode); }, scopes, "http");
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return withClient({ client, tokenLabel: stored?.label ?? null }, () => transport.handleRequest(req));

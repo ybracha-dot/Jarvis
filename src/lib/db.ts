@@ -281,6 +281,12 @@ CREATE TABLE reader_submissions(
   reasons TEXT NOT NULL DEFAULT '[]', result_version INTEGER, client TEXT, created_at TEXT NOT NULL);
 CREATE INDEX reader_submissions_req ON reader_submissions(request_id, revision, status);
 `,
+  /* 10 what the connector actually observed: where a reading came from, and the user's own confirmation, kept apart */ `
+ALTER TABLE reader_submissions ADD COLUMN origin TEXT;
+ALTER TABLE reader_submissions ADD COLUMN transport TEXT;
+ALTER TABLE reader_submissions ADD COLUMN confirmed_at TEXT;
+ALTER TABLE reader_submissions ADD COLUMN confirmed_note TEXT;
+`,
 ];
 
 const cache = new Map<string, DB>();

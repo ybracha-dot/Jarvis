@@ -1,8 +1,34 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Let Claude read the notes, and make completion verifiable** (this round), **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Reader field check: quantities and who submitted** (this round), **Let Claude read the notes, and make completion verifiable**, **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
 
-# Let Claude read the notes, and make completion verifiable (latest)
+# Reader field check: quantities and who submitted (latest)
+
+Baseline `48a54b7` (the commit the field check reproduced on; the tip was unchanged when I started). Paid model calls stayed off (zero model calls). Everything here is synthetic.
+
+## Fix 1. A real quote could accompany an invented number
+- **Before (first output, saved):** two isolated copies of the rooftop project, a REAL local stdio connector process, a second client reopening the result. Input A “Print the programmes” and input B “Print 400 programmes” (same real quote, no count anywhere): **both accepted, both Finished**, and the 400 stayed in the saved row. (`/tmp/claude-0/readerfix/repro-FIRST.json`.)
+- **After:** B is rejected with ““Print 400 programmes” says 400, but none of the passages you cited states 400 programmes for Mateus Oliveira. Remove the number from the action, or cite the passage that states it.” Nothing from it is saved; A is accepted and Finished; a second client reopens the same result with the two rows. In the app, the saved result contains no “400”.
+- **The rule (independent of printing, names and projects):** a number in an action or blocker must be stated by a passage that update cites, for the same unit (“400 programmes”, “12 pallet racks”, “Room 12”), about the same owner (a passage naming someone else does not count), and not replaced by a later passage. A number elsewhere in the project gives no support (the message says so). “400”, “four hundred”, “1,200”, “a dozen”, “twenty-five” are equivalent; dates, times and years are not quantities. Rejected content never reaches a saved row; an earlier accepted version is kept when a later submission fails.
+- **Paired regressions** (`tests/reader-quantity.test.ts`): omitted, supported (five phrasings), invented, a number belonging to a different item or a different person, a later correction replacing an earlier quantity (stale rejected, new accepted), a number in a blocker, and preservation after a failed submission. The real connector run is `tests/reader-connector.test.ts`; a browser journey step checks the rejection and that the result never shows it.
+- **New project, wording and numbers unlike the fixtures** (`tests/reader-fresh.test.ts`), expected results written before the run: 6 of 6 matched on the first valid run (accepted: “forty-eight folding chairs” citing the correction, “Print the menus”, “Rent 2 marquees” for “two marquees”; rejected: the replaced 36, an invented 60 menus, a chair number attributed to the wrong person). My first harness reused one project for all six, so five were masked by duplicate handling and I did not count them; the valid run used a fresh project per reading. These cases are now regressions, not measurements.
+
+## Fix 2. Report what the connector actually observed
+- **Before:** an accepted reading from a local SDK client was reported as “A Claude chat has submitted a reading that Jarvis accepted.”, stored client null; the card repeated it.
+- **After:** three separate observations on the Connections card, and the result page, mode and result metadata use the same words:
+  1. **Tool call**, as Jarvis saw it: “Reading accepted through the local connector.” (stdio) or “…through the HTTP connector.”, plus “The client reports itself as “X” (self-reported)” or “reported no name”, plus “That name looks like a test client” when it does. The app's test endpoint says “a simulation, not the connector”; automated tests say “a simulation”; rows saved before this change say “origin not recorded”.
+  2. **Your confirmation**: empty until you press **I ran this in my own Claude Desktop** (offered only for a connector reading; a simulation or unknown origin cannot be confirmed).
+  3. **Saved reading**: Jarvis's own result of the notes (Finished / partial, per-part detail).
+- Migration 10 adds the origin, transport and confirmation columns; nothing in older rows is rewritten. The connector now carries the transport and the client's initialize name into tool calls, for stdio and HTTP.
+- Verified through the real app: a running server, a REAL stdio connector process (client name “claude-desktop-stand-in”), then the browser on Connections and on the saved result (`/tmp/claude-0/readerfix/app-connector.json`): the rows, “Finished”, the self-reported name, no “Claude account” claim, no 400, the confirm button, and the confirmation appearing separately after the click.
+
+## What ran
+- 340 unit tests (30 files), typecheck, production build, and the full browser suite: 338 checks, 0 problems. Real-process checks: the stdio connector (unit test) and the stdio-plus-browser run above. The HTTP connector route has its own test. Not run: anything in your Claude account.
+
+## Still needs you (live pilot, pending)
+Steps are in the field-check note you pasted (new build, `npm ci && npm run dev` plus `npm run worker`, the `jarvis-reader-demo` entry in Claude Desktop's config, the example workspace). Then: Connections → Let Claude read your notes → Create a shareable test project; send the prompt in an ordinary Claude Desktop chat; open the returned link; in a fresh chat ask `get_result` for the same ID. *A passing pilot:* the card says “Reading accepted through the local connector” with a client name Claude reports, the two correct rows, no programme count, the power-plan blocker cleared, both chats showing the same result. Press **I ran this in my own Claude Desktop** to record your confirmation; until you do, Jarvis will not call it your account. The earlier frozen baseline stays: 3 of 6 usable first attempts on the simulated Claude path.
+
+# Let Claude read the notes, and make completion verifiable (previous)
 
 Baseline `507c465`. Paid model calls stayed off in every run (zero model calls). Everything below is synthetic.
 
