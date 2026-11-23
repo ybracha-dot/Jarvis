@@ -42,7 +42,7 @@ function Overview({ d, moved }: { d: any; moved: any }) {
       </li>)}</ol>
     </section>
     {d.requirements.length > 0 && <section><SectionTitle>Requirements</SectionTitle>
-      <ul className="space-y-2">{d.requirements.map((r: any) => <li key={r.id} className={cx("rounded-lg border p-2.5 text-sm", r.status === "waived" ? "border-line opacity-70" : "border-amber-dim bg-[#1a1508]")}>
+      <ul className="space-y-2">{d.requirements.map((r: any) => <li key={r.id} className={cx("rounded-lg border p-2.5 text-sm", r.status === "waived" ? "border-line opacity-70" : "border-amber-dim bg-amber-soft")}>
         <div className="flex items-center gap-2 flex-wrap">{r.kind === "bring_print" ? <Printer className="size-4 text-amber" aria-hidden /> : <FileText className="size-4 text-muted" aria-hidden />}<span className={cx("font-medium", r.status === "waived" && "line-through")}>{r.text}</span>{r.kind === "bring_print" && <Badge tone={r.mandatory ? "amber" : "neutral"}>{r.mandatory ? "Required" : "Optional"}</Badge>}{r.status === "waived" && <Badge>waived</Badge>}</div>
         <Quote source={r.source_title}>{r.quote}</Quote>
         {r.detail?.bibliography && <p className="text-[13px] text-muted mt-1">Bibliography: {r.detail.bibliography.map((b: any) => b.title).join(", ")}</p>}
@@ -130,7 +130,7 @@ function Brief({ id }: { id: string }) {
     <section><SectionTitle>Correct this brief</SectionTitle>
       <div className="flex gap-2"><input aria-label="Correction" className={inputCls} value={text} onChange={(e) => setText(e.target.value)} placeholder="You missed the printed excerpt last time." /><Button variant="primary" busy={teach.busy} disabled={text.trim().length < 4} onClick={() => teach.run()}>Teach</Button></div>
       {teach.error && <div className="mt-2"><ErrorBox error={teach.error} /></div>}
-      {out && <div className="mt-3 rounded-xl border border-accent-dim bg-[#0b1c29] p-3 text-[14px] space-y-1" data-testid="teach-result"><div className="font-medium text-accent">{out.duplicate ? "Already handled" : `Outcome: ${out.outcome}`}</div>{out.steps.map((s: string, i: number) => <p key={i}>{s}</p>)}</div>}
+      {out && <div className="mt-3 rounded-xl border border-accent-dim bg-accent-soft p-3 text-[14px] space-y-1" data-testid="teach-result"><div className="font-medium text-accent">{out.duplicate ? "Already handled" : `Outcome: ${out.outcome}`}</div>{out.steps.map((s: string, i: number) => <p key={i}>{s}</p>)}</div>}
     </section>
   </>;
 }

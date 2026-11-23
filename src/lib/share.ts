@@ -19,8 +19,14 @@ const sourceOk = (s: any) => !!s && !!s.shareable && !s.local_only && !s.revoked
 export const itemShareable = (ctx: Ctx, itemId: string) => { const r = get(ctx.db, "SELECT s.shareable, s.local_only, s.revoked_at, i.tombstone FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.id=? AND i.owner_id=?", itemId, ctx.owner); return !!r && !r.tombstone && sourceOk(r); };
 
 export function sourcesSharing(ctx: Ctx) {
-  return all(ctx.db, "SELECT s.id, s.kind, s.label, s.mode, s.shareable, s.local_only, s.revoked_at, s.project_id, (SELECT COUNT(*) FROM evidence_items i WHERE i.source_id=s.id AND i.tombstone=0) n FROM evidence_sources s WHERE s.owner_id=? ORDER BY s.created_at", ctx.owner)
-    .map((s) => ({ id: s.id as string, kind: s.kind as string, label: s.label as string, mode: s.mode as string, items: s.n as number, shared: sourceOk(s), localOnly: !!s.local_only, revoked: !!s.revoked_at }));
+  return all(ctx.db, "SELECT s.id, s.kind, s.label, s.mode, s.shareable, s.local_only, s.revoked_at, s.project_id, s.state, s.last_success_at, s.message, (SELECT COUNT(*) FROM evidence_items i WHERE i.source_id=s.id AND i.tombstone=0) n FROM evidence_sources s WHERE s.owner_id=? ORDER BY s.created_at", ctx.owner)
+    .map((s) => ({ id: s.id as string, kind: s.kind as string, label: s.label as string, mode: s.mode as string, items: s.n as number, shared: sourceOk(s), localOnly: !!s.local_only, revoked: !!s.revoked_at, state: s.state as string, lastSuccessAt: (s.last_success_at as string | null) ?? null, message: (s.message as string | null) ?? null }));
+}
+/** What Claude would receive from one source if it were shared: titles, dates and the text of those notes, and nothing else. */
+export function sourcePreview(ctx: Ctx, sourceId: string) {
+  const s = get(ctx.db, "SELECT label,kind FROM evidence_sources WHERE id=? AND owner_id=?", sourceId, ctx.owner); if (!s) throw new HttpError(404, "Source not found");
+  const items = all(ctx.db, "SELECT title, at FROM evidence_items WHERE source_id=? AND tombstone=0 ORDER BY at DESC", sourceId);
+  return { label: s.label as string, count: items.length, titles: items.slice(0, 8).map((i) => ({ title: i.title as string, at: i.at as string })), more: Math.max(0, items.length - 8), receives: "The text of these notes with their titles and dates. Passages are numbered so Claude can quote them.", never: "Your calendar, work blocks, course records, promises, other sources, and anything you keep local-only." };
 }
 /** The explicit choice. Sharing a source makes its notes readable by Claude; unsharing returns it to local-only at once. */
 export function setSourceSharing(ctx: Ctx, sourceId: string, share: boolean) {

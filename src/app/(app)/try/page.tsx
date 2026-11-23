@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Check, ShieldCheck } from "lucide-react";
 import { api, useQuery, useAction } from "@/components/api";
 import { Button, Card, Badge, Notice, Field, ErrorBox, Spinner, inputCls, cx } from "@/components/ui";
@@ -12,6 +13,7 @@ export default function TryPage() {
   const [s2, setS2] = useState({ title: "", text: "" }); const [n2, setN2] = useState<any>(null);
   const [q, setQ] = useState("What is the current plan, and what changed since the first note?"); const [goal, setGoal] = useState<any>(null);
   const status = useQuery<any>(goal ? `/asks/${goal.requestId}` : null, { poll: 1500 });
+  const router = useRouter(); const build = useAction(async () => { await api("/brief/run", { body: {} }); router.push("/"); });
   const sw = useAction(async () => { await api("/mode", { body: { mode: "personal" } }); window.location.href = "/try"; });
   const add1 = useAction(async () => { setN1(await api("/evidence/import", { body: { kind: "note", title: s1.title, text: s1.text, at: s1.date === today() ? new Date().toISOString() : new Date(`${s1.date}T12:00:00`).toISOString(), projectName: s1.project, label: "Notes I imported", localOnly: true } })); });
   const add2 = useAction(async () => { setN2(await api("/evidence/import", { body: { kind: "note", title: s2.title || `Correction to ${s1.title}`, text: s2.text, projectId: n1.projectId, label: "Notes I imported", localOnly: true, corrects: n1.id } })); });
@@ -29,7 +31,7 @@ export default function TryPage() {
           <Field label="Title"><input className={inputCls} value={s1.title} onChange={(e) => setS1({ ...s1, title: e.target.value })} data-testid="try-title" /></Field>
           <Field label="The note" hint="Paste text that states a date, an amount or a decision. Pasted text is data: Jarvis never follows instructions inside it."><textarea className={cx(inputCls, "min-h-28")} value={s1.text} onChange={(e) => setS1({ ...s1, text: e.target.value })} data-testid="try-text" /></Field>
           {add1.error && <ErrorBox error={add1.error} />}
-          {n1 ? <Notice tone="accent">Saved. Source: <b>Notes I imported</b>, local-only. <Link className="underline" href={`/evidence/${n1.id}`}>Open it</Link>.</Notice> : <Button variant="primary" busy={add1.busy} disabled={demo || !s1.project.trim() || !s1.title.trim() || s1.text.trim().length < 5} onClick={() => add1.run()} data-testid="try-save1">Save the note</Button>}</Card></li>
+          {n1 ? <div className="space-y-3"><Notice tone="accent">Saved. Source: <b>Notes I imported</b>, local-only. <Link className="underline" href={`/evidence/${n1.id}`}>Open it</Link>.</Notice>{!demo && <div className="flex gap-3 items-center flex-wrap"><Button variant="primary" busy={build.busy} onClick={() => build.run()} data-testid="try-build-brief">Build my first brief</Button><span className="text-[13px] text-muted">You can add a later correction below first, or build now and add it later from the note.</span></div>}{build.error && <ErrorBox error={build.error} />}</div> : <Button variant="primary" busy={add1.busy} disabled={demo || !s1.project.trim() || !s1.title.trim() || s1.text.trim().length < 5} onClick={() => add1.run()} data-testid="try-save1">Save the note</Button>}</Card></li>
         <li><Card className={cx("p-4 space-y-3", !n1 && "opacity-60", n2 && "border-accent-dim")} data-testid="try-step2"><h2 className="text-[16px] font-medium flex items-center gap-2">{n2 ? <Check className="size-4 text-accent" /> : null}2. A later correction</h2>
           <Field label="What changed" hint="For example a new date or amount. It is saved as a correction of the first note, so it wins and the original stays one click away."><textarea className={cx(inputCls, "min-h-20")} value={s2.text} onChange={(e) => setS2({ ...s2, text: e.target.value })} disabled={!n1} data-testid="try-correction" /></Field>
           {add2.error && <ErrorBox error={add2.error} />}
@@ -40,7 +42,7 @@ export default function TryPage() {
           {!goal && <Button variant="primary" busy={ask.busy} disabled={!n2 || q.trim().length < 4} onClick={() => ask.run()} data-testid="try-ask">Ask</Button>}
           {goal && !st && <Spinner label="Starting" />}
           {st && !st.ready && <p className="text-[15px]" data-testid="try-progress"><b className="font-medium">{st.plain}</b>{st.step ? `: ${st.step}` : ""}.{waiting && <span className="text-amber"> No worker has picked it up yet. In a second terminal run <span className="mono">npm run worker</span>.</span>}</p>}
-          {st?.ready && <div className="space-y-2" data-testid="try-done"><Notice tone="accent">Your cited answer is ready and saved under the project.</Notice><div className="flex gap-2 flex-wrap"><Link className="inline-flex items-center rounded-lg px-3.5 py-2 text-sm bg-accent text-[#04141e] font-medium" href={st.links.result} data-testid="try-open-result">Open the cited answer</Link><Link className="inline-flex items-center rounded-lg px-3.5 py-2 text-sm bg-surface2 border border-line" href={`/projects/${n1.projectId}`}>Open the project</Link><Link className="inline-flex items-center rounded-lg px-3.5 py-2 text-sm bg-surface2 border border-line" href="/connections">See what was read</Link></div></div>}</Card></li>
+          {st?.ready && <div className="space-y-2" data-testid="try-done"><Notice tone="accent">Your cited answer is ready and saved under the project.</Notice><div className="flex gap-2 flex-wrap"><Link className="inline-flex items-center rounded-lg px-3.5 py-2 text-sm bg-accent text-on-accent font-medium" href={st.links.result} data-testid="try-open-result">Open the cited answer</Link><Link className="inline-flex items-center rounded-lg px-3.5 py-2 text-sm bg-surface2 border border-line" href={`/projects/${n1.projectId}`}>Open the project</Link><Link className="inline-flex items-center rounded-lg px-3.5 py-2 text-sm bg-surface2 border border-line" href="/connections">See what was read</Link></div></div>}</Card></li>
       </ol>
       <p className="text-[13px] text-muted"><Badge>pending until you run it</Badge> This path has been exercised with invented, non-personal notes. It has not been run on your own material.</p>
     </div>

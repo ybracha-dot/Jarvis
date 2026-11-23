@@ -11,10 +11,10 @@ export default function ActivityPage() {
   const weekly = useQuery<any>("/review/weekly");
   const out = useQuery<any>("/outcomes?limit=30", { poll: 5000 });
   if (inbox.loading && !inbox.data) return <Spinner />;
-  return <div className="space-y-6"><h1 className="text-2xl font-semibold tracking-tight">Activity and outcomes</h1>
+  return <div className="space-y-6"><h1 className="t-title">Activity and outcomes</h1>
     <section aria-label="Outcomes"><SectionTitle right={<Link href="/completed" className="text-[14px] text-accent">Completed work</Link>}>Outcomes: goal, result, receipt</SectionTitle>
       {out.error && !out.data && <ErrorBox error={out.error} onRetry={out.reload} />}
-      <ul className="space-y-2" data-testid="outcomes">{out.data?.outcomes.map((x: any) => <li key={x.id}><Link href={x.href} className="block rounded-xl border border-line bg-surface hover:border-[#3b434e] p-4" data-testid="outcome-row">
+      <ul className="space-y-2" data-testid="outcomes">{out.data?.outcomes.map((x: any) => <li key={x.id}><Link href={x.href} className="block rounded-xl border border-line bg-surface hover:border-line-strong p-4" data-testid="outcome-row">
         <div className="flex items-center gap-2 flex-wrap"><Badge tone={x.status === "verified" ? "accent" : x.status === "waiting" ? "amber" : x.status === "failed" ? "danger" : "neutral"}>{x.status}</Badge><b className="text-[16px] font-medium break-words min-w-0">{x.goal}</b><Mono className="text-[13px] text-muted ml-auto">{fmtDateTime(x.at)}</Mono></div>
         <p className="text-[15px] mt-1.5 break-words">{x.result}</p>{x.receipt && <p className="text-[14px] text-muted mt-0.5">Receipt: {x.receipt}</p>}</Link></li>)}
         {out.data?.outcomes.length === 0 && <li className="text-[15px] text-muted">Nothing has finished yet.</li>}</ul></section>

@@ -31,7 +31,7 @@ export default function CouncilPage() {
 
     <section><SectionTitle>1. Ideas{essay ? `: ${essay.title}` : ""}</SectionTitle>
       <Card className="p-4 space-y-3"><p className="text-[13px] text-muted flex items-center gap-1.5"><Lightbulb className="size-3.5" aria-hidden />Template directions built from your task requirements. A Claude provider would write these for you.</p>
-        <div className="grid sm:grid-cols-2 gap-3">{directions.map((d, i) => <button key={i} onClick={() => { setDir(i); setQuestion(`Review my draft for this thesis direction: "${d.t}" What is the one fix that matters most?`); }} aria-pressed={dir === i} className={cx("text-left rounded-xl border p-3", dir === i ? "border-accent bg-[#0b1c29]" : "border-line bg-bg hover:border-[#37404a]")}><div className="text-sm font-medium break-words">{d.t}</div><div className="text-[13px] text-muted mt-1">Evidence needed: {d.need}</div></button>)}</div>
+        <div className="grid sm:grid-cols-2 gap-3">{directions.map((d, i) => <button key={i} onClick={() => { setDir(i); setQuestion(`Review my draft for this thesis direction: "${d.t}" What is the one fix that matters most?`); }} aria-pressed={dir === i} className={cx("text-left rounded-xl border p-3", dir === i ? "border-accent bg-accent-soft" : "border-line bg-bg hover:border-line-strong")}><div className="text-sm font-medium break-words">{d.t}</div><div className="text-[13px] text-muted mt-1">Evidence needed: {d.need}</div></button>)}</div>
         {dir != null && <Notice tone="accent">Direction {dir + 1} chosen. The question below now mentions it.</Notice>}</Card></section>
 
     <section><SectionTitle>2. Bring in the council</SectionTitle>
@@ -51,7 +51,7 @@ export default function CouncilPage() {
     {sid && <Session id={sid} onRerun={() => start.run(true)} />}
 
     <section><SectionTitle>Earlier sessions</SectionTitle>
-      {info.data.sessions.length === 0 ? <p className="text-[14px] text-muted">None yet.</p> : <ul className="space-y-1.5">{info.data.sessions.map((s: any) => <li key={s.id}><button onClick={() => setSid(s.id)} className="w-full text-left rounded-lg border border-line bg-surface hover:border-[#37404a] px-3 py-2 text-[14px] flex items-center gap-2"><span className="break-words min-w-0 flex-1">{s.question}</span><Badge>{s.mode}</Badge><Badge tone={s.status === "done" ? "accent" : "amber"}>{s.status}</Badge></button></li>)}</ul>}</section>
+      {info.data.sessions.length === 0 ? <p className="text-[14px] text-muted">None yet.</p> : <ul className="space-y-1.5">{info.data.sessions.map((s: any) => <li key={s.id}><button onClick={() => setSid(s.id)} className="w-full text-left rounded-lg border border-line bg-surface hover:border-line-strong px-3 py-2 text-[14px] flex items-center gap-2"><span className="break-words min-w-0 flex-1">{s.question}</span><Badge>{s.mode}</Badge><Badge tone={s.status === "done" ? "accent" : "amber"}>{s.status}</Badge></button></li>)}</ul>}</section>
 
     <Correction />
   </div>;
@@ -64,7 +64,7 @@ function Correction() {
   return <section><SectionTitle>3. Correct Jarvis</SectionTitle><Card className="p-4 space-y-3">
     <Field label="You say" hint="This runs the learning workflow on the open assignment, then you can see the skill history."><input className={inputCls} value={t} onChange={(e) => setT(e.target.value)} /></Field>
     <Button busy={go.busy} disabled={t.trim().length < 4} onClick={() => go.run()}>Teach Jarvis</Button>{go.error && <ErrorBox error={go.error} />}
-    {out && <div className="rounded-xl border border-accent-dim bg-[#0b1c29] p-3 text-[14px] space-y-1" data-testid="council-teach-result"><div className="font-medium text-accent">{out.duplicate ? "Already handled" : `Outcome: ${out.outcome}`}</div>{out.steps.map((s: string, i: number) => <p key={i}>{s}</p>)}<a href="/skills" className="text-accent underline">See skill history</a></div>}</Card></section>;
+    {out && <div className="rounded-xl border border-accent-dim bg-accent-soft p-3 text-[14px] space-y-1" data-testid="council-teach-result"><div className="font-medium text-accent">{out.duplicate ? "Already handled" : `Outcome: ${out.outcome}`}</div>{out.steps.map((s: string, i: number) => <p key={i}>{s}</p>)}<a href="/skills" className="text-accent underline">See skill history</a></div>}</Card></section>;
 }
 
 function Session({ id, onRerun }: { id: string; onRerun: () => void }) {

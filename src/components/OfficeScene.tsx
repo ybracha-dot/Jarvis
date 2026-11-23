@@ -199,7 +199,7 @@ export function OfficeScene({ jobs, pendingDecisions, selected, onSelect, onOpen
   const pathD = (pts: Pt[]) => pts.map((q, i) => `${i ? "L" : "M"}${q.x} ${q.y}`).join(" ");
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[calc(100dvh-210px)] min-h-[420px] rounded-xl border border-[#0a1228]" role="group" aria-label="The Jarvis office. Cyan lines show who assigned work, nameplates say who is working, and amber question bubbles show who needs you. The same workers are listed below." data-testid="office-scene">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[calc(100dvh-210px)] min-h-[420px] rounded-xl border border-line" role="group" aria-label="The Jarvis office. Cyan lines show who assigned work, nameplates say who is working, and amber question bubbles show who needs you. The same workers are listed below." data-testid="office-scene">
       <defs>
         <pattern id="planks" width="64" height="24" patternUnits="userSpaceOnUse"><rect width="64" height="24" fill="#d08a4c" /><rect width="64" height="2" fill="#a86333" /><rect x="0" y="12" width="64" height="12" fill="#d99556" /><rect x="31" y="12" width="2" height="12" fill="#a86333" /><rect x="15" y="0" width="2" height="12" fill="#a86333" /><rect y="12" width="64" height="2" fill="#a86333" /></pattern>
       </defs>

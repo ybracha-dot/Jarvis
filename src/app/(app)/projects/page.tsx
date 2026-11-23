@@ -17,7 +17,7 @@ export default function ProjectsPage() {
   const list: any[] = q.data.projects;
   return (
     <div className="space-y-6">
-      <header><h1 className="text-2xl font-semibold tracking-tight">Projects</h1><p className="text-[15px] text-muted mt-1 max-w-2xl">A project is where Claude and Jarvis keep the same decisions. Plan something in Claude, and what you settled shows up here with where it came from.</p></header>
+      <header><h1 className="t-title">Projects</h1><p className="text-[15px] text-muted mt-1 max-w-2xl">A project is where Claude and Jarvis keep the same decisions. Plan something in Claude, and what you settled shows up here with where it came from.</p></header>
       {list.length === 0 ? (
         <Card className="p-6 metal space-y-3" data-testid="projects-empty">
           <h2 className="text-lg font-medium">No projects yet</h2>
@@ -27,7 +27,7 @@ export default function ProjectsPage() {
       ) : (
         <ul className="grid md:grid-cols-2 gap-4" data-testid="project-list">
           {list.map((p) => (
-            <li key={p.id}><Link href={`/projects/${p.id}`} className="block rounded-xl border border-line bg-surface metal p-5 hover:border-[#3b434e] transition-colors h-full" data-testid="project-card">
+            <li key={p.id}><Link href={`/projects/${p.id}`} className="block rounded-xl border border-line bg-surface metal p-5 hover:border-line-strong transition-colors h-full" data-testid="project-card">
               <div className="flex items-center gap-2 flex-wrap"><h2 className="text-lg font-medium">{p.name}</h2><Badge>{p.kind}</Badge>{p.counts.suggestions > 0 && <Badge tone="amber">{p.counts.suggestions} to confirm</Badge>}</div>
               <p className="text-[14px] text-muted mt-2">{p.counts.current} current decision{p.counts.current === 1 ? "" : "s"} · <Mono className="text-[13px]">revision {p.revision}</Mono></p>
               <p className="text-[14px] text-muted mt-1">{p.last_origin ? `Last update: ${ORIGIN[p.last_origin] ?? p.last_origin}, ${fmtDateTime(p.updated_at)}` : "No updates yet."}</p>

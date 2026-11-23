@@ -12,7 +12,7 @@ export default function MemoryPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>("Memory");
   const [sel, setSel] = useState<string | null>(null);
   return <div className="space-y-5">
-    <header><h1 className="text-2xl font-semibold tracking-tight">Memory</h1><p className="text-[15px] text-muted mt-1">What Jarvis believes right now, and why. Everything here can be changed or forgotten.</p></header>
+    <header><h1 className="t-title">Memory</h1><p className="text-[15px] text-muted mt-1">What Jarvis believes right now, and why. Everything here can be changed or forgotten.</p></header>
     <div role="tablist" className="flex gap-1 p-1 rounded-lg bg-surface border border-line w-fit max-w-full overflow-x-auto">{TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cx("px-3 py-1.5 rounded-md text-sm whitespace-nowrap", tab === t ? "bg-surface2 text-fg" : "text-muted")}>{t}</button>)}</div>
     {tab === "Memory" && <Overview sel={sel} setSel={setSel} />}
     {tab === "Map" && <MapView sel={sel} setSel={setSel} />}
@@ -34,7 +34,7 @@ function Notes({ sel, setSel }: { sel: string | null; setSel: (s: string | null)
       {list.loading && !list.data && <Spinner />}{list.error && !list.data && <ErrorBox error={list.error} onRetry={list.reload} />}
       {items.length === 0 && !list.loading && <Card><Empty title={q ? "No matches" : "No notes yet"} /></Card>}
       {folders.map((f) => <div key={f}><div className="text-[12px] uppercase tracking-wider text-muted mb-1">{f}</div><ul className="space-y-1">{items.filter((n) => n.folder === f).map((n) => (
-        <li key={n.id}><button onClick={() => setSel(n.id)} className={cx("w-full text-left rounded-lg px-3 py-2 text-sm border", sel === n.id ? "border-accent-dim bg-[#0b1c29]" : "border-line bg-surface hover:border-[#37404a]")}>
+        <li key={n.id}><button onClick={() => setSel(n.id)} className={cx("w-full text-left rounded-lg px-3 py-2 text-sm border", sel === n.id ? "border-accent-dim bg-accent-soft" : "border-line bg-surface hover:border-line-strong")}>
           <div className="flex items-center gap-2"><span className="font-medium break-words min-w-0">{n.title}</span>{n.provisional ? <Badge tone="amber">provisional</Badge> : null}</div><div className="text-[13px] text-muted">{KIND_LABEL[n.kind] ?? n.kind} · {n.scope}</div></button></li>))}</ul></div>)}
     </div>
     <div className="md:col-span-3">{sel ? <Editor id={sel} onGone={() => setSel(null)} onPick={setSel} /> : <Card><Empty title="Pick a note" hint="Notes are Markdown with frontmatter and [[wikilinks]]. They export to an Obsidian vault." /></Card>}</div>
@@ -42,7 +42,7 @@ function Notes({ sel, setSel }: { sel: string | null; setSel: (s: string | null)
 }
 
 function NoteRow({ n, sel, setSel }: { n: any; sel: string | null; setSel: (s: string | null) => void }) {
-  return <li><button onClick={() => setSel(sel === n.id ? null : n.id)} aria-pressed={sel === n.id} data-testid="memory-row" className={cx("w-full text-left rounded-xl border p-4 transition-colors", sel === n.id ? "border-accent bg-[#0b1c29]" : "border-line bg-surface hover:border-[#3b434e]")}>
+  return <li><button onClick={() => setSel(sel === n.id ? null : n.id)} aria-pressed={sel === n.id} data-testid="memory-row" className={cx("w-full text-left rounded-xl border p-4 transition-colors", sel === n.id ? "border-accent bg-accent-soft" : "border-line bg-surface hover:border-line-strong")}>
     <div className="flex items-center gap-2 flex-wrap"><b className="text-[16px] font-medium break-words min-w-0">{n.title}</b>{n.pinned && <Badge tone="amber">pinned</Badge>}{n.provisional ? <Badge tone="amber">to confirm</Badge> : null}{n.project_name && <Badge tone="accent">{n.project_name}</Badge>}</div>
     {n.body && <p className="text-[15px] text-muted mt-1 line-clamp-2 break-words">{String(n.body).replace(/\s+/g, " ").slice(0, 200)}</p>}
     <p className="text-[13px] text-muted mt-1.5">{KIND_LABEL[n.kind] ?? n.kind} · from {n.source} · {fmtDateTime(n.updated_at)}</p></button></li>;
@@ -62,7 +62,7 @@ function Overview({ sel, setSel }: { sel: string | null; setSel: (s: string | nu
           {ans.data.answer ? <><h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium mb-1">Current answer</h2><p className="text-[17px] font-medium break-words">{ans.data.answer.title}</p><p className="text-[16px] mt-1 break-words">{ans.data.answer.text}</p><p className="text-[14px] text-muted mt-2"><b className="text-fg font-medium">Why:</b> {ans.data.answer.why} <a className="text-accent" href={ans.data.answer.href}>Open</a></p>
             {ans.data.alternatives.length > 0 && <details className="mt-2 text-[14px]"><summary className="cursor-pointer text-muted">Also related ({ans.data.alternatives.length})</summary><ul className="mt-1 space-y-1">{ans.data.alternatives.map((a: any, i: number) => <li key={i}><b className="font-medium">{a.title}</b> <span className="text-muted">{a.text}</span></li>)}</ul></details>}</> : <p className="text-[15px] text-muted">{ans.data.none} Jarvis only knows what was saved, imported or decided in a project.</p>}</section>}
         {creating && <NewNote onDone={(id) => { setCreating(false); if (id) setSel(id); }} />}</div>
-      {o.projects.length > 0 && <section aria-label="Project memory"><SectionTitle>Project decisions</SectionTitle><ul className="grid sm:grid-cols-2 gap-2.5">{o.projects.map((p: any) => <li key={p.id}><a href={`/projects/${p.id}`} className="block rounded-xl border border-line bg-surface hover:border-[#3b434e] p-4"><b className="text-[16px] font-medium">{p.name}</b><p className="text-[14px] text-muted">{p.n} current decision{p.n === 1 ? "" : "s"}</p></a></li>)}</ul></section>}
+      {o.projects.length > 0 && <section aria-label="Project memory"><SectionTitle>Project decisions</SectionTitle><ul className="grid sm:grid-cols-2 gap-2.5">{o.projects.map((p: any) => <li key={p.id}><a href={`/projects/${p.id}`} className="block rounded-xl border border-line bg-surface hover:border-line-strong p-4"><b className="text-[16px] font-medium">{p.name}</b><p className="text-[14px] text-muted">{p.n} current decision{p.n === 1 ? "" : "s"}</p></a></li>)}</ul></section>}
       {total === 0 && <Card className="p-6"><Empty title="Nothing remembered yet" hint="Say “Remember for Jarvis: …” in ordinary Claude, save a note here, or let a project collect your decisions." /></Card>}
       <Group title="Pinned" items={o.pinned} /><Group title="To confirm" items={o.review} /><Group title="What Jarvis knows" items={o.known} /><Group title="Saved from Claude and imports, not sorted yet" items={o.inbox} />
     </div>
@@ -113,7 +113,7 @@ function Editor({ id, onGone, onPick }: { id: string; onGone: () => void; onPick
       {moveTo && <Button size="sm" busy={move.busy} onClick={() => move.run()}>Move</Button>}
       <select aria-label="Merge into" className={cx(inputCls, "w-auto max-w-48")} value={mergeInto} onChange={(e) => setMergeInto(e.target.value)}><option value="">Merge into…</option>{allNotes.data?.notes.filter((x: any) => x.id !== id).map((x: any) => <option key={x.id} value={x.id}>{x.title}</option>)}</select>
       {mergeInto && <Button size="sm" busy={merge.busy} onClick={() => merge.run()}>Merge</Button>}</div>
-    <label className="flex items-center gap-2 text-[14px]"><input type="checkbox" className="accent-[#67d4ff]" checked={!!n.auto_learn} onChange={(e) => autolearn.run(e.target.checked)} />Let Jarvis learn automatically on this topic</label>
+    <label className="flex items-center gap-2 text-[14px]"><input type="checkbox" className="accent-[var(--color-accent)]" checked={!!n.auto_learn} onChange={(e) => autolearn.run(e.target.checked)} />Let Jarvis learn automatically on this topic</label>
     {err && <ErrorBox error={err} />}{msg && <Notice tone="accent">{msg}</Notice>}
     <div className="flex flex-wrap gap-2"><Button variant="primary" busy={save.busy} onClick={() => save.run()}>Save</Button><Button busy={supersede.busy} onClick={() => supersede.run()}><GitBranchPlus className="size-4" />Save as new version</Button>
       {!confirm ? <Button variant="danger" onClick={() => setConfirm(true)}><Trash2 className="size-4" />Forget</Button> : <Button variant="danger" busy={del.busy} onClick={() => del.run()}>Confirm: remove from search, vault and exports</Button>}</div>
@@ -185,7 +185,7 @@ function Private() {
   const keep = useAction(async () => { await api("/reflect/save", { body: { takeaway: save } }); setSaved(true); });
   return <div className="space-y-4 max-w-2xl">
     <Notice>Two AI perspectives to help you think and prepare questions for a licensed professional. They are not a therapist, do not diagnose, and do not give medication advice.</Notice>
-    <label className="flex items-center gap-3 text-sm"><input type="checkbox" className="accent-[#67d4ff] size-4" checked={on} onChange={(e) => { setOn(e.target.checked); if (!e.target.checked) { setLog([]); setSave(null); } }} /><Lock className="size-4 text-muted" aria-hidden />Start a private session. Text only. Nothing is saved, logged or searchable.</label>
+    <label className="flex items-center gap-3 text-sm"><input type="checkbox" className="accent-[var(--color-accent)] size-4" checked={on} onChange={(e) => { setOn(e.target.checked); if (!e.target.checked) { setLog([]); setSave(null); } }} /><Lock className="size-4 text-muted" aria-hidden />Start a private session. Text only. Nothing is saved, logged or searchable.</label>
     {on && <>
       <ul className="space-y-2" data-testid="reflection-log">{log.map((l, i) => <li key={i} className={cx("rounded-lg px-3 py-2 text-sm border", l.who === "You" ? "border-line bg-surface2" : "border-line bg-surface")}><span className="text-[12px] uppercase text-muted mr-2">{l.who === "You" ? "You" : `Perspective ${l.who}`}</span>{l.text}{l.who !== "You" && <button className="block text-[13px] text-accent mt-1" onClick={() => { setSave(l.text); setSaved(false); }}>Select this to save</button>}</li>)}</ul>
       <div className="flex gap-2"><textarea aria-label="Message" className={cx(inputCls, "min-h-16")} value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="What is on your mind?" /><Button variant="primary" busy={send.busy} disabled={!msg.trim()} onClick={() => send.run()}>Send</Button></div>

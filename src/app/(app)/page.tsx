@@ -6,7 +6,6 @@ import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Empty, Noti
 import { useDrawerParams } from "@/components/Shell";
 import { fmtDateTime, localHM } from "@/lib/time";
 import Link from "next/link";
-import { VoiceDock } from "@/components/VoiceDock";
 import { DecisionList } from "@/components/DecisionDrawer";
 import { displayName } from "@/components/OfficeScene";
 import { BriefCard } from "@/components/BriefCard";
@@ -37,6 +36,8 @@ export default function TodayPage() {
   if (q.loading && !t) return <Spinner label="Loading Today" />;
   if (q.error && !t) return <ErrorBox error={q.error} onRetry={q.reload} offline={q.error.status === 0} />;
   if (!t) return null;
+  // The private workspace opens on the morning brief and nothing competes with it. Decisions that need you sit underneath.
+  if (!demo) return <div className="space-y-10"><BriefCard />{(t.decisionsPending ?? 0) > 0 && <section aria-label="Decisions waiting" className="max-w-[44rem]"><DecisionList /></section>}<RecentOutput /></div>;
   const p = t.primary;
   const primaryClick = () => {
     if (p.kind === "review_decision") open("decision", p.decisionId);
@@ -50,15 +51,13 @@ export default function TodayPage() {
     <div className="space-y-6 min-w-0">
       {q.stale && <ErrorBox error="Could not refresh. Showing what was last loaded." onRetry={q.reload} />}
 
-      {!demo && <BriefCard />}
-
-      <VoiceDock />
+      <header className="flex items-baseline gap-3 flex-wrap"><h1 className="t-title">Today</h1><p className="t-meta" data-testid="today-date">{new Intl.DateTimeFormat("en-US", { timeZone: t.tz, weekday: "long", month: "long", day: "numeric" }).format(new Date(t.now))}</p></header>
 
       <section aria-labelledby="next-block">
         <Card className="p-5 md:p-6 relative overflow-hidden">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
-              <h1 id="next-block" className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium mb-2">Next useful block</h1>
+              <h2 id="next-block" className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium mb-2">Next useful block</h2>
               {t.nextBlock ? <div className="flex items-baseline gap-3 flex-wrap"><Mono className="text-3xl md:text-4xl font-semibold tracking-tight" data-testid="next-block-time">{localHM(t.nextBlock.start)}</Mono><span className="text-muted text-sm">{t.minutesAvailable} min free, until {localHM(t.nextBlock.end)}{t.reserved ? ` · ${t.reserved.task_title} reserved ${localHM(t.reserved.start_at)}` : ""}</span></div>
                 : <p className="text-lg">No free block in the next 48 hours.</p>}
               {t.suggestedTask && <p className="mt-2 text-sm text-muted">Suggested: <button className="text-fg underline underline-offset-2 decoration-line hover:decoration-accent" onClick={() => open("task", t.suggestedTask.id)}>{t.suggestedTask.title}</button> · {t.suggestedTask.remaining} min left · due <Mono>{fmtDateTime(t.suggestedTask.due)}</Mono>{t.suggestedTask.shortfall > 0 ? <Badge tone="amber" className="ml-2">short {t.suggestedTask.shortfall} min</Badge> : t.suggestedTask.latestSafeStart ? <span> · start by <Mono>{fmtDateTime(t.suggestedTask.latestSafeStart)}</Mono></span> : null}</p>}
@@ -72,7 +71,7 @@ export default function TodayPage() {
             <Button size="sm" onClick={() => open("quick", "minutes")}><Clock3 className="size-3.5" />I have 20 minutes</Button>
             <Button size="sm" onClick={() => open("quick", "resume")}><RotateCcw className="size-3.5" />Resume</Button>
             <Button size="sm" onClick={() => document.getElementById("changes")?.scrollIntoView({ behavior: "smooth" })}><History className="size-3.5" />What changed?</Button>
-            <Link href="/council" className="inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[14px] bg-surface2 border border-line hover:bg-[#222831]"><Users className="size-3.5" />Bring in the council</Link>
+            <Link href="/council" className="inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[14px] bg-surface2 border border-line hover:bg-surface3"><Users className="size-3.5" />Bring in the council</Link>
             <Button size="sm" onClick={() => open("capture")}><HandCoins className="size-3.5" />Capture a promise</Button>
           </div>
         </Card>
@@ -81,7 +80,7 @@ export default function TodayPage() {
       <TryCard />
       <AgentsAndOutput />
 
-      {empty && <Card className="p-5"><Empty title="This private workspace is empty" hint="Nothing is connected yet. Import a syllabus or follow the connection checklist." ><div className="flex gap-2 justify-center"><Link href="/sources" className="inline-flex rounded-lg px-3.5 py-2 text-sm bg-accent text-[#04141e] font-medium">Import a syllabus</Link><Button onClick={() => open("connections")}>Open checklist</Button></div></Empty></Card>}
+      {empty && <Card className="p-5"><Empty title="This private workspace is empty" hint="Nothing is connected yet. Import a syllabus or follow the connection checklist." ><div className="flex gap-2 justify-center"><Link href="/sources" className="inline-flex rounded-lg px-3.5 py-2 text-sm bg-accent text-on-accent font-medium">Import a syllabus</Link><Button onClick={() => open("connections")}>Open checklist</Button></div></Empty></Card>}
 
       <div className="grid lg:grid-cols-5 gap-6">
         <section className="lg:col-span-3" aria-labelledby="tl">
@@ -89,7 +88,7 @@ export default function TodayPage() {
           {t.timeline.length === 0 ? <Card className="p-4 text-sm text-muted">Nothing scheduled today.</Card> :
             <ol className="relative border-l border-line ml-2 space-y-3" data-testid="timeline">{t.timeline.map((b: any) => (
               <li key={b.id} className="pl-4 relative">
-                <span className={cx("absolute -left-[5px] top-2 size-2.5 rounded-full border-2 border-bg", b.kind === "calendar" ? "bg-[#5d6772]" : b.kind === "protected" ? "bg-[#3a4049]" : "bg-accent")} aria-hidden />
+                <span className={cx("absolute -left-[5px] top-2 size-2.5 rounded-full border-2 border-bg", b.kind === "calendar" ? "bg-muted" : b.kind === "protected" ? "bg-line-strong" : "bg-accent")} aria-hidden />
                 <div className="rounded-lg border border-line bg-surface px-3 py-2 flex items-center gap-3 flex-wrap">
                   <Mono className="text-[14px] text-muted w-28 shrink-0">{localHM(b.start_at)} to {localHM(b.end_at)}</Mono><span className="text-sm min-w-0 break-words flex-1">{b.title}</span>
                   <Badge tone={b.kind === "booked" || b.kind === "proposed" ? "accent" : "neutral"}>{KIND_LABEL[b.kind] ?? b.kind}{b.kind === "proposed" || b.kind === "booked" ? " · local" : ""}</Badge>
@@ -101,7 +100,7 @@ export default function TodayPage() {
           <SectionTitle><span id="ch">Changes this week</span></SectionTitle>
           {t.changes.length === 0 ? <Card className="p-4 text-sm text-muted">No changes. All on track.</Card> :
             <ul className="space-y-2" data-testid="changes">{groupChanges(t.changes).map((g) => (
-              <li key={g.taskId}><button onClick={() => open("task", g.taskId)} className="w-full text-left rounded-lg border border-line bg-surface hover:border-[#37404a] px-3 py-2">
+              <li key={g.taskId}><button onClick={() => open("task", g.taskId)} className="w-full text-left rounded-lg border border-line bg-surface hover:border-line-strong px-3 py-2">
                 <div className="flex items-center gap-2"><span className="text-sm font-medium break-words">{g.title}</span><Mono className="text-[12px] text-muted ml-auto shrink-0">{fmtDateTime(g.at)}</Mono></div>
                 <ul className="mt-1 space-y-0.5">{g.items.map((c: any) => <li key={c.id} className="text-[14px] flex gap-2 items-start"><Badge tone={c.kind === "due_moved" || c.kind === "conflict" ? "amber" : "neutral"} className="shrink-0">{CHANGE_LABEL[c.kind] ?? c.kind.replace(/_/g, " ")}</Badge><span className="break-words text-muted">{c.summary}</span></li>)}</ul></button></li>))}</ul>}
         </section>
@@ -130,8 +129,8 @@ export default function TodayPage() {
 
       {(t.goals.length > 0 || t.commitmentsOpen > 0) && <section>
         <div className="grid sm:grid-cols-2 gap-3">
-          {t.goals.slice(0, 1).map((g: any) => <Link key={g.id} href="/goals" className="rounded-xl border border-line bg-surface p-3 hover:border-[#37404a]"><div className="text-[12px] uppercase tracking-wider text-muted mb-1">Goal pace</div><div className="text-sm font-medium">{g.name}</div><Mono className="text-[14px] text-muted">{g.line}</Mono></Link>)}
-          {t.commitmentsOpen > 0 && <Link href="/tasks?tab=followups" className="rounded-xl border border-line bg-surface p-3 hover:border-[#37404a]"><div className="text-[12px] uppercase tracking-wider text-muted mb-1">Who owes you</div><div className="text-sm font-medium">{t.commitmentsOpen} open follow-up{t.commitmentsOpen > 1 ? "s" : ""}</div><span className="text-[14px] text-accent inline-flex items-center gap-1">Review <ArrowRight className="size-3" /></span></Link>}
+          {t.goals.slice(0, 1).map((g: any) => <Link key={g.id} href="/goals" className="rounded-xl border border-line bg-surface p-3 hover:border-line-strong"><div className="text-[12px] uppercase tracking-wider text-muted mb-1">Goal pace</div><div className="text-sm font-medium">{g.name}</div><Mono className="text-[14px] text-muted">{g.line}</Mono></Link>)}
+          {t.commitmentsOpen > 0 && <Link href="/tasks?tab=followups" className="rounded-xl border border-line bg-surface p-3 hover:border-line-strong"><div className="text-[12px] uppercase tracking-wider text-muted mb-1">Who owes you</div><div className="text-sm font-medium">{t.commitmentsOpen} open follow-up{t.commitmentsOpen > 1 ? "s" : ""}</div><span className="text-[14px] text-accent inline-flex items-center gap-1">Review <ArrowRight className="size-3" /></span></Link>}
         </div>
       </section>}
     </div>
@@ -144,7 +143,7 @@ export default function TodayPage() {
 function TryCard() {
   const q = useQuery<any>("/evidence/sources");
   if (!q.data || q.data.sources.some((x: any) => x.mode === "imported" && x.items > 0)) return null;
-  return <Link href="/try" className="block rounded-xl border border-accent-dim bg-[#0b1c29] p-4 hover:border-accent transition-colors" data-testid="try-card"><div className="flex items-center gap-2"><b className="text-[16px] font-medium">Try Jarvis with one real note</b><ArrowRight className="size-4 text-accent ml-auto" aria-hidden /></div><p className="text-[14px] text-muted mt-1">Paste one note, add a later correction, ask what was decided. About three minutes. It stays on this computer, with no key and no login.</p></Link>;
+  return <Link href="/try" className="block rounded-xl border border-accent-dim bg-accent-soft p-4 hover:border-accent transition-colors" data-testid="try-card"><div className="flex items-center gap-2"><b className="text-[16px] font-medium">Try Jarvis with one real note</b><ArrowRight className="size-4 text-accent ml-auto" aria-hidden /></div><p className="text-[14px] text-muted mt-1">Paste one note, add a later correction, ask what was decided. About three minutes. It stays on this computer, with no key and no login.</p></Link>;
 }
 
 const SRC: Record<string, string> = { agent: "Jarvis", claude: "Claude", you: "You", task: "You" };
@@ -159,7 +158,7 @@ function AgentsAndOutput() {
   const needs = jobs.filter((j) => j.needsYou);
   return (
     <section aria-label="Agents and output" className="grid md:grid-cols-2 gap-4" data-testid="agents-output">
-      <Link href="/office" className="rounded-xl border border-line bg-surface metal p-4 hover:border-[#3b434e] transition-colors" data-testid="today-agents">
+      <Link href="/office" className="rounded-xl border border-line bg-surface metal p-4 hover:border-line-strong transition-colors" data-testid="today-agents">
         <div className="flex items-center gap-2 mb-2"><h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium">Agents</h2><ArrowRight className="size-4 text-muted ml-auto" aria-hidden /></div>
         {o.data && <p className={cx("text-[13px] mb-2", queuedWaiting ? "text-amber" : "text-muted")} data-testid="worker-health">{queuedWaiting ? "Work is waiting and no worker has picked it up. Start the worker: npm run worker. " : ""}{o.data.runner.message}</p>}
         {!o.data ? <p className="text-[14px] text-muted">Loading…</p> : working.length === 0 && needs.length === 0 ? <p className="text-[15px]">All desks are quiet. Nothing is running.</p> : <ul className="space-y-1.5 text-[15px]">
@@ -184,4 +183,17 @@ const FIX = [
 ];
 function FixtureMenu({ onPick }: { onPick: (n: string) => void }) {
   return <div role="menu" className="absolute z-20 mt-1 w-72 rounded-xl border border-line bg-surface p-1 shadow-xl">{FIX.map(([k, l]) => <button key={k} role="menuitem" onClick={() => onPick(k)} className="w-full text-left px-3 py-2 rounded-lg text-[14px] hover:bg-surface2">{l}</button>)}</div>;
+}
+
+/** What Jarvis finished lately, one line each, so every result keeps a way back from Today. */
+function RecentOutput() {
+  const out = useQuery<any>("/outcomes?limit=5", { poll: 6000 }); const rows: any[] = out.data?.outcomes ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <section aria-label="Recent results" className="max-w-[44rem]" data-testid="today-output">
+      <h2 className="t-meta uppercase tracking-[0.1em] font-medium mb-1">Recent results</h2>
+      <ul className="border-t border-line divide-y divide-line">{rows.slice(0, 4).map((x: any) => <li key={x.id}><Link href={x.href} className="touch flex items-center gap-3 py-2.5 hover:bg-surface2/60 -mx-2 px-2 rounded-lg"><span className="min-w-0 flex-1 break-words text-[15.5px]">{x.goal}</span><Badge tone={ST[x.status]}>{x.status}</Badge></Link></li>)}</ul>
+      <Link href="/activity" className="inline-flex items-center gap-1 text-[14px] text-accent mt-2 underline underline-offset-4">All outcomes <ArrowRight className="size-3.5" aria-hidden /></Link>
+    </section>
+  );
 }

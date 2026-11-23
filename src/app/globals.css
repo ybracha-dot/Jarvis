@@ -2,25 +2,71 @@
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
 
-@theme {
-  --color-bg: #0b0d11;
-  --color-surface: #13161b;
-  --color-surface2: #1a1e25;
-  --color-line: #2a2f38;
-  --color-fg: #f3efe6;
-  --color-muted: #a2a9b4;
-  --color-accent: #67d4ff;
-  --color-accent-dim: #173f58;
-  --color-amber: #f3b24b;
-  --color-amber-dim: #4a3512;
-  --color-danger: #f0766b;
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+/* Semantic tokens. Components never name a colour: they say bg, surface, line, fg, muted, accent, amber, danger and their soft/on variants.
+   Light is the default; dark follows the OS unless the user chose (Settings > Appearance), which is stored in localStorage and applied before paint (layout.tsx). */
+:root {
+  color-scheme: light;
+  --bg: #f6f3ee; --surface: #ffffff; --surface2: #f1eee8; --surface3: #e8e4dc; --line: #e2ded5; --line-strong: #c9c4b8;
+  --fg: #1c1e22; --muted: #596070;
+  --accent: #0b57d0; --accent-soft: #e8f0fd; --accent-dim: #b9cff4; --on-accent: #ffffff;
+  --amber: #8a5000; --amber-soft: #fff4dc; --amber-dim: #e8c27a; --amber-solid: #f2b042; --on-amber: #231600;
+  --danger: #b3261e; --danger-soft: #fdecea; --danger-line: #efb6b1;
+  --shadow-lift: 0 1px 2px rgb(30 25 15 / .06), 0 8px 24px -8px rgb(30 25 15 / .16);
+  --metal-hi: 0 0; --glass: rgb(252 250 247 / .98);
+  --orb-bg: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f1114; --surface: #17191d; --surface2: #1e2126; --surface3: #272b31; --line: #2b2f36; --line-strong: #3d434c;
+    --fg: #f2f1ee; --muted: #a4abb6;
+    --accent: #7cb2ff; --accent-soft: #14233d; --accent-dim: #28477a; --on-accent: #06152e;
+    --amber: #f3b24b; --amber-soft: #261e0e; --amber-dim: #5a431a; --amber-solid: #f3b24b; --on-amber: #231600;
+    --danger: #f2887e; --danger-soft: #2a1614; --danger-line: #6b2b25;
+    --shadow-lift: 0 1px 2px rgb(0 0 0 / .5), 0 10px 28px -10px rgb(0 0 0 / .7);
+    --metal-hi: 1 1; --glass: rgb(23 25 29 / .98); --orb-bg: #0f1114;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1114; --surface: #17191d; --surface2: #1e2126; --surface3: #272b31; --line: #2b2f36; --line-strong: #3d434c;
+  --fg: #f2f1ee; --muted: #a4abb6;
+  --accent: #7cb2ff; --accent-soft: #14233d; --accent-dim: #28477a; --on-accent: #06152e;
+  --amber: #f3b24b; --amber-soft: #261e0e; --amber-dim: #5a431a; --amber-solid: #f3b24b; --on-amber: #231600;
+  --danger: #f2887e; --danger-soft: #2a1614; --danger-line: #6b2b25;
+  --shadow-lift: 0 1px 2px rgb(0 0 0 / .5), 0 10px 28px -10px rgb(0 0 0 / .7);
+  --metal-hi: 1 1; --glass: rgb(23 25 29 / .98); --orb-bg: #0f1114;
+}
+@theme inline {
+  --color-bg: var(--bg); --color-surface: var(--surface); --color-surface2: var(--surface2); --color-surface3: var(--surface3); --color-line: var(--line); --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg); --color-muted: var(--muted); --color-accent: var(--accent); --color-accent-soft: var(--accent-soft); --color-accent-dim: var(--accent-dim); --color-on-accent: var(--on-accent);
+  --color-amber: var(--amber); --color-amber-soft: var(--amber-soft); --color-amber-dim: var(--amber-dim); --color-amber-solid: var(--amber-solid); --color-on-amber: var(--on-amber);
+  --color-danger: var(--danger); --color-danger-soft: var(--danger-soft); --color-danger-line: var(--danger-line);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "SF Pro Text", sans-serif;
   --font-mono: "IBM Plex Mono", var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --shadow-lift: var(--shadow-lift);
 }
 
-html { color-scheme: dark; }
-body { background: var(--color-bg); color: var(--color-fg); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+body { background: var(--color-bg); color: var(--color-fg); font-family: var(--font-sans); font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+/* Type scale: page title 34-40, lead 22-28, body 16-17, metadata 13-14. Times use tabular numerals. */
+.t-title { font-size: clamp(34px, 4.2vw, 40px); line-height: 1.08; font-weight: 650; letter-spacing: -0.025em; }
+.t-lead { font-size: clamp(22px, 2.6vw, 28px); line-height: 1.25; font-weight: 600; letter-spacing: -0.015em; }
+.t-body { font-size: 16.5px; line-height: 1.5; }
+.t-meta { font-size: 13.5px; line-height: 1.4; color: var(--color-muted); }
+.tnum { font-variant-numeric: tabular-nums; }
+.lift { box-shadow: var(--shadow-lift); }
+/* Floating controls (the composer, the phone tab bar and header) sit on an opaque surface so nothing behind them competes with their text. */
+.glass { background: var(--color-surface); }
 :focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 6px; }
+.touch { min-height: 44px; min-width: 44px; }
+@media (min-width: 768px) and (pointer: fine) { .touch { min-height: 36px; min-width: 36px; } }
+/* A row expanding or a reservation settling: a short, honest transition that reduced motion removes. */
+.reveal { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
+.reveal[data-open="true"] { grid-template-rows: 1fr; }
+.reveal > div { overflow: hidden; min-height: 0; }
+@keyframes settle { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.settle { animation: settle .24s ease-out; }
+@media (prefers-reduced-motion: reduce) { .reveal { transition: none; } .settle { animation: none; } }
 ::selection { background: var(--color-accent-dim); }
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .scroll-thin { scrollbar-width: thin; scrollbar-color: #2a3038 transparent; }
@@ -71,18 +117,20 @@ body { background: var(--color-bg); color: var(--color-fg); font-family: var(--f
 }
 
 /* Brushed metal: a restrained highlight on raised surfaces, a fine grain on the rail. Never competes with content. */
-.metal { background-image: linear-gradient(180deg, rgb(255 255 255 / .055), rgb(255 255 255 / 0) 42%); box-shadow: inset 0 1px 0 rgb(255 255 255 / .07), 0 1px 0 rgb(0 0 0 / .5); }
-.metal-rail { background-image: repeating-linear-gradient(90deg, rgb(255 255 255 / .012) 0 1px, transparent 1px 3px), linear-gradient(180deg, rgb(255 255 255 / .04), transparent 30%); }
+.metal { box-shadow: 0 1px 0 var(--color-line); }
+:root[data-theme="dark"] .metal { background-image: linear-gradient(180deg, rgb(255 255 255 / .04), rgb(255 255 255 / 0) 42%); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .metal { background-image: linear-gradient(180deg, rgb(255 255 255 / .04), rgb(255 255 255 / 0) 42%); } }
+.metal-rail { background: var(--color-bg); }
 .hairline { border-color: color-mix(in srgb, var(--color-fg) 13%, transparent); }
 
 /* Assistant light */
-.orb { background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--color-accent) 22%, #0b0d11), #0b0d11 72%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 30%, transparent); }
-.orb-halo { background: conic-gradient(from 0deg, transparent, color-mix(in srgb, var(--color-accent) 55%, transparent), transparent 60%); opacity: .55; animation: spin 14s linear infinite; mask: radial-gradient(circle, transparent 58%, #000 62%); }
+.orb { background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--color-accent) 16%, var(--orb-bg)), var(--orb-bg) 72%); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 28%, transparent); }
+.orb-halo { background: conic-gradient(from 0deg, transparent, color-mix(in srgb, var(--color-accent) 55%, transparent), transparent 60%); opacity: .35; mask: radial-gradient(circle, transparent 58%, #000 62%); }
 .orb-ring { border: 1.5px solid color-mix(in srgb, var(--color-accent) 45%, transparent); }
-.orb-core { background: var(--color-accent); box-shadow: 0 0 10px 1px color-mix(in srgb, var(--color-accent) 70%, transparent); animation: orb-idle 5s ease-in-out infinite; }
-.orb[data-state="listening"] .orb-core { background: #bdeaff; box-shadow: 0 0 16px 4px color-mix(in srgb, var(--color-accent) 85%, transparent); animation: orb-listen 1.1s ease-in-out infinite; }
+.orb-core { background: var(--color-accent); box-shadow: 0 0 8px 0 color-mix(in srgb, var(--color-accent) 55%, transparent); }
+.orb[data-state="listening"] .orb-core { background: color-mix(in srgb, var(--color-accent) 55%, white); box-shadow: 0 0 16px 4px color-mix(in srgb, var(--color-accent) 85%, transparent); animation: orb-listen 1.1s ease-in-out infinite; }
 .orb[data-state="listening"] .orb-ring { border-color: var(--color-accent); animation: orb-listen 1.1s ease-in-out infinite; }
-.orb[data-state="listening"] .orb-halo { opacity: 1; animation-duration: 3s; }
+.orb[data-state="listening"] .orb-halo { opacity: 1; animation: spin 3s linear infinite; }
 .orb[data-state="speaking"] .orb-ring { animation: orb-speak .9s ease-out infinite; border-color: var(--color-accent); }
 .orb[data-state="speaking"] .orb-core { animation: orb-speak-core .45s ease-in-out infinite alternate; }
 @keyframes orb-idle { 0%,100% { opacity: .7; transform: scale(.9); } 50% { opacity: 1; transform: scale(1); } }
@@ -90,3 +138,10 @@ body { background: var(--color-bg); color: var(--color-fg); font-family: var(--f
 @keyframes orb-speak { 0% { transform: scale(.8); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
 @keyframes orb-speak-core { from { transform: scale(.8); } to { transform: scale(1.25); } }
 @media (prefers-reduced-motion: reduce) { .orb-halo, .orb-core, .orb-ring { animation: none !important; } .orb[data-state="listening"] .orb-core { transform: scale(1.2); } .orb[data-state="speaking"] .orb-core { transform: scale(1.1); } }
+
+/* A visible affordance on every disclosure: a chevron that turns when it opens. */
+summary.disc { list-style: none; }
+summary.disc::-webkit-details-marker { display: none; }
+summary.disc::after { content: ""; width: .5rem; height: .5rem; margin-left: .55rem; border-right: 1.75px solid var(--color-muted); border-bottom: 1.75px solid var(--color-muted); transform: translateY(-2px) rotate(45deg); transition: transform .2s ease; display: inline-block; flex: none; }
+details[open] > summary.disc::after { transform: translateY(1px) rotate(225deg); }
+@media (prefers-reduced-motion: reduce) { summary.disc::after { transition: none; } }

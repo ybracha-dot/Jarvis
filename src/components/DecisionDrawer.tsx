@@ -24,7 +24,7 @@ export function DecisionList({ compact }: { compact?: boolean }) {
         <ul className="space-y-2">
           {pending.data?.decisions.map((d: any) => (
             <li key={d.id}>
-              <button onClick={() => open("decision", d.id)} data-testid="decision-card" className="w-full text-left rounded-xl border border-line bg-surface hover:border-[#37404a] p-3 transition-colors">
+              <button onClick={() => open("decision", d.id)} data-testid="decision-card" className="w-full text-left rounded-xl border border-line bg-surface hover:border-line-strong p-3 transition-colors">
                 <div className="flex items-center gap-2 mb-1"><Badge tone={URG[d.urgency]?.tone ?? "neutral"}>{URG[d.urgency]?.label ?? d.urgency}</Badge></div>
                 <div className="text-sm font-medium leading-snug break-words">{d.title}</div>
                 <div className="text-[14px] text-muted mt-1 line-clamp-2 break-words">{d.summary}</div>
@@ -145,7 +145,7 @@ export function DecisionDrawer({ id, onClose }: { id: string; onClose: () => voi
         </section>
         {reqs.length > 0 && <section>
           <SectionTitle>New requirement</SectionTitle>
-          <ul className="space-y-2">{reqs.map((r, i) => <li key={i} className="flex items-start gap-2 text-sm rounded-lg border border-amber-dim bg-[#1a1508] px-3 py-2"><Printer className="size-4 text-amber mt-0.5 shrink-0" aria-hidden /><div className="min-w-0"><div className="font-medium">{r.text}{r.kind === "bring_print" && <Badge tone={r.mandatory ? "amber" : "neutral"} className="ml-2">{r.mandatory ? "Required" : "Optional"}</Badge>}</div><div className="text-[13px] text-muted mt-0.5 break-words">“{r.quote}”</div></div></li>)}</ul>
+          <ul className="space-y-2">{reqs.map((r, i) => <li key={i} className="flex items-start gap-2 text-sm rounded-lg border border-amber-dim bg-amber-soft px-3 py-2"><Printer className="size-4 text-amber mt-0.5 shrink-0" aria-hidden /><div className="min-w-0"><div className="font-medium">{r.text}{r.kind === "bring_print" && <Badge tone={r.mandatory ? "amber" : "neutral"} className="ml-2">{r.mandatory ? "Required" : "Optional"}</Badge>}</div><div className="text-[13px] text-muted mt-0.5 break-words">“{r.quote}”</div></div></li>)}</ul>
         </section>}
         {rec && pending && <>
           <section>
@@ -160,8 +160,8 @@ export function DecisionDrawer({ id, onClose }: { id: string; onClose: () => voi
             </div>
             <div data-testid="plan-chunks"><Chunks plan={plan === "best" ? rec.best : rec.alternative} /></div>
             <fieldset className="mt-3 space-y-1.5 text-[14px]"><legend className="sr-only">Block type</legend>
-              <label className="flex items-start gap-2"><input type="radio" checked={mode === "proposed"} onChange={() => setMode("proposed")} className="mt-1 accent-[#67d4ff]" /><span><b className="font-medium">Proposed</b> <span className="text-muted">tentative local block, easy to drop</span></span></label>
-              <label className="flex items-start gap-2"><input type="radio" checked={mode === "confirmed"} onChange={() => setMode("confirmed")} className="mt-1 accent-[#67d4ff]" /><span><b className="font-medium">Confirmed</b> <span className="text-muted">booked local block</span></span></label>
+              <label className="flex items-start gap-2"><input type="radio" checked={mode === "proposed"} onChange={() => setMode("proposed")} className="mt-1 accent-[var(--color-accent)]" /><span><b className="font-medium">Proposed</b> <span className="text-muted">tentative local block, easy to drop</span></span></label>
+              <label className="flex items-start gap-2"><input type="radio" checked={mode === "confirmed"} onChange={() => setMode("confirmed")} className="mt-1 accent-[var(--color-accent)]" /><span><b className="font-medium">Confirmed</b> <span className="text-muted">booked local block</span></span></label>
             </fieldset>
             <p className="text-[13px] text-muted mt-2 flex items-center gap-1.5"><CalendarX2 className="size-3.5" aria-hidden />Local block in Jarvis. It is not on Google Calendar. Writing to Google Calendar needs your approval and a connection.</p>
           </section>

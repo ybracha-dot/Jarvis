@@ -58,6 +58,15 @@ describe("a brief that combines shareable and local-only evidence", () => {
   });
 });
 
+describe("a newer brief and an older shared view", () => {
+  it("taking it back closes every shared view that is still open, even when a newer brief has been built since", async () => {
+    const { ctx, token } = world(); const b1 = runBrief(ctx, { occurrenceKey: "m1", kind: "scheduled" }); const v1 = shareBrief(ctx, b1.resultId);
+    const b2 = runBrief(ctx, { occurrenceKey: "m2", kind: "scheduled" }); expect(b2.resultId).not.toBe(b1.resultId);
+    const c = await connect(token); expect((await c.call("get_result", { id: v1.sharedResultId })).json.body).toMatch(/Essay 2/);
+    unshareBrief(ctx, b2.resultId); expect((await c.call("get_result", { id: v1.sharedResultId })).json).toEqual({ error: "No shared result with that id." });
+  });
+});
+
 describe("what stays private", () => {
   it("search, reader passages, project context, today and recall never return local-only or unshared material", async () => {
     const { ctx, pa, pb, token } = world(); const c = await connect(token);

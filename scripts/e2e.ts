@@ -317,7 +317,7 @@ async function journeyMemoryGoals(page: Page) {
   await page.getByRole("tab", { name: "Private room" }).click();
   await page.getByLabel(/Start a private session/).check();
   await page.getByLabel("Message").fill("zebra-quokka-7731 is on my mind");
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await page.getByTestId("reflection-log").getByText(/Perspective A/).waitFor();
   const dump = JSON.stringify(await (await fetch(`${base}/api/export`)).json());
   ok(!dump.includes("zebra-quokka-7731"), "private room content is not stored or exported");
@@ -519,7 +519,7 @@ async function journeyAssistant(page: Page, browser: Browser) {
   ok(/fixture/.test(await page.getByTestId("source-row").filter({ hasText: "Mail (fixture)" }).innerText()), "fixture sources are labelled as fixtures");
   await page.goto(base + "/");
   await page.getByTestId("voice-dock").waitFor();
-  ok((await page.getByTestId("examples").locator("button").count()) === 3, "Ask Jarvis offers general example requests");
+  await page.getByTestId("transcript").focus(); ok((await page.getByTestId("examples").locator("button").count()) === 3, "Ask Jarvis offers general example requests once you start to ask");
   await page.getByTestId("transcript").fill("Pick up where we left off on the pitch and draft my follow-up.");
   await page.getByTestId("send").click();
   await page.getByTestId("goal-result-link").waitFor();
@@ -865,7 +865,7 @@ async function journeyBrief(browser: Browser) {
   const A = await ctx.newPage(); watch(A, "brief-a"); const B = await ctx.newPage(); watch(B, "brief-b");
 
   await B.goto(base + "/"); await B.getByTestId("brief-card").waitFor(); await B.getByTestId("brief-empty").waitFor();
-  ok(/No brief yet/.test(await B.getByTestId("brief-empty").innerText()) && /baseline/.test(await B.getByTestId("brief-empty").innerText()), "an empty private workspace explains what to add and that the first brief is a baseline");
+  ok(/Start with one note/.test(await B.getByTestId("brief-empty").innerText()) && /baseline/.test(await B.getByTestId("brief-empty").innerText()) && (await B.getByTestId("brief-add-note").isVisible()), "an empty private workspace gives one short invitation, one primary action (Add your first note) and says the first brief is a baseline");
   ok(/never/.test(await B.getByTestId("brief-last").innerText()) && /private schedules are off/.test(await B.getByTestId("brief-next-check").innerText()), "Today says there has been no successful check and that private schedules are off until chosen");
   await B.reload(); await B.getByTestId("brief-worker").getByText("running").waitFor({ timeout: 60000 }); ok(true, "Today shows the worker is actually running (a heartbeat, not a setting)");
 
@@ -873,19 +873,19 @@ async function journeyBrief(browser: Browser) {
   await A.goto(base + "/try"); await A.getByTestId("try-project").fill("Essay 2"); await A.getByTestId("try-title").fill("Essay 2 outline"); await A.locator('input[type="date"]').fill(addD(D0, -8));
   await A.getByTestId("try-text").fill(`Essay 2 outline is due ${longD(OLDDUE)} at 11:59 PM. Write a one-page outline.`); await A.getByTestId("try-save1").click(); await A.getByText(/local-only/).first().waitFor();
   // 2. the first brief: a baseline, and a missing calendar
-  await B.getByTestId("brief-build").click(); await B.getByTestId("brief-lead").waitFor(); await B.getByText(/baseline/i).first().waitFor();
-  ok(/first brief/.test(await B.getByTestId("brief-lead").innerText()) && /baseline/.test(await B.getByTestId("brief-built").innerText()), "the first run identifies itself as a baseline, not a comparison");
+  await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-lead").waitFor(); await B.getByText(/baseline/i).first().waitFor();
+  ok(/first brief/i.test(await B.getByTestId("brief-lead").innerText()) && /baseline/.test(await B.getByTestId("brief-built").innerText()), "the first run identifies itself as a baseline, not a comparison");
   await B.getByTestId("brief-also-due").locator("summary").click(); ok(/Essay 2 outline/.test(await B.getByTestId("brief-also-due").innerText()) && (await B.getByTestId("brief-priority").count()) === 0, "a deadline nine days out is listed under Also due, not crowded into the priorities");
   // 3. the later correction, with a format requirement
   await A.getByTestId("try-correction").fill(`Announcement: the Essay 2 outline is now due ${longD(NEWDUE)} at 9:00 AM. Please bring a printed alphanumeric outline to class.`); await A.getByTestId("try-save2").click(); await A.getByText(/Saved as a correction/).waitFor();
   await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-priority").first().waitFor({ timeout: 20000 });
-  const lead1 = await B.getByTestId("brief-lead").innerText(); ok(new RegExp(`now due ${shortD(NEWDUE).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}, 9:00 AM`).test(lead1) && /moved up 7 days/.test(lead1), `the lead change is the new deadline, ${lead1.split("\n")[1]?.slice(0, 110)}`);
-  const pr = B.getByTestId("brief-priority").first(); const prt = await pr.innerText();
-  ok(/Bring a printed alphanumeric outline to class/.test(await pr.getByTestId("brief-next").innerText()), "the next action is the requirement the announcement states, in its own words");
+  const lead1 = await B.getByTestId("brief-lead").innerText(); ok(/is due (today|tomorrow|on \w+) at 9:00 AM/.test(lead1) && /Previously/.test(lead1) && /Now/.test(lead1) && /7 days earlier/.test(lead1), `the lead says the deadline moved, with the previous and the current one (${lead1.split("\n").slice(1, 3).join(" | ").slice(0, 110)})`);
+  const pr = B.getByTestId("brief-priority").first(); await pr.getByTestId("brief-row-toggle").click();
+  ok(/Bring a printed alphanumeric outline to class/.test(await B.getByTestId("brief-lead-next").innerText()), "the next action is the requirement the announcement states, in its own words");
   ok(/Was .*11:59 PM.*Replaced by/.test(await pr.getByTestId("brief-history").first().innerText()), "the original deadline is shown as superseded, with the note that replaced it");
   ok((await pr.getByTestId("brief-evidence").count()) >= 2, "each claim carries a link that opens its source");
   await pr.getByTestId("brief-evidence").first().click(); await B.getByTestId("evidence-body").waitFor(); ok(/Announcement|Essay 2 outline/.test(await B.getByTestId("evidence-body").innerText()), "the evidence link opens the exact note"); await B.goBack(); await B.getByTestId("brief-card").waitFor();
-  ok(/No time proposed.*No calendar has been read/.test(await B.getByTestId("brief-priority").first().getByTestId("brief-no-block").innerText()), "with no calendar, no time is proposed and the page says why");
+  ok(/no calendar has been read/.test(await B.getByTestId("brief-no-block").innerText()) && (await B.getByTestId("brief-add-calendar").first().isVisible()), "with no calendar, no time is proposed, the page says why, and the one action is Add a calendar");
   ok(/due before tomorrow ends/.test(await B.getByTestId("brief-owed").innerText()), "what is owed before tomorrow ends is stated");
 
   // 4. a calendar with a conflict: the proposed block avoids it, and is separate from the instructor's deadline
@@ -893,22 +893,23 @@ async function journeyBrief(browser: Browser) {
   const events = [{ day: D0, a: "0900", b: "1030", t: "Lecture" }, { day: D0, a: "1100", b: "1230", t: "Lab" }, { day: addD(D0, 1), a: "1000", b: "1800", t: "TAMID meeting" }, { day: NEWDUE, a: "1000", b: "1100", t: "Section" }];
   const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//e2e//EN", ...events.flatMap((e) => ev(e.day, e.a, e.b, e.t)), "END:VCALENDAR"].join("\r\n");
   await A.goto(base + "/sources"); await A.getByLabel("File name").fill("week.ics"); await A.getByTestId("import-text").fill(ics); await A.getByTestId("import-preview").click(); await A.getByTestId("import-preview-result").waitFor(); await A.getByTestId("import-commit").click(); await A.getByTestId("import-done").waitFor();
-  await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-block").first().waitFor({ timeout: 20000 });
+  await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-reserve").waitFor({ timeout: 20000 });
   const brief: any = await (await rq.get(base + "/api/brief")).json(); const blocks: any[] = brief.analysis.priorities[0].blocks; const dueAt = Date.parse(brief.analysis.priorities[0].due.at);
   ok(blocks.length === 2 && blocks[0].step === "work" && blocks[1].step === "print", "a feasible work block and a printing step are proposed");
   const nyHM = (iso: string) => new Intl.DateTimeFormat("en-GB", { timeZone: NY, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso)); const nyDay = (iso: string) => ymd(new Date(iso));
   const busy = events.map((e) => ({ day: e.day, a: `${e.a.slice(0, 2)}:${e.a.slice(2)}`, b: `${e.b.slice(0, 2)}:${e.b.slice(2)}` }));
   ok(blocks.every((b) => Date.parse(b.end) <= dueAt - 3600000 && Date.parse(b.start) > Date.now() && !busy.some((x) => x.day === nyDay(b.start) && nyHM(b.start) < x.b && nyHM(b.end) > x.a)), `no block overlaps a calendar event, none starts in the past, all end an hour before the deadline (${blocks.map((b) => `${nyDay(b.start)} ${nyHM(b.start)}-${nyHM(b.end)}`).join(", ")})`);
-  ok(/Time estimate: .*estimate/.test(await B.getByTestId("brief-priority").first().getByTestId("brief-estimate").innerText()), "the duration is identified as an estimate");
+  await B.getByTestId("brief-priority").first().getByTestId("brief-row-toggle").click(); ok(/Time estimate: .*estimate/.test(await B.getByTestId("brief-priority").first().getByTestId("brief-estimate").innerText()), "the duration is identified as an estimate");
+  ok(/Suggested/.test(await B.getByTestId("brief-agenda").innerText()) && /Instructor.s deadline|Due/.test(await B.getByTestId("brief-agenda").innerText()), "the agenda keeps the instructor's deadline and the suggested start distinct");
   // 5. one click reserves; a reload keeps it
   await B.getByTestId("brief-reserve").click(); await B.getByTestId("brief-reserved").waitFor({ timeout: 20000 }); await B.reload(); await B.getByTestId("brief-reserved").waitFor({ timeout: 20000 });
-  ok(/Reserved:/.test(await B.getByTestId("brief-reserved").innerText()), "after a reload the block is still reserved");
+  ok(/Reserved,/.test(await B.getByTestId("brief-reserved").innerText()), "after a reload the block is still reserved");
   const tl: any = await (await rq.get(base + "/api/today")).json(); const rows = (tl.timeline ?? []).filter((b: any) => b.kind === "booked"); const bk = await rq.get(base + "/api/export"); void bk;
   ok(rows.length >= 0, "the reservation is a local block");
   await shot(B, "60-brief-laptop.png");
 
   // 6. dismiss and correct, and the effect on the next brief
-  await B.getByTestId("brief-correct").first().click(); await B.getByTestId("brief-fix-est").fill("90"); await B.getByTestId("brief-fix-save").click(); await B.getByTestId("brief-estimate").filter({ hasText: /90 min \(your estimate\)/ }).first().waitFor({ timeout: 20000 });
+  await B.getByTestId("brief-priority").first().getByTestId("brief-row-toggle").click().catch(() => {}); await B.getByTestId("brief-correct").first().click(); await B.getByTestId("brief-fix-est").fill("90"); await B.getByTestId("brief-fix-save").click(); await B.getByTestId("brief-estimate").filter({ hasText: /90 min \(your estimate\)/ }).first().waitFor({ state: "attached", timeout: 20000 });
   ok(true, "a corrected estimate shows in the next brief, labelled as yours");
   await B.getByTestId("brief-dismiss").first().click(); await B.getByTestId("brief-dismissed").waitFor({ timeout: 20000 }); ok(/Essay 2 outline/.test(await B.getByTestId("brief-dismissed").innerText()), "a dismissed item leaves the priorities and is listed as dismissed");
   await B.getByTestId("brief-undo-dismiss").click(); await B.getByTestId("brief-priority").first().waitFor({ timeout: 20000 }); ok(true, "undo brings it back");
@@ -917,7 +918,7 @@ async function journeyBrief(browser: Browser) {
   const http = await import("node:http"); const feed = ["BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VEVENT", "UID:m3", "SUMMARY:Memo 3 due", `DTSTART;TZID=America/New_York:${addD(D0, 1).replace(/-/g, "")}T170000`, "LAST-MODIFIED:20261114T150000Z", "END:VEVENT", "END:VCALENDAR"].join("\r\n");
   const srv = http.createServer((_q, res) => { res.writeHead(200, { "content-type": "text/calendar" }); res.end(feed); }); await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r)); const link = `http://127.0.0.1:${(srv.address() as any).port}/feed/SECRET-BRIEF-LINK-1`;
   await apiP("/blackboard/save", { url: link }); await B.reload(); await B.getByTestId("brief-build").click();
-  await B.getByTestId("brief-card").getByText("Memo 3 due").first().waitFor({ timeout: 20000 }); ok(/original instructions/.test(await B.getByTestId("brief-card").innerText()), "a deadline that only the calendar knows comes with a request for the original instructions");
+  await B.getByTestId("brief-card").getByText("Memo 3 due").first().waitFor({ state: "attached", timeout: 20000 }); ok(/original instructions/.test(await B.getByTestId("brief-card").innerText()), "a deadline that only the calendar knows comes with a request for the original instructions");
   await new Promise<void>((r) => srv.close(() => r())); await apiP("/blackboard/read"); await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-input-gaps").waitFor({ timeout: 20000 });
   ok(/Blackboard calendar feed: unavailable/.test(await B.getByTestId("brief-input-gaps").innerText()) && (await B.getByTestId("brief-priority").count()) >= 1, "with the feed unreachable the brief names the gap and still finishes the parts it can support");
   ok(!(await B.locator("body").innerText()).includes("SECRET-BRIEF-LINK-1"), "the private feed link appears nowhere on the page");
@@ -950,15 +951,16 @@ async function journeyBrief(browser: Browser) {
   await B.getByTestId("brief-unshare").click(); await B.getByTestId("brief-share-btn").waitFor({ timeout: 20000 }).catch(async (e) => { console.log("DBG share card:", (await B.getByTestId("brief-share").innerText()).replace(/\n/g, " | ")); throw e; });
   ok(/No shared result|not shared/.test((await callC(c1, "get_result", { id: sharedId })).text), "after revocation the very next retrieval, on the same open connection, is refused");
   await c1.close(); await c2.close();
-  await A.goto(base + "/connections"); await A.getByTestId("sharing-panel").waitFor(); ok(/disclosed via get_result/.test(await A.getByTestId("sharing-log").innerText()), "Connections lists what Claude was shown");
+  await A.goto(base + "/connections"); await A.getByTestId("sharing-panel").waitFor(); await A.getByText("Projects, approved results and what Claude was shown").click(); ok(/disclosed via get_result/.test(await A.getByTestId("sharing-log").innerText()), "Connections lists what Claude was shown");
 
   // days later, a further change arrives and is added from the note itself
   const essay: any = ((await (await rq.get(base + "/api/evidence/items")).json()).items as any[]).find((i) => i.title === "Essay 2 outline");
   await A.goto(base + `/evidence/${essay.id}`); await A.getByTestId("evidence-correct-text").fill(`Update: the Essay 2 outline is now due ${longD(addD(D0, 1))} at 8:00 AM.`); await A.getByTestId("evidence-correct-save").click(); await A.getByTestId("evidence-correct-saved").waitFor();
-  await B.goto(base + "/"); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-lead").filter({ hasText: new RegExp(`now due ${shortD(addD(D0, 1))}, 8:00 AM`) }).waitFor({ timeout: 20000 });
-  ok(/moved up 1 day/.test(await B.getByTestId("brief-lead").innerText()) && (await B.getByTestId("brief-priority").first().getByTestId("brief-history").count()) >= 2, "a later correction added from the note itself becomes the lead change and the chain of earlier deadlines is kept");
+  await B.goto(base + "/"); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-lead").filter({ hasText: /at 8:00 AM/ }).waitFor({ timeout: 20000 });
+  await B.getByTestId("brief-priority").first().getByTestId("brief-row-toggle").click().catch(() => {});
+  ok(/1 day earlier/.test(await B.getByTestId("brief-lead").innerText()) && (await B.getByTestId("brief-priority").first().getByTestId("brief-history").count()) >= 2, "a later correction added from the note itself becomes the lead change and the chain of earlier deadlines is kept");
   // the saved brief opens as an ordinary result, with its sources and the flags for what could not be checked
-  await B.goto(base + "/"); await B.getByTestId("brief-card").waitFor(); await B.getByRole("link", { name: /Open the full brief/ }).click(); await B.getByTestId("result-body").waitFor(); const rb = await B.getByTestId("result-body").innerText();
+  await B.goto(base + "/"); await B.getByTestId("brief-card").waitFor(); await B.getByRole("link", { name: /Open the saved brief/ }).click(); await B.getByTestId("result-body").waitFor(); const rb = await B.getByTestId("result-body").innerText();
   ok(/Morning brief/.test(rb) && /What you owe/.test(rb) && /Source: .*Essay 2/.test(rb) || /Source:/.test(rb), "the saved brief opens from its stable result link with its sources"); ok((await B.getByTestId("result-sources").count()) === 1, "the result page lists where each claim came from");
   ok(/no model call/.test(await B.getByTestId("exec-mode").innerText()), "the result says it was built by rules with no model call");
 
@@ -966,8 +968,32 @@ async function journeyBrief(browser: Browser) {
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true }); await phone.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]); const m = await phone.newPage(); watch(m, "brief-phone");
   await m.goto(base + "/"); await m.getByTestId("brief-card").waitFor(); await m.getByTestId("brief-priority").first().waitFor();
   const overflow = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth); ok(overflow <= 1, `the brief fits a phone without sideways scrolling (overflow ${overflow}px)`);
-  ok(await m.getByTestId("brief-lead").isVisible() && await m.getByTestId("brief-priority").first().isVisible(), "on a phone the lead change and the first priority are on the first screen");
+  ok(await m.getByTestId("brief-lead").isVisible() && await m.getByTestId("brief-headline").isVisible(), "on a phone the lead change is on the first screen"); const actionBox = await m.getByTestId("brief-action").boundingBox(); ok(!!actionBox && actionBox.y + actionBox.height < 844, `the one action is above the first scroll on a 390 x 844 phone (bottom at ${Math.round((actionBox?.y ?? 0) + (actionBox?.height ?? 0))}px)`);
   await shot(m, "61-brief-phone.png"); await phone.close();
+  // contrast and accessible names on the real brief, in both appearances, at laptop and phone width (axe: WCAG 2.1 AA)
+  const axePath2 = createRequire(import.meta.url).resolve("axe-core"); const phone2 = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, isMobile: true }); await phone2.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]); const m2 = await phone2.newPage(); watch(m2, "brief-a11y-phone");
+  for (const scheme of ["light", "dark"] as const) for (const [pg, label] of [[B, "laptop"], [m2, "phone"]] as [Page, string][]) {
+    await pg.emulateMedia({ colorScheme: scheme }); await pg.goto(base + "/"); await pg.getByTestId("brief-card").waitFor(); await pg.getByTestId("brief-priority").first().waitFor(); await pg.getByTestId("brief-priority").first().getByTestId("brief-row-toggle").click(); await pg.waitForTimeout(350);
+    await pg.addScriptTag({ path: axePath2 }); const res: any = await pg.evaluate(async () => (window as any).axe.run(document, { runOnly: ["wcag2a", "wcag2aa", "wcag21aa"] })); const bad = res.violations.filter((v: any) => ["serious", "critical"].includes(v.impact));
+    for (const v of bad) console.log(`    axe ${v.impact} ${v.id}: ${v.nodes.slice(0, 3).map((n: any) => n.target.join(" ")).join(" | ")}`);
+    ok(bad.length === 0, `Today with an expanded row has no serious or critical axe violations (${scheme}, ${label}; ${res.violations.length} minor)`);
+  }
+  await phone2.close();
+  // appearance: follows the OS until the user chooses, and the choice is kept
+  await A.emulateMedia({ colorScheme: "light" }); await A.goto(base + "/settings"); await A.getByTestId("appearance").waitFor(); const bgOf = () => A.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  const sysLight = await bgOf(); await A.emulateMedia({ colorScheme: "dark" }); await A.waitForTimeout(150); const sysDark = await bgOf(); ok(sysLight !== sysDark && /rgb\(1[0-9]?, /.test(sysDark), `with no choice made it follows the OS (${sysLight} light, ${sysDark} dark)`);
+  await A.getByTestId("appearance-light").click(); await A.reload(); ok((await A.evaluate(() => document.documentElement.getAttribute("data-theme"))) === "light" && (await bgOf()) === sysLight, "an explicit Light choice is kept across a reload even when the OS is dark");
+  await A.getByTestId("appearance-system").click(); await A.reload(); ok((await A.evaluate(() => document.documentElement.getAttribute("data-theme"))) === null, "choosing System returns to following the OS"); await A.emulateMedia({ colorScheme: "light" });
+  // keyboard: the row opens and closes from the keyboard and focus returns to the row; Escape from the composer collapses it
+  await B.emulateMedia({ colorScheme: "light" }); await B.goto(base + "/"); await B.getByTestId("brief-priority").first().waitFor(); const toggle = B.getByTestId("brief-priority").first().getByTestId("brief-row-toggle"); await toggle.focus(); await B.keyboard.press("Enter");
+  ok((await toggle.getAttribute("aria-expanded")) === "true", "a priority row opens from the keyboard"); await B.keyboard.press("Enter"); ok((await toggle.getAttribute("aria-expanded")) === "false" && await toggle.evaluate((el) => document.activeElement === el), "it closes again and focus stays on the row");
+  await B.getByTestId("transcript").focus(); await B.getByTestId("examples").waitFor({ timeout: 5000 }); ok(await B.getByTestId("examples").isVisible(), "the composer expands when you start to ask"); await B.keyboard.press("Escape"); ok(!(await B.getByTestId("transcript").evaluate((el) => document.activeElement === el)), "Escape leaves the composer");
+  // reduced motion: the row reveal has no transition
+  const rm = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" }); await rm.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]); const rp = await rm.newPage(); await rp.goto(base + "/"); await rp.getByTestId("brief-priority").first().waitFor();
+  ok((await rp.locator(".reveal").first().evaluate((el) => getComputedStyle(el).transitionDuration)) === "0s", "reduced motion removes the row transition"); await rm.close();
+  // 200% zoom: no sideways scroll at a 640 px wide layout viewport (a 1280 px window at 200%)
+  const z = await browser.newContext({ viewport: { width: 640, height: 400 } }); await z.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]); const zp = await z.newPage(); await zp.goto(base + "/"); await zp.getByTestId("brief-lead").waitFor();
+  ok((await zp.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)) <= 1 && await zp.getByTestId("brief-headline").isVisible(), "at 200% zoom (640 px layout) the brief still reads in one column without sideways scrolling"); await z.close();
   ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole brief journey made zero model calls");
   await A.close(); await B.close(); await ctx.close(); stopWorker();
 }
@@ -1020,7 +1046,7 @@ async function journeyMobile(browser: Browser) {
   await reserve.tap();
   await dlg.getByTestId("decision-state").waitFor();
   await page.keyboard.press("Escape");
-  await page.getByTestId("mobile-capture").tap();
+  await page.getByRole("button", { name: "More", exact: true }).tap(); await page.getByTestId("mobile-capture").tap();
   await page.getByRole("dialog").getByLabel("Who owes").fill("Example advisor");
   await page.getByRole("dialog").getByLabel("What was promised").fill("Send the reading list");
   await page.getByRole("dialog").getByRole("button", { name: "Save" }).tap();
@@ -1060,11 +1086,11 @@ async function journeySettings(page: Page) {
   ok(/No worker is running/.test(await page.getByTestId("scheduler-message").innerText()), "scheduler says no worker is running");
   step("Private workspace is separate and starts empty");
   await page.getByRole("button", { name: "Open private workspace" }).click();
-  await page.getByTestId("primary-action").waitFor();
+  await page.getByTestId("brief-empty").waitFor();
   await page.waitForFunction(() => /PRIVATE WORKSPACE/.test(document.body.innerText));
   ok((await page.getByTestId("decision-card").count()) === 0, "no example decisions in the private workspace");
   ok(!/Argument and primary sources/.test(await bodyText(page)), "no example data leaks into the private workspace");
-  ok(/empty/.test(await bodyText(page)), "private workspace shows a first-run state");
+  ok(/Start with one note/.test(await bodyText(page)) && await page.getByTestId("brief-add-note").isVisible(), "private workspace shows one invitation and one primary action");
   await shot(page, "14-private-empty-desktop.png");
   await page.getByRole("button", { name: "Back to example" }).click();
   await page.waitForFunction(() => /EXAMPLE WORKSPACE/.test(document.body.innerText));
@@ -1211,9 +1237,10 @@ async function journeyStudy(browser: Browser) {
   await page.goto(base + "/");
   await page.getByTestId("voice-dock").waitFor();
   ok(/Microphone off/.test(await page.getByTestId("mic-state").innerText()), "the microphone state is visible and starts off");
-  ok(await page.getByTestId("mic-button").isDisabled(), "the mic stays disabled until the speech service is disclosed");
-  ok(/sends audio to Google or Microsoft/.test(await page.getByTestId("voice-dock").innerText()), "the external speech service is disclosed before capture");
-  await page.getByTestId("mic-consent").click();
+  ok(await page.getByTestId("mic-button").isEnabled() && /Microphone off/.test(await page.getByTestId("mic-state").innerText()), "the mic is available and nothing listens until it is tapped");
+  await page.getByTestId("mic-button").click(); await page.getByTestId("mic-disclosure").waitFor();
+  ok(/sends audio to Google or Microsoft/.test(await page.getByTestId("mic-disclosure").innerText()) && /Microphone off/.test(await page.getByTestId("mic-state").innerText()), "the external speech service is disclosed at the first tap, before any permission or capture");
+  await page.getByTestId("mic-consent").click(); await page.getByTestId("mic-state").getByText(/listening/).waitFor(); await page.getByTestId("mic-button").click(); await page.getByTestId("mic-state").getByText(/Microphone off/).waitFor();
   await page.getByRole("combobox", { name: "Course for these photos" }).selectOption("BI107").catch(() => {});
   await page.getByTestId("photo-input").setInputFiles(PHOTOS);
   await page.getByTestId("attached").getByText(/partly unclear/).waitFor({ timeout: 15000 });

@@ -28,7 +28,7 @@ function Goal({ g }: { g: any }) {
       <div className="rounded-lg bg-bg border border-line p-3"><div className="text-[12px] uppercase tracking-wider text-muted">Planned by today</div><Mono className="text-2xl font-semibold block text-amber">{g.plannedByToday}</Mono><div className="text-[13px] text-muted">target to date</div></div>
       <div className="rounded-lg bg-bg border border-line p-3"><div className="text-[12px] uppercase tracking-wider text-muted">Deadline</div><Mono className="text-2xl font-semibold block">{g.weeksLeft}w</Mono><div className="text-[13px] text-muted">{g.deadline}</div></div>
     </div>
-    <div aria-label={`${g.completed} of ${g.targetTotal}, planned ${g.plannedByToday}`} role="img" className="relative h-2.5 rounded-full bg-surface2 overflow-hidden"><div className="absolute inset-y-0 left-0 bg-accent rounded-full" style={{ width: `${pct}%` }} /><div className="absolute inset-y-0 w-0.5 bg-amber" style={{ left: `${plan}%` }} /></div>
+    <div aria-label={`${g.completed} of ${g.targetTotal}, planned ${g.plannedByToday}`} role="img" className="relative h-2.5 rounded-full bg-surface2 overflow-hidden"><div className="absolute inset-y-0 left-0 bg-accent rounded-full" style={{ width: `${pct}%` }} /><div className="absolute inset-y-0 w-0.5 bg-amber-solid" style={{ left: `${plan}%` }} /></div>
     <p className="text-sm"><Mono data-testid="goal-line">{g.line}</Mono></p>
     <p className="text-[13px] text-muted">{g.paceLabel}.</p>
     <div className="flex items-end gap-2 flex-wrap"><Field label="Set actual"><input type="number" min={0} className={cx(inputCls, "w-28")} value={v} onChange={(e) => setV(e.target.value)} /></Field>

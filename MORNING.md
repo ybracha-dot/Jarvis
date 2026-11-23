@@ -1,8 +1,42 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **The first private morning brief** (this round), **Handoff completeness: Finished means every open assignment is accounted for**, **Reader field check: quantities and who submitted**, **Let Claude read the notes, and make completion verifiable**, **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Interface redesign: Today, the shell, light and dark** (this round), **The first private morning brief**, **Handoff completeness: Finished means every open assignment is accounted for**, **Reader field check: quantities and who submitted**, **Let Claude read the notes, and make completion verifiable**, **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
 
-# The first private morning brief (latest)
+# Interface redesign: Today, the shell, light and dark (latest)
+
+Baseline `d9791f7`. Open this first: the **private workspace → Today** (http://127.0.0.1:3000, Open private workspace). Paid model calls stayed off. All screenshots use invented notes; none are yours.
+
+## Before and after of the same brief
+Both builds were given the same seeded private workspace (four invented notes, one correction, one calendar file) and built the brief themselves, at the same moment: `docs/screenshots/redesign/before/` (the build at `d9791f7`, dark only) and `docs/screenshots/redesign/after/` (this build, light and dark). Laptop 1280 × 800, phone 390 × 844 at 2×.
+- `today-laptop-*`, `today-phone-*`: the populated brief. Before: a boxed card with a cyan Rebuild button, the deadline repeated in the lead, the priority, its history and its evidence. After: a plain headline ("Essay 2 outline is due tomorrow at 9:00 AM."), **Previously / Now** with the days moved, the next action with its source link, **one** primary action ("Reserve 75 min"), three rows with an action, a due time and a short source link (quotes, history, estimate, correction and dismissal open under the row), and an agenda column.
+- `empty-*`: the private empty state. Before: microphone consent, suggested prompts and a large composer filled the first screen. After: one invitation, one primary action ("Add your first note"), a secondary "Connect a calendar", and a one-line composer.
+- `office-*`: the Office keeps its Pixel Agents room and job feed; it now sits in the new shell and tokens.
+The older screenshots in `docs/screenshots/` (01–50) predate the redesign and were not regenerated. `60-brief-laptop.png` and `61-brief-phone.png` are from this build.
+
+## What changed
+- **Shell**: a labeled sidebar (Today, Projects, Office, Memory; More and Connections below; workspace badge and switch at the foot) and, on the phone, its own header and a five-tab labeled bar (Today, Projects, Office, Memory, More; Capture lives in More). The command palette and ⌘K are kept.
+- **Ask Jarvis**: one composer on the four main screens: a single line with attach, microphone and send. It expands when you start to ask and shows its examples then. **The microphone disclosure appears at the first mic tap**, before any permission or capture; editable transcripts, photo previews and an explicit Send are unchanged. The Jarvis light is still when idle, brightens when listening and moves gently when speaking. On the phone it sits above the tab bar and rides above the software keyboard.
+- **Today (private)**: the lead is plain language; a moved deadline names the previous and current one. When nothing material changed, the next action leads. **Rebuild** is a secondary toolbar button. The agenda shows real busy periods, your classes, the instructor's deadlines (red bar), suggested times (dashed blue) and reserved times (solid blue), each labelled; a day no calendar covers says "Calendar unknown", and "How Jarvis knows what is free" says coverage is judged from the first and last event of a snapshot. Scheduled-run status is one compact line with details on demand; a missed or impossible scheduled brief is an amber alert with the fix ("Attention: the brief due … will not run: no worker is running. Start one…").
+- **Suggestions never overlap** (a real defect the redesign exposed: three priorities each proposed 7:30 PM). Each priority now plans around the ones above it, and work blocks shorter than 30 minutes are no longer proposed when more time is needed.
+- **Light and dark** from semantic tokens (`src/app/globals.css`): warm off-white canvas, white surfaces, graphite text and one deep blue in light; charcoal, near-white and a lighter blue in dark; amber for attention and red for errors, each with a text label. Follows the OS; **Settings → Appearance** (System / Light / Dark) is stored on the device and applied before first paint. Type scale: title 34–40, lead 22–28, body 16.5, metadata 13.5; tabular numerals for times. Controls are 44 px on touch. Rows expand with a short transition that reduced motion removes.
+- **Connections**: leads with "What Claude can read": each source with its access (Local-only, Shared with Claude, Revoked, Example data), last successful read and one next action, and **a preview of what Claude would receive** before sharing. Projects, approved results and the log of what Claude was shown sit one disclosure down. The setup steps follow, unchanged.
+- Today (private) keeps decisions that need you and a short list of recent results (each result keeps its stable link); Memory, Projects, Office, Settings and results use the new titles, tokens and shell.
+- **A real bug found and fixed**: "Take it back" only revoked the shared view of the latest brief, so a newer brief left an older shared view open. It now closes every open shared view.
+
+## Verification (final build)
+- Typecheck clean; **411 unit tests (36 files)**; production build; the whole browser suite **404 checks, 0 problems** (Chromium). The suite now runs in light mode (Playwright's default), so every existing axe scan is a light-mode scan.
+- The new private-brief journey adds: axe (WCAG 2.1 AA, including contrast) on the real brief with an expanded row in **light and dark, at laptop and phone width**; appearance follows the OS and an explicit choice survives a reload; a row opens and closes from the keyboard and focus stays on it; Escape leaves the composer; reduced motion removes the row transition; 200% zoom (640 px layout) reads in one column; the one action is above the first scroll on a 390 × 844 phone. `tests/contrast.test.ts` now checks the tokens in both appearances.
+- **Not tested: Safari/WebKit.** No WebKit is installed here; everything above is Chromium (phone views are Chromium emulation, not an iPhone). Software-keyboard behaviour rests on the visual viewport API and was not exercised on a device.
+
+## Remaining defects and gaps (honest list)
+- Office: restyled by tokens and the new shell only. The inspector, handoff strip and roster are the existing ones; I did not redesign the room's framing or the agent inspector.
+- Projects and results: new titles and tokens, not a decision-first rewrite. Memory already led with search and the current answer.
+- The example workspace's Today keeps its old content (Next useful block, changes, sources) in the new shell.
+- Older screenshots in `docs/screenshots/` (01–50) show the previous interface.
+- The dock hides the last visible row in a short laptop window until you scroll; the page leaves room at the end.
+- The agenda is limited to four days and today/tomorrow plus days that matter.
+
+# The first private morning brief (previous)
 
 Baseline `8daa35d`. Paid model calls stayed off (zero model calls, asserted in the browser journey). Everything tested here is invented material on this machine. **Nothing ran on your Mac, your Blackboard account, your calendar or Claude Desktop.** The live pilot is **pending**.
 

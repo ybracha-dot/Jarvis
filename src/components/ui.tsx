@@ -9,12 +9,12 @@ export function Button({ variant = "secondary", size = "md", busy, className, ch
   return (
     <button {...p} disabled={p.disabled || busy}
       className={clsx("inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed select-none",
-        size === "sm" ? "px-2.5 py-1.5 text-[14px]" : "px-3.5 py-2 text-sm min-h-9",
-        variant === "primary" && "bg-accent text-[#04141e] hover:bg-[#8fdcff]",
-        variant === "secondary" && "bg-surface2 text-fg border border-line hover:bg-[#222831]",
+        size === "sm" ? "touch px-3 py-1.5 text-[14px]" : "touch px-4 py-2 text-[15px]",
+        variant === "primary" && "bg-accent text-on-accent hover:brightness-110",
+        variant === "secondary" && "bg-surface2 text-fg border border-line hover:bg-surface3",
         variant === "ghost" && "text-muted hover:text-fg hover:bg-surface2",
-        variant === "amber" && "bg-amber text-[#2a1c04] hover:bg-[#f7c36c]",
-        variant === "danger" && "bg-transparent text-danger border border-[#4a2723] hover:bg-[#2a1614]", className)}>
+        variant === "amber" && "bg-amber-solid text-on-amber hover:brightness-95",
+        variant === "danger" && "bg-transparent text-danger border border-danger-line hover:bg-danger-soft", className)}>
       {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}{children}
     </button>
   );
@@ -28,7 +28,7 @@ export function SectionTitle({ children, right }: { children: React.ReactNode; r
 }
 export function Badge({ tone = "neutral", children, className, ...rest }: { tone?: "neutral" | "accent" | "amber" | "danger"; children: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLSpanElement>) {
   return <span {...rest} className={clsx("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium border", className,
-    tone === "neutral" && "border-line text-muted", tone === "accent" && "border-accent-dim text-accent bg-[#0b1c29]", tone === "amber" && "border-amber-dim text-amber bg-[#1f180a]", tone === "danger" && "border-[#4a2723] text-danger bg-[#241211]")}>{children}</span>;
+    tone === "neutral" && "border-line text-muted", tone === "accent" && "border-accent-dim text-accent bg-accent-soft", tone === "amber" && "border-amber-dim text-amber bg-amber-soft", tone === "danger" && "border-danger-line text-danger bg-danger-soft")}>{children}</span>;
 }
 export const Mono = ({ children, className, ...rest }: { children?: React.ReactNode; className?: string } & React.HTMLAttributes<HTMLSpanElement>) => <span {...rest} className={clsx("mono", className)}>{children}</span>;
 
@@ -41,7 +41,7 @@ export function Empty({ title, hint, children }: { title: string; hint?: string;
 export function ErrorBox({ error, onRetry, offline }: { error: { message: string; status?: number } | string; onRetry?: () => void; offline?: boolean }) {
   const msg = typeof error === "string" ? error : error.message;
   return (
-    <div role="alert" className="rounded-lg border border-[#4a2723] bg-[#1c1110] text-sm p-3 flex items-start gap-2">
+    <div role="alert" className="rounded-lg border border-danger-line bg-danger-soft text-sm p-3 flex items-start gap-2">
       {offline ? <WifiOff className="size-4 mt-0.5 text-danger shrink-0" aria-hidden /> : <AlertTriangle className="size-4 mt-0.5 text-danger shrink-0" aria-hidden />}
       <div className="flex-1 min-w-0 break-words">{msg}</div>
       {onRetry && <Button size="sm" onClick={onRetry}>Retry</Button>}
@@ -49,7 +49,7 @@ export function ErrorBox({ error, onRetry, offline }: { error: { message: string
   );
 }
 export function Notice({ tone = "amber", children }: { tone?: "amber" | "accent" | "neutral"; children: React.ReactNode }) {
-  return <div className={clsx("rounded-lg border px-3 py-2 text-[14px] leading-snug", tone === "amber" && "border-amber-dim bg-[#1a1508] text-[#f6d7a1]", tone === "accent" && "border-accent-dim bg-[#0b1c29] text-[#cdeeff]", tone === "neutral" && "border-line bg-surface2 text-muted")}>{children}</div>;
+  return <div className={clsx("rounded-lg border px-3 py-2 text-[14px] leading-snug", tone === "amber" && "border-amber-dim bg-amber-soft text-amber", tone === "accent" && "border-accent-dim bg-accent-soft text-accent", tone === "neutral" && "border-line bg-surface2 text-muted")}>{children}</div>;
 }
 
 export function Drawer({ title, subtitle, onClose, children, wide, footer }: { title: string; subtitle?: React.ReactNode; onClose: () => void; children: React.ReactNode; wide?: boolean; footer?: React.ReactNode }) {
@@ -88,7 +88,7 @@ export function Drawer({ title, subtitle, onClose, children, wide, footer }: { t
 export function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return <label className="block text-[14px]"><span className="block text-muted mb-1">{label}</span>{children}{hint && <span className="block text-[13px] text-muted mt-1">{hint}</span>}</label>;
 }
-export const inputCls = "w-full rounded-lg bg-bg border border-line px-3 py-2 text-sm text-fg placeholder:text-[#7d8691] focus:border-accent outline-none";
+export const inputCls = "w-full rounded-lg bg-bg border border-line px-3 py-2 text-sm text-fg placeholder:text-muted focus:border-accent outline-none";
 
 export function Quote({ children, source }: { children: React.ReactNode; source?: React.ReactNode }) {
   return <blockquote className="border-l-2 border-amber pl-3 text-sm leading-relaxed text-fg break-words">{children}{source && <footer className="mt-1 text-[13px] text-muted mono">{source}</footer>}</blockquote>;

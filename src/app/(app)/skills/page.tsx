@@ -28,7 +28,7 @@ export default function SkillsPage() {
           <Button variant="primary" busy={teach.busy} disabled={text.trim().length < 4} onClick={() => teach.run()}>Teach</Button></div>
         <HoldToTalk onText={(t) => setText((x) => (x ? x + " " : "") + t)} />
         {teach.error && <ErrorBox error={teach.error} />}
-        {out && <div className="rounded-xl border border-accent-dim bg-[#0b1c29] p-3 text-[14px] space-y-1" data-testid="teach-result"><div className="font-medium text-accent">{out.duplicate ? "Already handled" : `Outcome: ${out.outcome}`}</div>{out.steps.map((s: string, i: number) => <p key={i}>{s}</p>)}
+        {out && <div className="rounded-xl border border-accent-dim bg-accent-soft p-3 text-[14px] space-y-1" data-testid="teach-result"><div className="font-medium text-accent">{out.duplicate ? "Already handled" : `Outcome: ${out.outcome}`}</div>{out.steps.map((s: string, i: number) => <p key={i}>{s}</p>)}
           {out.before && out.after && out.outcome === "promote" && <p className="text-fg">Brief materials before: {out.before.materials.length}. After: {out.after.materials.length}.</p>}</div>}
       </Card></section>
     <section><SectionTitle right={active?.parentVersion != null ? <Button size="sm" variant="ghost" busy={rollback.busy} onClick={() => rollback.run()}><Undo2 className="size-3.5" />Roll back to v{active.parentVersion}</Button> : null}>Versions</SectionTitle>

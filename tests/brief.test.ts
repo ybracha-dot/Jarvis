@@ -3,7 +3,7 @@ import { memCtx } from "./helpers";
 import { all, get, getSetting } from "@/lib/db";
 import { importText, registerSource, ingestItem, markSource, addCorrection } from "@/lib/evidence";
 import { upsertCalendar } from "@/lib/bundle";
-import { buildBrief, runBrief, briefNow, briefFeedback, reserveBrief, briefToday } from "@/lib/brief";
+import { buildBrief, runBrief, briefNow, briefFeedback, reserveBrief, briefToday, agendaFor, sharePreview } from "@/lib/brief";
 import { saveBriefConfig } from "@/lib/brief-config";
 import { eventBody, SOURCE_LABEL } from "@/lib/blackboard";
 import { resultView } from "@/lib/assistant";
@@ -113,6 +113,16 @@ describe("a time slot is claimed only where a calendar says it is free", () => {
   });
 });
 
+describe("suggestions for different priorities", () => {
+  it("never overlap each other: each priority plans around the ones above it", () => {
+    const { ctx } = world(); importText(ctx, { kind: "note", title: "Poster deck", text: "The poster deck is due Thursday, November 19 at 3:00 PM. Please bring a printed handout.", at: "2026-11-12T12:00:00.000Z", label: "My class notes" });
+    importText(ctx, { kind: "note", title: "Lab report 4", text: "Lab report 4 is due Thursday, November 19 at 11:59 PM. Please upload a PDF to the course site.", at: "2026-11-12T12:00:00.000Z", label: "My class notes" });
+    const pr = buildBrief(ctx, { occurrenceKey: "t", kind: "ondemand" }).analysis.priorities; expect(pr.length).toBe(3);
+    const all2 = pr.flatMap((p) => p.blocks).sort((a, b) => Date.parse(a.start) - Date.parse(b.start)); expect(all2.length).toBeGreaterThanOrEqual(4);
+    for (let i = 1; i < all2.length; i++) expect(Date.parse(all2[i].start), `${all2[i - 1].end} vs ${all2[i].start}`).toBeGreaterThanOrEqual(Date.parse(all2[i - 1].end));
+  });
+});
+
 describe("reserving, dismissing and correcting", () => {
   it("one click reserves the proposed blocks locally, a repeat adds nothing, and the next brief shows them as reserved", () => {
     const { ctx } = world(); const key = buildBrief(ctx, { occurrenceKey: "t", kind: "ondemand" }).analysis.priorities[0].key;
@@ -176,5 +186,24 @@ describe("erasing the private workspace", () => {
     wipe(ctx);
     for (const t of ["evidence_items", "evidence_sources", "evidence_facts", "results", "requests", "brief_runs", "brief_feedback", "claude_grants", "share_log", "projects", "blocks"]) expect(get(ctx.db, `SELECT COUNT(*) n FROM ${t}`)!.n, t).toBe(0);
     expect(searchEvidence(ctx, ["essay", "outline"])).toEqual([]);
+  });
+});
+
+describe("the agenda beside the brief", () => {
+  it("keeps the instructor's deadline, a suggested start, a reservation and real busy time distinct", () => {
+    const { ctx } = world(); const a = buildBrief(ctx, { occurrenceKey: "t", kind: "ondemand" }).analysis; let ag = agendaFor(ctx, a);
+    const kinds = (d: string) => ag.days.find((x) => x.day === d)!.items.map((i) => i.kind);
+    expect(kinds("2026-11-17")).toEqual(expect.arrayContaining(["busy", "proposed"])); expect(ag.days.find((x) => x.day === "2026-11-19")!.items.some((i) => i.kind === "deadline" && /Due: Essay 2 outline/.test(i.label))).toBe(true);
+    expect(ag.days.flatMap((d) => d.items).filter((i) => i.kind === "proposed").every((i) => /not reserved yet/.test(i.detail ?? ""))).toBe(true);
+    reserveBrief(ctx, { key: a.priorities[0].key }); ag = agendaFor(ctx, buildBrief(ctx, { occurrenceKey: "t2", kind: "ondemand" }).analysis);
+    expect(ag.days.find((x) => x.day === "2026-11-17")!.items.map((i) => i.kind)).toEqual(expect.arrayContaining(["busy", "reserved"])); expect(ag.days.flatMap((d) => d.items).some((i) => i.kind === "proposed" && /Essay 2/.test(i.label))).toBe(false);
+  });
+  it("labels a day no calendar covers as unknown, and says coverage is judged from the first and last event; with no calendar nothing is called free", () => {
+    const { ctx } = world(); const ag = agendaFor(ctx, null); expect(ag.coverage.join(" ")).toMatch(/covers 2026-11-17 to 2026-11-19, judged from its first and last event; it is a snapshot/); expect(ag.days.every((d) => d.covered === (d.day >= "2026-11-17" && d.day <= "2026-11-19"))).toBe(true);
+    const bare = memCtx(CLOCK, "personal"); const g = agendaFor(bare, null); expect(g.days.every((d) => !d.covered && /unknown, not free/.test(d.coverageNote))).toBe(true); expect(g.coverage).toEqual([]);
+  });
+  it("previews what Claude would receive: titles of shared notes, only a count of what is kept out", () => {
+    const { ctx } = world(); importText(ctx, { kind: "note", title: "Shared poster", text: "The poster is due Friday, November 20 at 3:00 PM.", at: "2026-11-12T12:00:00.000Z", label: "Shared notes", shareable: true });
+    const p = sharePreview(ctx); expect(p.included.map((x) => x.title)).toEqual(["Shared poster"]); expect(p.withheld).toBe(1); expect(JSON.stringify(p)).not.toMatch(/Essay 2/);
   });
 });

@@ -13,7 +13,7 @@ export default function SourcesPage() {
   const scan = useAction(async () => api("/scheduler/run-now", { body: {} }));
   const [scanMsg, setScanMsg] = useState<string | null>(null);
   return <div className="space-y-6">
-    <div><h1 className="text-xl font-semibold tracking-tight">Sources and import</h1><p className="text-sm text-muted mt-1">Everything Jarvis knows came from a source you can open. Imported text is treated as data, never as instructions.</p></div>
+    <div><h1 className="t-title">Sources and import</h1><p className="text-sm text-muted mt-1">Everything Jarvis knows came from a source you can open. Imported text is treated as data, never as instructions.</p></div>
     <Importer />
     <Health />
     <section><SectionTitle>Watched folder</SectionTitle><Card className="p-4 space-y-2 text-sm">

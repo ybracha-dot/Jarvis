@@ -24,7 +24,7 @@ export function BriefSettings() {
   const sh = f.shabbat;
   return <section id="brief" data-testid="brief-settings"><SectionTitle>Morning brief</SectionTitle>
     <Card className="p-4 space-y-4">
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-[#67d4ff]" checked={f.enabled} onChange={(e) => upd("enabled", e.target.checked)} data-testid="brief-enable" />Build my brief automatically each morning (private schedules). Off until you turn it on. A worker must be running: <span className="mono">npm run worker</span></label>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-[var(--color-accent)]" checked={f.enabled} onChange={(e) => upd("enabled", e.target.checked)} data-testid="brief-enable" />Build my brief automatically each morning (private schedules). Off until you turn it on. A worker must be running: <span className="mono">npm run worker</span></label>
       <div className="grid sm:grid-cols-3 gap-3"><Field label="Brief time (local)"><input type="time" className={inputCls} value={f.time} onChange={(e) => upd("time", e.target.value)} data-testid="brief-time" /></Field><Field label="Time zone"><input className={inputCls} value={f.tz} onChange={(e) => upd("tz", e.target.value)} /></Field>
         <Field label="Work day"><div className="flex gap-2"><input type="time" className={inputCls} value={f.dayStart} onChange={(e) => upd("dayStart", e.target.value)} /><input type="time" className={inputCls} value={f.dayEnd} onChange={(e) => upd("dayEnd", e.target.value)} /></div></Field></div>
       {slots("classes", "Classes", "Jarvis treats these as busy every week and never proposes work then.")}

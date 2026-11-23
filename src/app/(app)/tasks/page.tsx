@@ -15,7 +15,7 @@ function Tasks() {
   const set = (t: string) => router.push(t === "tasks" ? "/tasks" : `/tasks?tab=${t}`);
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-semibold tracking-tight">Tasks</h1>
+      <h1 className="t-title">Tasks</h1>
       <div role="tablist" className="flex gap-1 p-1 rounded-lg bg-surface border border-line w-fit">
         {[["tasks", "Tasks"], ["followups", "Follow-ups"]].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => set(k)} className={cx("px-3.5 py-1.5 rounded-md text-sm", tab === k ? "bg-surface2 text-fg" : "text-muted")}>{l}</button>)}
       </div>
@@ -43,7 +43,7 @@ function TaskList() {
   </div>;
 }
 function TaskRow({ t, onOpen }: { t: any; onOpen: () => void }) {
-  return <li><button onClick={onOpen} className="w-full text-left rounded-xl border border-line bg-surface hover:border-[#37404a] p-3.5">
+  return <li><button onClick={onOpen} className="w-full text-left rounded-xl border border-line bg-surface hover:border-line-strong p-3.5">
     <div className="flex items-center gap-2 flex-wrap"><span className="text-sm font-medium break-words min-w-0">{t.title}</span><Badge>{t.course_code}</Badge>{t.kind === "exam" && <Badge tone="amber">exam</Badge>}{t.requirements.filter((r: any) => r.kind === "bring_print").map((r: any, i: number) => <Badge key={i} tone={r.mandatory ? "amber" : "neutral"}>print{r.mandatory ? "" : " (optional)"}</Badge>)}
       <Mono className="ml-auto text-[13px] text-muted">{t.due_at ? `due ${fmtDateTime(t.due_at)}` : "no date"}</Mono></div>
     {t.milestone && <p className="text-[14px] text-muted mt-1 break-words">{t.milestone}</p>}

@@ -31,10 +31,12 @@ export default function ConnectionsPage() {
   const url = `${d.publicUrl ?? "https://YOUR-HOST"}/mcp`;
   const err = [create.error, revoke.error, rotate.error, start.error, edit.error].find(Boolean);
   return (
-    <div className="space-y-6 max-w-3xl">
-      <header><h1 className="text-2xl font-semibold tracking-tight">Connections</h1><p className="text-[15px] text-muted mt-1">Let ordinary Claude read and update your projects, and prove it works in both directions.</p></header>
+    <div className="space-y-8 max-w-3xl">
+      <header><h1 className="t-title">Connections</h1><p className="t-body text-muted mt-2 max-w-[40rem]">What each source gives Jarvis, what Claude can read, and how to take it back.</p></header>
+      <SharingGate />
+      <h2 className="text-[22px] font-semibold tracking-tight pt-4">Connect Claude and other accounts</h2>
       <nav aria-label="On this page" className="flex gap-3 flex-wrap text-[14px]"><a className="text-accent underline underline-offset-2" href="#reader">Let Claude read your notes</a><a className="text-accent underline underline-offset-2" href="#roundtrip">Prove it with Claude</a><a className="text-accent underline underline-offset-2" href="#blackboard">Blackboard</a><a className="text-accent underline underline-offset-2" href="#sources">What Jarvis can read</a></nav>
-      <section aria-label="Status" className={cx("rounded-2xl border p-5 metal", claudeVerified ? "border-accent-dim bg-[#0b1c29]" : "border-line bg-surface")} data-testid="connection-status">
+      <section aria-label="Status" className={cx("rounded-2xl border p-5 metal", claudeVerified ? "border-accent-dim bg-accent-soft" : "border-line bg-surface")} data-testid="connection-status">
         <div className="flex items-center gap-2"><ShieldCheck className={cx("size-5", claudeVerified ? "text-accent" : "text-muted")} aria-hidden /><h2 className="text-[17px] font-medium">{claudeVerified ? "A round trip finished with clients that reported themselves as Claude" : testOnly ? "The connector works. It has only been tested with a local test client" : "Not verified with ordinary Claude yet"}</h2></div>
         <p className="text-[14px] text-muted mt-1.5">{claudeVerified ? "Jarvis cannot verify an account from a self-reported client name, but this is the write, change and fresh read you asked for. Details and timestamps are under the round trip." : testOnly ? "A test client proves the connector code works. It does not prove your own Claude account can reach this Jarvis. Run the round trip below from Claude." : "Local tests and the example workspace prove the connector code. Only a round trip from your own Claude account proves it reaches this Jarvis."}</p>
       </section>
@@ -48,7 +50,7 @@ export default function ConnectionsPage() {
             <Field label="Expires"><select className={inputCls} value={days} onChange={(e) => setDays(e.target.value)}><option value="30">30 days</option><option value="90">90 days</option><option value="365">1 year</option><option value="never">Never</option></select></Field>
             <Button variant="primary" busy={create.busy} disabled={!label.trim()} onClick={() => create.run()} data-testid="token-create"><KeyRound className="size-4" />Create</Button>
           </div>
-          {fresh && <div className="rounded-lg border border-amber-dim bg-[#1a1508] p-3 space-y-2" data-testid="token-fresh"><p className="text-[14px] text-[#f6d7a1]">Copy this now. It will not be shown again.</p><div className="flex gap-2 items-center flex-wrap"><code className="mono text-[13px] break-all bg-bg rounded px-2 py-1 border border-line flex-1 min-w-0" data-testid="token-value">{fresh.token}</code><CopyBtn text={fresh.token} /><Button size="sm" variant="ghost" onClick={() => setFresh(null)}>Hide</Button></div></div>}
+          {fresh && <div className="rounded-lg border border-amber-dim bg-amber-soft p-3 space-y-2" data-testid="token-fresh"><p className="text-[14px] text-amber">Copy this now. It will not be shown again.</p><div className="flex gap-2 items-center flex-wrap"><code className="mono text-[13px] break-all bg-bg rounded px-2 py-1 border border-line flex-1 min-w-0" data-testid="token-value">{fresh.token}</code><CopyBtn text={fresh.token} /><Button size="sm" variant="ghost" onClick={() => setFresh(null)}>Hide</Button></div></div>}
           {d.tokens.length > 0 && <ul className="space-y-2" data-testid="token-list">{d.tokens.map((t: any) => <li key={t.id} className="flex items-center gap-2 flex-wrap rounded-lg border border-line px-3 py-2 text-[14px]"><b className="font-medium">{t.label}</b><Badge tone={t.status === "active" ? "accent" : "neutral"}>{t.status}</Badge><Badge>{t.scopes.includes("write") ? "read + save" : "read only"}</Badge><span className="text-muted text-[13px]">{t.lastUsedAt ? `used ${fmtDateTime(t.lastUsedAt)}` : "never used"}{t.lastClient ? ` · client says it is ${t.lastClient}` : ""}{t.expiresAt ? ` · expires ${fmtDateTime(t.expiresAt)}` : ""}</span>
             {t.status === "active" && <span className="ml-auto flex gap-1.5"><Button size="sm" busy={rotate.busy} onClick={() => rotate.run(t.id)}><RefreshCw className="size-4" />Rotate</Button><Button size="sm" variant="danger" busy={revoke.busy} onClick={() => revoke.run(t.id)}><Ban className="size-4" />Revoke</Button></span>}</li>)}</ul>}
         </Step>
@@ -79,7 +81,6 @@ export default function ConnectionsPage() {
         {sess.data?.mode !== "personal" && !srcs.data?.sources.some((s: any) => s.mode === "fixture") && <div className="mt-3"><SampleLoader /></div>}
         <ImportForm /></section>
       <ReaderCard />
-      <SharingGate />
       <BlackboardCard />
       <RoundTripCard />
       <section aria-label="Disconnect"><SectionTitle>Disconnect</SectionTitle><Card className="p-4 text-[14px] space-y-1.5"><p>Revoke the token above. It stops working immediately, even in a Claude conversation that is already open.</p><p>Then remove the connector in Claude: Settings, Connectors, Jarvis, Remove. What was saved stays in Jarvis until you forget it.</p></Card></section>
@@ -184,4 +185,4 @@ function RoundTripCard() {
 }
 
 /** The sharing controls matter only in the private workspace: the example workspace is synthetic. */
-function SharingGate() { const sess = useQuery<any>("/session"); if (sess.data?.mode !== "personal") return null; return <SharingPanel />; }
+function SharingGate() { return <SharingPanel />; }

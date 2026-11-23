@@ -27,9 +27,9 @@ import { addCorrection, listSources, getItem, importText, revokeSource, reauthor
 import { startRoundTrip, roundTripState, editRoundTrip } from "./roundtrip";
 import { blackboardStatus, readFeed, saveFeed, removeFeed } from "./blackboard";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
-import { briefToday, briefNow, briefFeedback, reserveBrief, shareBrief, unshareBrief } from "./brief";
+import { briefToday, briefNow, briefFeedback, reserveBrief, shareBrief, unshareBrief, sharePreview } from "./brief";
 import { getBriefConfig, saveBriefConfig } from "./brief-config";
-import { sharingState, setSourceSharing, setProjectSharing, grantResult, revokeResult, resultAccess } from "./share";
+import { sharingState, sourcePreview, setSourceSharing, setProjectSharing, grantResult, revokeResult, resultAccess } from "./share";
 import { availabilityCoverage } from "./calendar-cover";
 import { issueReaderTask, submitReaderResult, createReaderTestProject, readerTestState, readerHandoff, confirmReader } from "./reader";
 import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
@@ -218,11 +218,13 @@ on("POST", "/brief/reserve", (c, r) => { const b = r.json(z.object({ key: z.stri
 on("GET", "/brief/config", (c) => getBriefConfig(c));
 on("POST", "/brief/config", (c, r) => saveBriefConfig(c, r.json(z.any())));
 on("GET", "/sharing", (c) => sharingState(c));
+on("GET", "/sharing/brief-preview", (c) => sharePreview(c));
+on("GET", "/sharing/sources/:id/preview", (c, r) => sourcePreview(c, r.params.id));
 on("POST", "/sharing/sources/:id", (c, r) => setSourceSharing(c, r.params.id, r.json(z.object({ share: z.boolean() }).strict()).share));
 on("POST", "/sharing/projects/:id", (c, r) => setProjectSharing(c, r.params.id, r.json(z.object({ share: z.boolean() }).strict()).share));
 on("POST", "/sharing/results/:id", (c, r) => {
   const share = r.json(z.object({ share: z.boolean() }).strict()).share; const isFullBrief = !!get(c.db, "SELECT 1 x FROM brief_runs WHERE result_id=? AND view='full'", r.params.id);
-  if (isFullBrief) return share ? shareBrief(c, r.params.id) : unshareBrief(c, r.params.id);            // a brief mixes private and shareable evidence: Claude gets a separate view
+  if (isFullBrief) return share ? shareBrief(c, r.params.id) : unshareBrief(c);            // a brief mixes private and shareable evidence: Claude gets a separate view
   if (!share) return revokeResult(c, r.params.id);
   return { ...grantResult(c, r.params.id), sharedResultId: r.params.id };
 });

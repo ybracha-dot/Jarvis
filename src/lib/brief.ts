@@ -6,13 +6,13 @@ import { HttpError } from "./decisions";
 import { findDates, resolveWeekday, splitSentences } from "./extract";
 import { tokens, ownerName } from "./evidence";
 import { findTaskRefs } from "./extract";
-import { Interval, plannerSettings, planWork, collides } from "./planner";
+import { Interval, plannerSettings, planWork, collides, weeklyEntries } from "./planner";
 import { availabilityCoverage, uncoveredIntervals, uncoveredDays, Coverage, coveredOn } from "./calendar-cover";
 import { addDays, dayOfWeek, diffDays, fmtDateTime, localDate, localHM, parseLocal } from "./time";
 import { saveResult, verifyResult } from "./assistant";
 import { enqueue } from "./notify";
 import { deepLinkBase } from "./capture";
-import { grantResult, revokeResult } from "./share";
+import { grantResult, revokeResult, resultShared, resultAccess } from "./share";
 
 // ---------- types ----------
 export interface BriefSource { itemId: string; revision: number; title: string; kind: string; at: string; sourceLabel: string; mode: string; role: string; quote: string; shareable: boolean }
@@ -212,13 +212,13 @@ const href = (s: BriefSource) => s.itemId.startsWith("task:") ? `/?drawer=task&i
 // ---------- the brief ----------
 export interface BuildOpts { occurrenceKey: string; kind: "scheduled" | "ondemand"; view?: "full" | "shared" }
 const STEP_PRINT = 15;
-function plan(ctx: Ctx, o: Obligation, est: number, cov: Coverage[], now: Date, reservedOwn: any[]): { blocks: BlockProposal[]; note: string | null } {
+function plan(ctx: Ctx, o: Obligation, est: number, cov: Coverage[], now: Date, reservedOwn: any[], taken: Interval[] = []): { blocks: BlockProposal[]; note: string | null } {
   if (!o.due) return { blocks: [], note: null }; const due = new Date(o.due.at); if (due.getTime() <= now.getTime()) return { blocks: [], note: "The deadline has passed, so Jarvis proposes no time." };
   if (reservedOwn.length) return { blocks: [], note: null };
   if (!cov.some((c) => c.trusted)) return { blocks: [], note: "No calendar has been read, so Jarvis cannot say when you are free. Import a calendar file or paste your Blackboard link, then rebuild." };
-  const extra = uncoveredIntervals(ctx, now, due, cov); const hasPrint = o.requirements.some((r) => /print|hard ?copy|printout/i.test(r.action));
+  const extra = [...uncoveredIntervals(ctx, now, due, cov), ...taken]; const hasPrint = o.requirements.some((r) => /print|hard ?copy|printout/i.test(r.action));
   const workMin = Math.max(15, est);
-  const p1 = planWork(ctx, { effort: workMin, from: now, due, extraBusy: extra, minChunk: 15 });
+  const p1 = planWork(ctx, { effort: workMin, from: now, due, extraBusy: extra, minChunk: Math.min(30, workMin) });
   const gaps = uncoveredDays(ctx, now, due, cov);
   if (p1.shortfall > 0) return { blocks: [], note: gaps.length ? `The calendar covers only some of the days before this is due (${gaps.length} day${gaps.length === 1 ? "" : "s"} unknown), and there is not enough free time in the covered days. Jarvis will not call an unknown day free.` : `No free ${workMin} minutes before this is due (short by ${p1.shortfall} min). Free a block, or ask for an extension.` };
   const blocks: BlockProposal[] = p1.chunks.map((c) => ({ start: c.start, end: c.end, minutes: c.minutes, label: `Work on ${o.title}`, step: "work" }));
@@ -232,12 +232,12 @@ function plan(ctx: Ctx, o: Obligation, est: number, cov: Coverage[], now: Date, 
   return { blocks, note: gaps.length ? `Calendar coverage is unknown for ${gaps.length} day${gaps.length === 1 ? "" : "s"} before the deadline; only covered days were used.` : null };
 }
 
-function priorityOf(ctx: Ctx, o: Obligation, rank: number, cov: Coverage[], changes: Change[], fbs: any[], tz: string): Priority {
+function priorityOf(ctx: Ctx, o: Obligation, rank: number, cov: Coverage[], changes: Change[], fbs: any[], tz: string, taken: Interval[] = []): Priority {
   const now = ctx.now(); const est = fbs.filter((f) => f.obligation_key === o.key && f.kind === "estimate").pop();
   const base = defaultEstimate(`${o.title} ${o.requirements.map((r) => r.action).join(" ")}`);
   const estimate = est ? { minutes: Number(est.value), basis: "user" as const, label: `${est.value} min (your estimate)` } : { minutes: base.minutes, basis: "default" as const, label: `${base.minutes} min (estimate: ${base.why}; correct it if it is wrong)` };
   const reserved = all(ctx.db, "SELECT id,start_at,end_at,title FROM blocks WHERE owner_id=? AND source='brief' AND revision_id=? AND state='active' AND end_at>?", ctx.owner, `brief:${o.key}`, now.toISOString()).map((b) => ({ id: String(b.id), start: String(b.start_at), end: String(b.end_at), label: String(b.title) }));
-  const pl = plan(ctx, o, estimate.minutes, cov, now, reserved);
+  const pl = plan(ctx, o, estimate.minutes, cov, now, reserved, taken);
   const first = o.requirements[0]; const next = first ? first.action : !o.requirementsKnown ? `Find out what “${o.title}” requires (the calendar only gives the date)` : /outline|essay|paper|draft|report|memo|proposal|presentation|slides/i.test(o.title) ? `Work on ${o.title}` : `Do: ${o.title}`;
   const dueLabel = o.due ? { at: o.due.at, label: fmtDueLabel(o.due.at, o.due.timeAssumed, tz), relative: relative(ctx, o.due.at, tz), assumedTime: o.due.timeAssumed } : null;
   const why: string[] = []; if (o.superseded.length && o.due) { const last = o.superseded[o.superseded.length - 1]; const n = diffDays(localDate(last.at, tz), localDate(o.due.at, tz)); why.push(o.userDue ? `You corrected the deadline (it was ${fmtDueLabel(last.at, last.timeAssumed, tz)}).` : `${n < 0 ? "Moved up" : n > 0 ? "Pushed back" : "Time changed"}${n ? ` ${Math.abs(n)} day${Math.abs(n) === 1 ? "" : "s"}` : ""} from ${fmtDueLabel(last.at, last.timeAssumed, tz)} by “${last.by}”. The instructor's deadline is the one above; your work blocks are separate.`); } else if (o.dueBasis) why.push(o.dueBasis); if (o.conflicts.length) why.push("Two sources disagree about the deadline; the earlier one is used until you decide."); if (!o.requirementsKnown) why.push("This deadline comes from a calendar, which does not include the instructions or what to hand in.");
@@ -272,7 +272,8 @@ export function buildBrief(ctx: Ctx, opts: BuildOpts): { analysis: BriefAnalysis
   const score = (o: Obligation) => { if (!o.due) return -50; const h = (Date.parse(o.due.at) - now.getTime()) / 3600000; const base = h < 0 ? 400 + Math.min(60, -h / 24) : 300 / (1 + h / 24); return base + (changes.filter((c) => c.key === o.key).reduce((m, c) => Math.max(m, c.score), 0)) * 0.6 + (o.conflicts.length ? 25 : 0); };
   const ranked = live.filter((o) => o.due && (Date.parse(o.due.at) - now.getTime() < 7 * 86400000 || changes.some((c) => c.key === o.key) || o.conflicts.length)).sort((a, b) => score(b) - score(a));
   const top = ranked.slice(0, 3); const topKeys = new Set(top.map((o) => o.key));
-  const priorities = top.map((o, i) => priorityOf(ctx, o, i + 1, cov, changes, fbs, tz));
+  // Suggestions never overlap each other: each priority plans around the ones above it.
+  const taken: Interval[] = []; const priorities = top.map((o, i) => { const pr = priorityOf(ctx, o, i + 1, cov, changes, fbs, tz, taken); for (const b of pr.blocks) taken.push({ start: Date.parse(b.start), end: Date.parse(b.end), kind: "proposed" }); return pr; });
   const rest = live.filter((o) => !topKeys.has(o.key) && o.due).sort((a, b) => Date.parse(a.due!.at) - Date.parse(b.due!.at));
   const alsoDue = rest.slice(0, 8).map((o) => ({ key: o.key, title: o.title, due: o.due!.at, label: fmtDueLabel(o.due!.at, o.due!.timeAssumed, tz), href: o.dueSource ? href(o.dueSource) : o.link }));
   const owedBeforeTomorrow = live.filter((o) => o.due && Date.parse(o.due.at) < endTomorrow).length;
@@ -347,9 +348,51 @@ export function shareBrief(ctx: Ctx, resultId: string) {
   const v = runBrief(ctx, { occurrenceKey: row.occurrence_key as string, kind: row.kind as "scheduled" | "ondemand", view: "shared" }); grantResult(ctx, v.resultId, resultId);
   return { shared: true as const, sharedResultId: v.resultId, link: `/results/${v.resultId}` };
 }
-export function unshareBrief(ctx: Ctx, resultId: string) {
-  const row = get(ctx.db, "SELECT occurrence_key FROM brief_runs WHERE result_id=? AND view='full'", resultId); const v = row ? get(ctx.db, "SELECT result_id FROM brief_runs WHERE occurrence_key=?", `${row.occurrence_key}|shared`) : null;
-  if (v) revokeResult(ctx, v.result_id as string); return { shared: false as const };
+/** Take it back: every shared view that Claude can still open is closed, whichever brief it was made from. A newer brief does not leave an older shared view open. */
+export function unshareBrief(ctx: Ctx, _resultId?: string) {
+  for (const r of all(ctx.db, "SELECT result_id FROM brief_runs WHERE view='shared'")) if (resultShared(ctx, r.result_id as string)) revokeResult(ctx, r.result_id as string);
+  return { shared: false as const };
+}
+
+// ---------- the agenda beside the brief ----------
+export interface AgendaItem { id: string; kind: "busy" | "class" | "quiet" | "deadline" | "proposed" | "reserved"; start: string; end: string | null; label: string; detail: string | null; href: string | null }
+export interface AgendaDay { day: string; name: string; covered: boolean; coverageNote: string; items: AgendaItem[] }
+/** Real busy periods, the instructor's deadlines, suggested times and reserved times, each kept distinct. A day no calendar covers is unknown, never free. */
+export function agendaFor(ctx: Ctx, a: BriefAnalysis | null): { days: AgendaDay[]; coverage: string[] } {
+  const tz = plannerSettings(ctx).tz; const now = ctx.now(); const today = localDate(now, tz); const cov = availabilityCoverage(ctx);
+  const dayNames = (d: string) => d === today ? "Today" : d === addDays(today, 1) ? "Tomorrow" : new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" }).format(new Date(`${d}T12:00:00Z`));
+  const days = new Set<string>([today, addDays(today, 1)]);
+  for (const p of a?.priorities ?? []) { if (p.due) { const d = localDate(p.due.at, tz); if (d >= today && d <= addDays(today, 4)) days.add(d); } for (const b of p.blocks) days.add(localDate(b.start, tz)); }
+  const reserved = all(ctx.db, "SELECT id,start_at,end_at,title,revision_id FROM blocks WHERE owner_id=? AND source='brief' AND state='active' AND end_at>?", ctx.owner, now.toISOString()); for (const b of reserved) days.add(localDate(b.start_at as string, tz));
+  const order = [...days].filter((d) => d >= today).sort().slice(0, 4); const out: AgendaDay[] = [];
+  for (const d of order) {
+    const lo = parseLocal(d, "00:00", tz), hi = parseLocal(addDays(d, 1), "00:00", tz); const items: AgendaItem[] = []; const covered = coveredOn(cov, d);
+    for (const b of all(ctx.db, "SELECT id,start_at,end_at,title,source FROM blocks WHERE owner_id=? AND kind='calendar' AND state='active' AND end_at>? AND start_at<? ORDER BY start_at", ctx.owner, lo.toISOString(), hi.toISOString())) items.push({ id: String(b.id), kind: "busy", start: String(b.start_at), end: String(b.end_at), label: String(b.title), detail: "On your calendar", href: null });
+    for (const w of weeklyEntries(ctx)) if (w.days.includes(dayOfWeek(d))) items.push({ id: `w:${w.label}:${d}`, kind: w.kind === "class" ? "class" : "quiet", start: parseLocal(d, w.start, tz).toISOString(), end: parseLocal(addDays(d, w.spansDays ?? 0), w.end, tz).toISOString(), label: w.label, detail: w.kind === "class" ? "Your class time" : "Quiet time you set", href: null });
+    for (const p of a?.priorities ?? []) {
+      if (p.due && localDate(p.due.at, tz) === d) items.push({ id: `due:${p.key}`, kind: "deadline", start: p.due.at, end: null, label: `Due: ${p.title}`, detail: "Deadline set by the instructor", href: p.evidence[0]?.href ?? null });
+      if (!p.reserved.length) for (const b of p.blocks) if (localDate(b.start, tz) === d) items.push({ id: `prop:${p.key}:${b.start}`, kind: "proposed", start: b.start, end: b.end, label: b.step === "print" ? `Print and check: ${p.title}` : `Work on ${p.title}`, detail: `${b.minutes} min · not reserved yet`, href: null });
+    }
+    for (const b of reserved) if (localDate(b.start_at as string, tz) === d) items.push({ id: String(b.id), kind: "reserved", start: String(b.start_at), end: String(b.end_at), label: String(b.title), detail: "Reserved on this computer", href: null });
+    items.sort((x, y) => Date.parse(x.start) - Date.parse(y.start) || x.kind.localeCompare(y.kind));
+    out.push({ day: d, name: dayNames(d), covered, items, coverageNote: covered ? "A calendar you read covers this day." : cov.some((c) => c.trusted) ? "No calendar covers this day, so open time here is unknown, not free." : "No calendar has been read, so open time is unknown, not free." });
+  }
+  const notes = cov.map((c) => c.mode === "declared" ? `${c.label}: ${c.fromDay} to ${c.toDay}.` : c.trusted ? `${c.label}: covers ${c.fromDay} to ${c.toDay}, judged from its first and last event${c.mode === "imported" ? "; it is a snapshot and does not update by itself" : ""}.` : `${c.label}: ${c.note}`);
+  return { days: out, coverage: notes };
+}
+
+/** If a scheduled brief is going to be missed, say so, with the step that fixes it. */
+function scheduleWarning(ctx: Ctx, sch: { enabled: boolean; paused: boolean; workerActive: boolean; nextRun: any }, tz: string): { text: string; fix: string } | null {
+  if (!sch.enabled || !sch.nextRun) return null; const when = fmtDateTime(sch.nextRun.at, tz);
+  if (sch.paused) return { text: `Scheduled briefs are paused, so the one due ${when} will not run.`, fix: "Resume them in Settings." };
+  if (!sch.workerActive && Date.parse(sch.nextRun.at) - ctx.now().getTime() < 36 * 3600_000) return { text: `The brief due ${when} will not run: no worker is running.`, fix: "Start one in Terminal: npm run worker" };
+  return null;
+}
+
+/** What Claude would receive if the user shared the brief now. Titles of what would be included, and only a count of what is kept out. */
+export function sharePreview(ctx: Ctx) {
+  const { analysis: a } = buildBrief(ctx, { occurrenceKey: "preview", kind: "ondemand", view: "shared" }); const tz = a.tz;
+  return { included: [...a.priorities.map((p) => ({ title: p.title, due: p.due ? p.due.label : null })), ...a.alsoDue.map((o) => ({ title: o.title, due: o.label }))], withheld: a.unshareableCount };
 }
 
 /** Today's reading of the latest brief, plus the honest state of the machinery behind it. */
@@ -357,8 +400,9 @@ export function briefToday(ctx: Ctx, sch: { enabled: boolean; paused: boolean; w
   const run1 = lastRun(ctx, "full"); const tz = plannerSettings(ctx).tz;
   const analysis = run1 ? (get(ctx.db, "SELECT rv.analysis FROM result_versions rv JOIN results r ON r.id=rv.result_id AND r.version=rv.version WHERE r.id=?", run1.result_id)?.analysis as string | null) : null;
   const recentMisses = all(ctx.db, "SELECT occurrence_key, scheduled_for, ran_at, status, detail FROM schedule_runs WHERE (missed=1 OR status IN ('failed','deferred') OR detail IS NOT NULL) AND ran_at>? ORDER BY ran_at DESC LIMIT 5", new Date(ctx.now().getTime() - 7 * 86400000).toISOString()).map((r) => ({ key: r.occurrence_key as string, scheduledFor: r.scheduled_for as string, ranAt: r.ran_at as string, status: r.status as string, detail: (r.detail as string | null) ?? null }));
-  const shared = run1 ? get(ctx.db, "SELECT * FROM brief_runs WHERE view='shared' AND status='ok' ORDER BY built_at DESC, rowid DESC LIMIT 1") : null;
+  const sharedRuns = all(ctx.db, "SELECT * FROM brief_runs WHERE view='shared' AND status='ok' ORDER BY built_at DESC, rowid DESC LIMIT 12"); const shared = sharedRuns.find((r) => resultAccess(ctx, r.result_id as string).allowed) ?? sharedRuns[0] ?? null;
   return { tz, enabled: getSetting(ctx.db, "brief_enabled", ctx.mode === "personal"), analysis: analysis ? (JSON.parse(analysis) as BriefAnalysis) : null, resultId: (run1?.result_id as string | null) ?? null, builtAt: (run1?.built_at as string | null) ?? null, occurrenceKey: (run1?.occurrence_key as string | null) ?? null,
+    agenda: agendaFor(ctx, analysis ? (JSON.parse(analysis) as BriefAnalysis) : null), hasNotes: (get(ctx.db, "SELECT COUNT(*) n FROM evidence_items WHERE owner_id=? AND tombstone=0 AND kind NOT IN ('calendar','claude')", ctx.owner)?.n as number) > 0, hasCalendar: availabilityCoverage(ctx).some((c) => c.trusted), now: ctx.now().toISOString(), scheduleWarning: scheduleWarning(ctx, sch, tz),
     scheduler: { enabled: sch.enabled, paused: sch.paused, workerActive: sch.workerActive, lastHeartbeat: sch.lastHeartbeat, nextRun: sch.nextRun, lastRun: sch.lastRun, message: sch.message, quietNow: sch.quietNow }, lastSuccessAt: (run1?.built_at as string | null) ?? null, recentMisses, sharedResultId: (shared?.result_id as string | null) ?? null, link: deepLinkBase() };
 }
 
