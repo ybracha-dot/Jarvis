@@ -1,8 +1,46 @@
 # MORNING
 
-Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Interface redesign: Today, the shell, light and dark** (this round), **The first private morning brief**, **Handoff completeness: Finished means every open assignment is accounted for**, **Reader field check: quantities and who submitted**, **Let Claude read the notes, and make completion verifiable**, **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
+Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Office, the TAMID thread, and the scheduling words** (this round), **Interface redesign: Today, the shell, light and dark**, **The first private morning brief**, **Handoff completeness: Finished means every open assignment is accounted for**, **Reader field check: quantities and who submitted**, **Let Claude read the notes, and make completion verifiable**, **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
 
-# Interface redesign: Today, the shell, light and dark (latest)
+# Office, the TAMID thread, and the scheduling words (latest)
+
+Baseline `63af5b7`; the Today layout is unchanged. Paid model calls stayed off (the whole thread run makes **zero** model calls). Every screenshot uses invented data. Open this first: **Office** in the example workspace.
+
+## What you reported, and what changed
+- **Office spent three panels saying it was idle.** Idle is now one status line ("All desks idle. Idle desks make zero model calls."). When something is moving, the same line shows who handed work to whom, who is working, and who needs you, each from a saved job row (`handoff-assigned/working/needs` appear only when there is something to say).
+- **The composer covered the room.** On a laptop the room is the first thing under the title and is sized to the window (it never grows past what fits above the composer). The browser test measures it: at 1440x900, 1280x720 and 1024x768 the room, including your desk, ends above the top of the composer. The composer also fades the content behind it, so the first roster row no longer shows through.
+- **Clicking an agent** now answers five questions in this order: *You asked* (your own words, from the capture or request that started the work), *Assigned by*, *Doing now*, *Needs from you*, *Result* (an "Open what it produced" button). When it needs you, an amber block at the top says who is waiting, what is to be decided, and has one button ("Review and decide"). Heartbeat, evidence, tools, budget, steps and events moved under "Run details".
+- **On a phone** the room is hidden, and the first card under the title is the decision waiting for you (or, failing that, the agent that is working). The roster leads with live work and keeps each helper under the one that delegated it. Picking a job brings its inspector to the top.
+- **Pixel Agents boundary is unchanged.** The room is Jarvis's own art in the Pixel Agents direction you supplied; Pixel Agents itself stays a separate app for Claude Code terminals and was not run here. No assets were copied.
+- **Nameplates** no longer end mid-word ("waiting on helpe…", "CONFIRMING THE").
+
+## The one TAMID pitch, used everywhere
+The sample data now tells one story. **Projects → TAMID**: *What we decided* (Wednesday, with when it changed and that it replaced Monday, and where each came from), *What I owe next* (the three pitch angles from the Office capture, due Thursday, plus the follow-up to send to Dana) and *Latest draft* (opens the same saved result). From the draft, the source link opens the original email with the quote highlighted. **Memory**: searching "sponsor follow-up" shows the current decision, "Current since" with its source, and "It replaced Monday (set Tue Nov 10, from the sync)". The project list shows the same three things per project. The "where the output went" list on Today now says "Recorded from your sources" for imported decisions instead of "Edited in Jarvis".
+- Memory search now matches every word against the topic, the text or the project name, so "sponsor follow-up" finds "sponsor-follow-up".
+- The sample project is now called **TAMID** (it was "Lantern Club") so the Office capture, Projects and Memory are the same project.
+
+## Scheduling language and calendar coverage
+- Before you press **Reserve**, Today says **Suggested** and "Nothing is reserved until you press the button". **Reserved** appears only after the reservation saves, and it is still there after a reload. The browser test checks both and that "Reserved on this computer only" never appears early.
+- A calendar export that lists events on only some days (Monday and Friday, Wednesday omitted) does **not** make Wednesday free: the agenda marks it "Calendar unknown", no time is proposed there, and the planner treats it as busy. You can confirm a day yourself ("Confirm Wednesday is open"); that is shown as "You confirmed", survives a reload, and can be taken back. Unit tests cover the Monday/Friday/Wednesday export; the browser test covers the confirm, reload and take-back flow.
+
+## The run you asked to see (`docs/screenshots/thread/`)
+One TAMID pitch, driven through the real app by `E2E_ONLY=thread npm run e2e`: the promise is captured in the Office, the Planner works, the Reviewer needs a decision, the decision is made, "Pick up where we left off on the TAMID sponsor pitch and draft my follow-up" is asked from the same composer, and the saved draft is opened from the Office.
+- `1-working-*`: the handoff while the Planner is working (laptop shows the status line, the cyan assignment and the inspector; phone shows the working card first).
+- `2-needs-you-*`: the moment an agent needs you. Who is waiting (Reviewer), what (TAMID team: three pitch angles by Thursday), where to click (Review and decide), and nothing about setup.
+- `3-finished-*`: the finished agent with "Open what it produced". `4-result-laptop-light.png`, `5-project-*`, `6-source-laptop-light.png`, `7-memory-*` follow the same project and result.
+- Each is captured at laptop (1440x900) and phone (390x844) in light and dark, except 4 and 6 (laptop, light) and 5 and 7 (laptop, light and dark).
+
+## Verification (final build)
+- Typecheck clean; **413 unit tests (36 files)**; production build; the whole browser suite **437 checks, 0 problems** (Chromium; 5 expected failures from deliberate break tests are ignored by design). The suite includes the new thread journey (19 checks) with axe (WCAG 2.1 AA) on the Office while an agent is waiting, in light and dark at laptop and phone width: **0 serious or critical violations**.
+- New in the suite: idle Office is one status line; the inspector quotes what you asked; the room clears the composer at three laptop sizes; the last mobile control is fully visible and tappable above the tab bar; Suggested vs Reserved (before and after a reload); an export listing only some days leaves the rest unknown, and your confirmation of a day survives a reload and can be taken back; Projects, the draft's source quote and Memory tell the same TAMID story; the thread makes zero model calls.
+- One harness note: after the long assistant journey the Connections "Load the sample" button was not clickable in the browser harness (Playwright kept reporting it detached). The thread journey therefore makes the same request that button makes (`POST /evidence/fixtures`); the button itself is clicked in the assistant journey earlier in the run. I did not root-cause it.
+
+## What I could not test
+- **Only Chromium was run** (Playwright's bundled build; phone views are Chromium emulation with touch, not an iPhone). **Safari/WebKit was not tested**; none is installed here. Real-device software-keyboard behaviour is still unverified.
+- Pixel Agents and the live Claude pilot are unchanged and still pending; no provider is marked connected.
+- The older screenshots `01`–`50` predate the redesign and were not regenerated; `docs/screenshots/thread/` and `15*`, `16*` are from this build.
+
+# Interface redesign: Today, the shell, light and dark (previous)
 
 Baseline `d9791f7`. Open this first: the **private workspace → Today** (http://127.0.0.1:3000, Open private workspace). Paid model calls stayed off. All screenshots use invented notes; none are yours.
 

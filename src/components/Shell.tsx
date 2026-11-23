@@ -126,7 +126,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
         </main>
 
         {isMain && <div className={cx("z-30 px-3 md:px-10 pointer-events-none fixed inset-x-0 md:sticky md:bottom-0 md:pb-4", kb ? "bottom-[var(--kb)]" : "bottom-[calc(4.4rem+env(safe-area-inset-bottom))] md:bottom-0")} data-testid="composer-wrap">
-          <div className="w-full max-w-[1240px] mx-auto pointer-events-none"><div className="max-w-[46rem] pointer-events-auto pb-2 md:pb-0"><VoiceDock variant="bar" /></div></div></div>}
+          <div className="w-full max-w-[1240px] mx-auto pointer-events-none relative"><div aria-hidden className="absolute -inset-x-3 md:-inset-x-10 -top-6 -bottom-0 md:-bottom-4 bg-gradient-to-t from-bg from-55% to-transparent" /><div className="relative max-w-[46rem] pointer-events-auto pb-2 md:pb-0"><VoiceDock variant="bar" /></div></div></div>}
       </div>
 
       {!kb && <nav aria-label="Primary mobile" className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-line glass grid grid-cols-5 pb-[env(safe-area-inset-bottom)]">

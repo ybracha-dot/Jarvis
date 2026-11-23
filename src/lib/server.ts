@@ -151,7 +151,11 @@ on("POST", "/evidence/sources/:id/authorize", (c, r) => reauthorizeSource(c, r.p
 on("POST", "/evidence/items/:id/forget", (c, r) => { r.json(z.object({ confirm: z.literal(true) })); return forgetItem(c, r.params.id); });
 on("POST", "/evidence/fixtures", (c) => { demoOnly(c); return loadWorkspaceFixtures(c); });
 on("GET", "/outcomes", (c, r) => ({ outcomes: outcomes(c, Math.min(Number(r.query.get("limit") ?? 20) || 20, 60)) }));
-on("GET", "/projects", (c) => ({ projects: listProjects(c) }));
+on("GET", "/projects", (c) => ({ projects: listProjects(c).map((p) => {
+  const d = projectContext(c, p.id); const top = d.current.filter((f) => f.kind === "decision").sort((a, b) => Date.parse(b.asOf) - Date.parse(a.asOf))[0] ?? null;
+  const draft = listResults(c, { projectId: p.id, limit: 1 })[0] ?? null;
+  return { ...p, headline: top ? { key: top.key, text: top.text, changed: !!top.replaced } : null, owe: projectOwe(c, p.id).items.length, draft: draft ? { title: draft.title, link: draft.link, version: draft.version } : null };
+}) }));
 on("POST", "/projects", (c, r) => createProject(c, r.json(z.object({ name: z.string().trim().min(1).max(120), kind: z.enum(["trip", "course", "club", "project", "other"]).default("project"), aliases: z.array(z.string().max(80)).max(8).optional() }).strict())));
 on("GET", "/projects/:id", (c, r) => ({ ...projectContext(c, r.params.id), events: projectEvents(c, r.params.id), owe: projectOwe(c, r.params.id).items }));
 on("POST", "/projects/:id/update", (c, r) => { const b = r.json(z.record(z.string(), z.unknown())); return applyProjectUpdate(c, { ...(b as any), project: r.params.id, origin: "jarvis-ui" }); });

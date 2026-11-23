@@ -27,10 +27,14 @@ export default function ProjectsPage() {
       ) : (
         <ul className="grid md:grid-cols-2 gap-4" data-testid="project-list">
           {list.map((p) => (
-            <li key={p.id}><Link href={`/projects/${p.id}`} className="block rounded-xl border border-line bg-surface metal p-5 hover:border-line-strong transition-colors h-full" data-testid="project-card">
-              <div className="flex items-center gap-2 flex-wrap"><h2 className="text-lg font-medium">{p.name}</h2><Badge>{p.kind}</Badge>{p.counts.suggestions > 0 && <Badge tone="amber">{p.counts.suggestions} to confirm</Badge>}</div>
-              <p className="text-[14px] text-muted mt-2">{p.counts.current} current decision{p.counts.current === 1 ? "" : "s"} · <Mono className="text-[13px]">revision {p.revision}</Mono></p>
-              <p className="text-[14px] text-muted mt-1">{p.last_origin ? `Last update: ${ORIGIN[p.last_origin] ?? p.last_origin}, ${fmtDateTime(p.updated_at)}` : "No updates yet."}</p>
+            <li key={p.id}><Link href={`/projects/${p.id}`} className="block rounded-2xl border border-line bg-surface p-5 lift hover:border-line-strong transition-colors h-full" data-testid="project-card">
+              <div className="flex items-center gap-2 flex-wrap"><h2 className="text-[19px] font-semibold tracking-tight">{p.name}</h2><Badge>{p.kind}</Badge>{p.counts.suggestions > 0 && <Badge tone="amber">{p.counts.suggestions} to confirm</Badge>}<ArrowRight className="size-4 text-muted ml-auto" aria-hidden /></div>
+              {p.headline ? <div className="mt-3" data-testid="project-headline"><div className="text-[12px] uppercase tracking-wider text-muted">{p.headline.key.replace(/-/g, " ")}</div><p className="text-[16.5px] leading-snug font-medium break-words">{p.headline.text}</p>{p.headline.changed && <p className="text-[13px] text-muted">Changed from an earlier decision</p>}</div> : <p className="text-[14.5px] text-muted mt-3">{p.counts.current} current decision{p.counts.current === 1 ? "" : "s"}.</p>}
+              <div className="mt-3 pt-3 border-t border-line flex flex-wrap gap-x-5 gap-y-1 text-[13.5px] text-muted">
+                <span><b className="text-fg font-medium tnum">{p.owe}</b> to do or owed</span>
+                <span>{p.draft ? <>Latest draft: <b className="text-fg font-medium">{p.draft.title}</b></> : "No draft yet"}</span>
+                <span className="ml-auto">{p.last_origin ? `${ORIGIN[p.last_origin] ?? p.last_origin}, ${fmtDateTime(p.updated_at)}` : "No updates yet"}</span>
+              </div>
             </Link></li>))}
         </ul>
       )}

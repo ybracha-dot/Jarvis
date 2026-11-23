@@ -888,6 +888,18 @@ async function journeyBrief(browser: Browser) {
   ok(/no calendar has been read/.test(await B.getByTestId("brief-no-block").innerText()) && (await B.getByTestId("brief-add-calendar").first().isVisible()), "with no calendar, no time is proposed, the page says why, and the one action is Add a calendar");
   ok(/due before tomorrow ends/.test(await B.getByTestId("brief-owed").innerText()), "what is owed before tomorrow ends is stated");
 
+  // 3b. an export that lists events on only two days (think Monday and Friday): the days between are unknown, not free, until you confirm them
+  const evS = (day: string, a: string, b: string, t: string) => ["BEGIN:VEVENT", `UID:${t.replace(/\W/g, "")}${day}`, `SUMMARY:${t}`, `DTSTART;TZID=America/New_York:${day.replace(/-/g, "")}T${a}00`, `DTEND;TZID=America/New_York:${day.replace(/-/g, "")}T${b}00`, "END:VEVENT"];
+  const sparse = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//e2e//EN", ...evS(addD(D0, 2), "1900", "2000", "Study group"), ...evS(addD(D0, 4), "1900", "2000", "Pickup"), "END:VCALENDAR"].join("\r\n");
+  await A.goto(base + "/sources"); await A.getByLabel("File name").fill("sparse.ics"); await A.getByTestId("import-text").fill(sparse); await A.getByTestId("import-preview").click(); await A.getByTestId("import-preview-result").waitFor(); await A.getByTestId("import-commit").click(); await A.getByTestId("import-done").waitFor();
+  await B.reload(); await B.getByTestId("brief-agenda").waitFor({ timeout: 20000 });
+  ok((await B.getByTestId("agenda-day-unknown").count()) >= 2 && /Calendar unknown/.test(await B.getByTestId("brief-agenda").innerText()), "days the export does not list (today and tomorrow here) are shown as unknown, not free");
+  ok(!(await B.getByTestId("brief-reserve").count()), "no time is proposed on a day whose availability is unknown");
+  await B.getByTestId("agenda-confirm").first().click(); await B.getByTestId("agenda-unconfirm").first().waitFor({ timeout: 15000 });
+  ok(/You confirmed/.test(await B.getByTestId("brief-agenda").innerText()), "once you confirm a day, the agenda says it is your statement");
+  await B.reload(); await B.getByTestId("agenda-unconfirm").first().waitFor({ timeout: 15000 }); ok(true, "the confirmation survives a reload");
+  await B.getByTestId("agenda-unconfirm").first().click(); await B.getByTestId("agenda-confirm").first().waitFor({ timeout: 15000 }); ok(true, "taking the confirmation back returns the day to unknown");
+
   // 4. a calendar with a conflict: the proposed block avoids it, and is separate from the instructor's deadline
   const ev = (day: string, a: string, b: string, t: string) => ["BEGIN:VEVENT", `UID:${t.replace(/\W/g, "")}${day}`, `SUMMARY:${t}`, `DTSTART;TZID=America/New_York:${day.replace(/-/g, "")}T${a}00`, `DTEND;TZID=America/New_York:${day.replace(/-/g, "")}T${b}00`, "END:VEVENT"];
   const events = [{ day: D0, a: "0900", b: "1030", t: "Lecture" }, { day: D0, a: "1100", b: "1230", t: "Lab" }, { day: addD(D0, 1), a: "1000", b: "1800", t: "TAMID meeting" }, { day: NEWDUE, a: "1000", b: "1100", t: "Section" }];
@@ -901,9 +913,13 @@ async function journeyBrief(browser: Browser) {
   ok(blocks.every((b) => Date.parse(b.end) <= dueAt - 3600000 && Date.parse(b.start) > Date.now() && !busy.some((x) => x.day === nyDay(b.start) && nyHM(b.start) < x.b && nyHM(b.end) > x.a)), `no block overlaps a calendar event, none starts in the past, all end an hour before the deadline (${blocks.map((b) => `${nyDay(b.start)} ${nyHM(b.start)}-${nyHM(b.end)}`).join(", ")})`);
   await B.getByTestId("brief-priority").first().getByTestId("brief-row-toggle").click(); ok(/Time estimate: .*estimate/.test(await B.getByTestId("brief-priority").first().getByTestId("brief-estimate").innerText()), "the duration is identified as an estimate");
   ok(/Suggested/.test(await B.getByTestId("brief-agenda").innerText()) && /Instructor.s deadline|Due/.test(await B.getByTestId("brief-agenda").innerText()), "the agenda keeps the instructor's deadline and the suggested start distinct");
+  // The words must match the state: "Suggested" until the reservation saves, "Reserved" only after.
+  const pre = await B.getByTestId("brief-card").innerText();
+  ok(/Suggested/.test(await B.getByTestId("brief-when-note").innerText()) && !(await B.getByTestId("brief-reserved").count()) && !/Reserved,|Reserved on this computer/.test(pre), "before the button is pressed Today says Suggested and never Reserved");
+  ok(/Nothing is reserved until you press/.test(pre), "it says plainly that nothing is reserved yet");
   // 5. one click reserves; a reload keeps it
   await B.getByTestId("brief-reserve").click(); await B.getByTestId("brief-reserved").waitFor({ timeout: 20000 }); await B.reload(); await B.getByTestId("brief-reserved").waitFor({ timeout: 20000 });
-  ok(/Reserved,/.test(await B.getByTestId("brief-reserved").innerText()), "after a reload the block is still reserved");
+  ok(/Reserved,/.test(await B.getByTestId("brief-reserved").innerText()) && !(await B.getByTestId("brief-when-note").count()), "after a reload the block is still reserved, and Suggested is gone");
   const tl: any = await (await rq.get(base + "/api/today")).json(); const rows = (tl.timeline ?? []).filter((b: any) => b.kind === "booked"); const bk = await rq.get(base + "/api/export"); void bk;
   ok(rows.length >= 0, "the reservation is a local block");
   await shot(B, "60-brief-laptop.png");
@@ -1225,7 +1241,8 @@ async function journeyThread(browser: Browser) {
   const lp = views[0].p;
   const snap = async (v: { label: string; p: Page }, name: string) => { await v.p.evaluate(() => window.scrollTo(0, 0)); await v.p.waitForTimeout(250); await v.p.screenshot({ path: path.join(OUT, `${name}-${v.label}.png`) }); };
 
-  await lp.goto(base + "/connections"); await lp.getByTestId("load-sample").click(); await lp.getByTestId("sources-panel").getByText(/Mail \(fixture\)/).waitFor();
+  await post("/evidence/fixtures", {});      // the same call the Connections "Load the sample" button makes (that button is exercised in the assistant journey)
+  await lp.goto(base + "/connections"); await lp.getByTestId("sources-panel").getByText(/Mail \(fixture\)/).waitFor();
   for (const v of views) { await v.p.goto(base + "/office"); await v.p.getByTestId("handoff-strip").waitFor(); }
 
   step("Office: the room is first, and the composer does not cover it");
@@ -1257,6 +1274,12 @@ async function journeyThread(browser: Browser) {
   ok(/Reviewer is waiting for you/i.test(nb) && /TAMID/.test(nb) && (await lp.getByTestId("inspector-open-decision").isVisible()), "the inspector says who is waiting, what they need decided, and where to click");
   ok(!/npx|setup|token|install/i.test(nb), "the moment an agent needs you has no setup instructions in it");
   for (const v of views) { if (v.phone) { await v.p.getByTestId("phone-now").and(v.p.locator('[data-kind="needs"]')).waitFor({ timeout: 40000 }); } await snap(v, "2-needs-you"); }
+  const axeOffice = createRequire(import.meta.url).resolve("axe-core");
+  for (const v of views) {
+    await v.p.addScriptTag({ path: axeOffice }); const res: any = await v.p.evaluate(async () => (window as any).axe.run(document, { runOnly: ["wcag2a", "wcag2aa", "wcag21aa"] })); const bad = res.violations.filter((x: any) => ["serious", "critical"].includes(x.impact));
+    for (const x of bad) console.log(`    axe ${x.impact} ${x.id}: ${x.nodes.slice(0, 3).map((n: any) => n.target.join(" ")).join(" | ")}`);
+    ok(bad.length === 0, `Office with an agent waiting has no serious or critical axe violations (${v.label}; ${res.violations.length} minor)`);
+  }
   const pn = await views[2].p.getByTestId("phone-now").innerText(); ok(/waiting for you/i.test(pn) && /TAMID/.test(pn), "on the phone the decision is the first card");
 
   step("Office on the phone: the last control is reachable above the tab bar");
@@ -1486,7 +1509,7 @@ async function journeyStudy(browser: Browser) {
   const g3 = (await api(`/documents/${docId}`)).content; ok(/Midterm/.test(g3.sources.format), "the version records the guide you chose for format");
   await typeAndSend(page, "Make me a study guide for BI107 that I can cancel.");
   await page.goto(base + "/office");
-  const sup = page.getByTestId("roster-job").filter({ hasText: "Supervisor" }).filter({ hasText: "final study guide" }).last();
+  const sup = page.getByTestId("roster-job").filter({ hasText: "Supervisor" }).filter({ hasText: "final study guide" }).first();
   await sup.click();
   await page.getByTestId("inspector").getByText("Assigned by", { exact: true }).waitFor();
   await page.getByRole("button", { name: /Cancel \(and its helpers\)/ }).click();
@@ -1549,6 +1572,7 @@ async function main() {
     else if (only === "blackboard") { await journeyBlackboard(browser); }
     else if (only === "brief") { await journeyBrief(browser); }
     else if (only === "thread") { await journeyThread(browser); }
+    else if (only === "assistant+thread") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "assistant"); await journeyAssistant(p, browser); await journeyThread(browser); await c.close(); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
     else if (only === "mcp") { startWorker(300); await journeyMcp(); }
     else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
