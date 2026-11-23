@@ -3,20 +3,20 @@
 Branch `claude/upbeat-cannon-wf5kxf`. Start commit `dd8499a`. No PR, no deploy, no paid model calls, no external sends, no private-account connections. All inputs invented.
 
 ## Work queue (in order)
-- [ ] 1. One-command Mac launch: app + worker + open private Today, health, same-workspace check, ports, stop/restart, build id, upgrade with backup/adopt
+- [x] 1. One-command Mac launch: app + worker + open private Today, health, same-workspace check, ports, stop/restart, build id, upgrade with backup/adopt
 - [ ] 2. Private intake: blank -> one note + optional calendar -> cited corrected brief; unclassified sentences reviewable; catch-up once; last successful check
 - [ ] 3. Claude/project continuity: share one project, preview, reopen, revoke all; privacy proofs; pitch draft versioned from a correction
 - [ ] 4. Feedback and memory: feedback tied to source/project/result; why the next brief changed; one narrow skill proposal with before/after
 - [ ] 5. Release QA/design: Connections detach repro, Study flake, WebKit check, visual inspection; `npm run verify` + `npm run e2e` from a clean checkout; MORNING.md top
 
 ## Latest pushed checkpoint
-`dd8499a` (start). Tests at start: typecheck clean, 413 unit tests, full e2e 437 checks 0 problems (Chromium).
+`dd8499a` (start); item 1 committed locally, pushed with the next checkpoint. Tests at start: typecheck clean, 413 unit tests, full e2e 437 checks 0 problems (Chromium).
 
 ## Tests run tonight
-(none yet)
+- Item 1: `npx tsx scripts/launch-qa.ts` 35 checks, 0 problems (disposable installs, paths with spaces; unrelated app and earlier Jarvis on the port; missing deps; stale build; upgrade v9->v11 with a saved result, old folder byte-identical). Real `npm ci`+build+start from a bare copy: ok. 413 unit tests pass.
 
 ## Next unchecked item
-1
+2
 
 ## Dependencies on Yonathan's account/device (recorded, never blocking)
 - Mac: run the launcher once, Claude Desktop connector, Blackboard sign-in, real notes/calendar.

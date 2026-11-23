@@ -1245,6 +1245,8 @@ async function journeyThread(browser: Browser) {
   await lp.goto(base + "/connections"); await lp.getByTestId("sources-panel").getByText(/Mail \(fixture\)/).waitFor();
   for (const v of views) { await v.p.goto(base + "/office"); await v.p.getByTestId("handoff-strip").waitFor(); }
 
+  await lp.getByTestId("build-id").waitFor({ timeout: 20000 });
+  ok(/^build \S+/.test(await lp.getByTestId("build-id").innerText()) && /Worker running/.test(await lp.getByTestId("worker-state").innerText()), "the sidebar shows which build is running and that a worker is beating on this workspace");
   step("Office: the room is first, and the composer does not cover it");
   for (const [w, h] of [[1440, 900], [1280, 720], [1024, 768]] as const) {
     await lp.setViewportSize({ width: w, height: h }); await lp.waitForTimeout(300);
