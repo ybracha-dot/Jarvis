@@ -299,6 +299,13 @@ CREATE TABLE share_log(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, e
 ALTER TABLE schedule_runs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE schedule_runs ADD COLUMN detail TEXT;
 `,
+  /* 12 feedback on the brief is tied to the exact source sentence, the project and the brief result it was given on */ `
+ALTER TABLE brief_feedback ADD COLUMN result_id TEXT;
+ALTER TABLE brief_feedback ADD COLUMN item_id TEXT;
+ALTER TABLE brief_feedback ADD COLUMN project_id TEXT;
+ALTER TABLE brief_feedback ADD COLUMN quote TEXT;
+ALTER TABLE brief_feedback ADD COLUMN run_key TEXT;
+`,
 ];
 
 const cache = new Map<string, DB>();

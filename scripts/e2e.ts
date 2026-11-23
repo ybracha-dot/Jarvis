@@ -905,6 +905,31 @@ async function journeyBrief(browser: Browser) {
   await B.reload(); await B.getByTestId("brief-also-due").locator("summary").click().catch(() => {}); ok(/Memo draft/.test(await B.getByTestId("brief-card").innerText()), "the memo now appears with the deadline you set");
   const apiBrief: any = await (await rq.get(base + "/api/brief")).json(); ok(apiBrief.analysis.review.length === 0, "the saved brief carries no unreviewed sentences");
 
+  // 3d. one correction teaches one narrow rule: judged, shown on your case and another project, no new permission, in force only when you approve, and reversible
+  await B.getByTestId("wording-proposal").waitFor({ timeout: 15000 });
+  const wp = await B.getByTestId("wording-proposal").innerText();
+  ok(/must be typed/.test(wp) && /No new permission/.test(wp) && /different project/.test(wp) && (await B.getByTestId("wording-beforeafter").locator("tbody tr").count()) === 2 && /Tried on 8 fixed cases/.test(await B.getByTestId("wording-eval").innerText()), "your confirmed requirement is offered as one narrow rule, tried on fixed cases, with a before/after on your case and a different project, and no new permission");
+  await shot(B, "63-wording-proposal-laptop.png");
+  await apiP("/evidence/import", { kind: "note", title: "Poster brief", text: `The poster is due ${longD(addD(D0, 3))} at 5:00 PM. Posters must be typed and double-spaced.`, at: new Date().toISOString(), label: "Gallery notes", projectName: "Gallery" });
+  await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-review").waitFor({ timeout: 20000 });
+  ok(/Posters must be typed and double-spaced/.test(await B.getByTestId("brief-review").innerText()), "before you approve, the same wording in another project is only listed for review");
+  await B.getByTestId("wording-approve").click(); await B.getByTestId("wording-active").waitFor({ timeout: 15000 }); await B.waitForTimeout(1500);
+  await B.getByTestId("brief-review").waitFor({ state: "detached", timeout: 15000 });
+  ok(/must be typed/.test(await B.getByTestId("wording-active").innerText()), "approved: the rule is in force and the other project's sentence is now a requirement, not a review item");
+  const poster = B.getByTestId("brief-priority").filter({ hasText: /Poster brief|Posters must be typed/ }).first(); await poster.getByTestId("brief-row-toggle").click();
+  ok(/your rule: “must be typed”/.test(await poster.innerText()), "its source line says the requirement came from your rule");
+  await B.getByTestId("wording-rollback").click(); await B.getByTestId("wording-active").waitFor({ state: "detached", timeout: 15000 }); await B.getByTestId("brief-review").waitFor({ timeout: 15000 });
+  ok(true, "rolling the rule back restores the earlier behaviour (the sentence is listed for review again)");
+  await B.getByTestId("review-item").filter({ hasText: "Posters must be typed" }).getByTestId("review-no").click(); await B.getByTestId("brief-review").waitFor({ state: "detached", timeout: 15000 });
+  // 3e. useful / wrong tied to the source, project and brief; the next brief says why it changed
+  const prow = B.getByTestId("brief-priority").first(); if ((await prow.getByTestId("brief-row-toggle").getAttribute("aria-expanded")) !== "true") await prow.getByTestId("brief-row-toggle").click(); await B.waitForTimeout(500);
+  await prow.getByTestId("brief-useful").click(); await prow.getByTestId("feedback-receipt").waitFor({ timeout: 15000 });
+  ok(/useful/.test(await prow.getByTestId("feedback-receipt").innerText()) && /source/.test(await prow.getByTestId("feedback-receipt").innerText()) && /brief of/.test(await prow.getByTestId("feedback-receipt").innerText()), "Useful is stored against the source and the brief it was given on, and says so");
+  await prow.getByTestId("brief-wrong").click(); await prow.getByTestId("brief-wrong-send").waitFor(); ok(await prow.getByTestId("brief-wrong-send").isDisabled(), "Wrong cannot be sent without saying what was wrong");
+  await prow.getByTestId("brief-wrong-note").fill("the time of day is wrong"); await prow.getByTestId("brief-wrong-send").click(); await B.getByTestId("brief-because").getByText(/was wrong/).waitFor({ timeout: 20000 });
+  const bec = await B.getByTestId("brief-because").innerText(); ok(/was wrong: “the time of day is wrong”/.test(bec) && (await B.getByTestId("brief-because").getByRole("link", { name: "The earlier brief" }).count()) >= 1, "the next brief says why it changed, naming what you said and linking the earlier brief");
+  await shot(B, "64-because-laptop.png");
+
   // 3b. an export that lists events on only two days (think Monday and Friday): the days between are unknown, not free, until you confirm them
   const evS = (day: string, a: string, b: string, t: string) => ["BEGIN:VEVENT", `UID:${t.replace(/\W/g, "")}${day}`, `SUMMARY:${t}`, `DTSTART;TZID=America/New_York:${day.replace(/-/g, "")}T${a}00`, `DTEND;TZID=America/New_York:${day.replace(/-/g, "")}T${b}00`, "END:VEVENT"];
   const sparse = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//e2e//EN", ...evS(addD(D0, 2), "1900", "2000", "Study group"), ...evS(addD(D0, 4), "1900", "2000", "Pickup"), "END:VCALENDAR"].join("\r\n");

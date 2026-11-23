@@ -10,6 +10,7 @@ import { listCommitments, createCommitment, prepareFollowUp, simulateEvent, reso
 import { forMinutes, saveCheckpoint, CheckpointInput, latestCheckpoint } from "./resume";
 import * as mem from "./memory";
 import { listSkills, teach, rollback, promoteCandidate, generateBrief } from "./skills";
+import { approveWording, declineWording, WORDING_SKILL } from "./wording-skill";
 import { startCouncil, getCouncil, cancelCouncil, listCouncil, PRESETS, SAMPLE_DRAFT, SAMPLE_SOURCES, SAMPLE_RUBRIC } from "./council";
 import { Router, routerStatus, RouterError } from "./router";
 import { previewImport, commitImport, ImportRequest } from "./imports";
@@ -217,9 +218,12 @@ on("GET", "/today", (c) => today(c));
 // The morning brief: the same builder answers a click and a schedule.
 on("GET", "/brief", (c) => { const b = briefToday(c, schedulerStatus(c)); return { ...b, config: getBriefConfig(c), sharedClaudeCanRead: b.sharedResultId ? resultAccess(c, b.sharedResultId).allowed : false, coverage: availabilityCoverage(c) }; });
 on("POST", "/brief/run", (c) => { const out = briefNow(c); return { ...out, brief: briefToday(c, schedulerStatus(c)) }; });
-on("POST", "/brief/feedback", (c, r) => { const b = r.json(z.object({ key: z.string().max(120), kind: z.enum(["dismiss", "undismiss", "due", "estimate", "done", "undo", "req_add", "req_ignore", "req_undo"]), value: z.union([z.string().max(60), z.number()]).nullish(), note: z.string().max(300).nullish() }).strict()); briefFeedback(c, b); const out = briefNow(c); return { ok: true, ...out, brief: briefToday(c, schedulerStatus(c)) }; });
+on("POST", "/brief/feedback", (c, r) => { const b = r.json(z.object({ key: z.string().max(120), kind: z.enum(["dismiss", "undismiss", "due", "estimate", "done", "undo", "req_add", "req_ignore", "req_undo", "useful", "wrong"]), value: z.union([z.string().max(60), z.number()]).nullish(), note: z.string().max(300).nullish() }).strict()); const fb = briefFeedback(c, b); const out = briefNow(c); return { ok: true, ...out, receipt: fb.receipt ?? null, proposal: fb.proposal ?? null, brief: briefToday(c, schedulerStatus(c)) }; });
 on("POST", "/brief/reserve", (c, r) => { const b = r.json(z.object({ key: z.string().max(120), blocks: z.array(z.object({ start: z.string(), end: z.string() })).max(4).optional() }).strict()); const out = reserveBrief(c, b); const rebuilt = briefNow(c); return { ...out, resultId: rebuilt.resultId }; });
 on("POST", "/brief/coverage", (c, r) => { const b = r.json(z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), confirmed: z.boolean() }).strict()); const out = confirmDay(c, b.day, b.confirmed); const rebuilt = briefNow(c); return { ...out, resultId: rebuilt.resultId, brief: briefToday(c, schedulerStatus(c)) }; });
+on("POST", "/brief/wording/approve", (c, r) => { const o = approveWording(c, r.json(z.object({ version: z.number().int() }).strict()).version); const out = briefNow(c); return { ...o, ...out, brief: briefToday(c, schedulerStatus(c)) }; });
+on("POST", "/brief/wording/decline", (c, r) => ({ ...declineWording(c, r.json(z.object({ version: z.number().int() }).strict()).version), brief: briefToday(c, schedulerStatus(c)) }));
+on("POST", "/brief/wording/rollback", (c) => { const o = rollback(c, WORDING_SKILL); const out = briefNow(c); return { ...o, ...out, brief: briefToday(c, schedulerStatus(c)) }; });
 on("GET", "/brief/config", (c) => getBriefConfig(c));
 on("POST", "/brief/config", (c, r) => saveBriefConfig(c, r.json(z.any())));
 on("GET", "/sharing", (c) => sharingState(c));

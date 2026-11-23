@@ -67,8 +67,10 @@ export function BriefCard() {
         <div className="min-w-0 space-y-7">
           {!a ? <FirstLaunch d={d} run={run} /> : <>
             <Lead a={a} d={d} tz={tz} now={now} />
+            <Because items={a.because ?? []} />
             <Priorities a={a} tz={tz} now={now} />
             <ReviewPanel items={a.review ?? []} />
+            <WordingCard w={d.wording} />
             <Secondary a={a} tz={tz} resultId={d.resultId} />
           </>}
           <ClaudeRow d={d} />
@@ -194,6 +196,57 @@ function Priorities({ a, tz, now }: { a: any; tz: string; now: string }) {
     </div>
   );
 }
+
+/** "Was this right?" The answer is stored against the exact source sentence, its project and the brief it was given on, and the receipt says so. */
+function FeedbackBar({ p, tz }: { p: any; tz: string }) {
+  const [wrong, setWrong] = useState(false); const [note, setNote] = useState(""); const [receipt, setReceipt] = useState<any>(null);
+  const send = useAction(async (kind: "useful" | "wrong") => { const r = await api("/brief/feedback", { body: { key: p.key, kind, note: kind === "wrong" ? note : undefined } }); setReceipt(r.receipt); setWrong(false); setNote(""); });
+  return (
+    <div className="space-y-2" data-testid="brief-feedback">
+      <div className="flex gap-2 flex-wrap items-center"><span className="t-meta">Was this right?</span>
+        <Button size="sm" busy={send.busy} onClick={() => send.run("useful")} data-testid="brief-useful">Useful</Button>
+        <Button size="sm" onClick={() => setWrong((v) => !v)} aria-expanded={wrong} data-testid="brief-wrong">Wrong</Button></div>
+      {wrong && <div className="flex gap-2 flex-wrap items-end settle"><label className="text-[13px] text-muted grid gap-1 flex-1 min-w-[12rem]">What was wrong?<input className="rounded-lg bg-bg border border-line px-3 py-2 text-[15px] text-fg" value={note} onChange={(e) => setNote(e.target.value)} placeholder="For example: the deadline is Friday" data-testid="brief-wrong-note" /></label><Button size="sm" variant="primary" busy={send.busy} disabled={note.trim().length < 3} onClick={() => send.run("wrong")} data-testid="brief-wrong-send">Send</Button></div>}
+      {receipt && <p className="t-meta rounded-lg bg-surface2 px-3 py-2" data-testid="feedback-receipt">Noted as <b className="text-fg font-medium">{receipt.kind === "useful" ? "useful" : "wrong"}</b> for “{receipt.obligation}”{receipt.source ? <> · source <Link href={receipt.source.href} className="text-accent underline underline-offset-4">{receipt.source.title}</Link></> : null}{receipt.project ? <> · project {receipt.project}</> : null}{receipt.result ? <> · given in <Link href={receipt.result.href} className="text-accent underline underline-offset-4">the brief of {F(tz, { weekday: "short", hour: "numeric", minute: "2-digit" }).format(new Date(receipt.result.builtAt))}</Link></> : null}. The next brief says what changed because of it.</p>}
+      {send.error && <ErrorBox error={send.error} />}
+    </div>
+  );
+}
+
+/** Why this brief differs, in your words: only what you told Jarvis since the last one, each with its source, project and the earlier brief. */
+function Because({ items }: { items: any[] }) {
+  if (!items.length) return null;
+  return (
+    <section aria-label="Because of what you told Jarvis" data-testid="brief-because" className="rounded-2xl border border-line bg-surface p-4 md:p-5 space-y-2.5">
+      <h2 className="text-[16px] font-semibold">Because of what you told Jarvis</h2>
+      <ul className="space-y-2">{items.map((b, i) => <li key={i} className="text-[15px] leading-snug" data-testid="because-item" data-kind={b.kind}>{b.text}{(b.href || b.resultHref) && <span className="t-meta"> {b.href && <Link href={b.href} className="text-accent underline underline-offset-4">The sentence</Link>}{b.href && b.resultHref ? " · " : ""}{b.resultHref && <Link href={b.resultHref} className="text-accent underline underline-offset-4">The earlier brief</Link>}</span>}</li>)}</ul>
+    </section>
+  );
+}
+
+/** One narrow rule, proposed from one correction. It shows what it would have done on your case and on another project, needs no new permission, and does nothing until you say so. */
+function WordingCard({ w }: { w: any }) {
+  const approve = useAction(async (version: number) => { await api("/brief/wording/approve", { body: { version } }); });
+  const decline = useAction(async (version: number) => { await api("/brief/wording/decline", { body: { version } }); });
+  const rollback = useAction(async () => { await api("/brief/wording/rollback", { body: {} }); });
+  if (!w || (!w.proposals?.length && !w.active)) return null;
+  return (
+    <section aria-label="A rule Jarvis could learn" data-testid="brief-wording" className="space-y-3">
+      {w.proposals.map((p: any) => (
+        <div key={p.version} className="rounded-2xl border border-accent-dim bg-accent-soft p-4 md:p-5 space-y-3" data-testid="wording-proposal">
+          <div><h2 className="text-[16px] font-semibold">Jarvis can learn one thing from your correction</h2><p className="text-[15px] mt-1">From now on, treat a sentence that says <b className="font-semibold">“{p.phrase}”</b> as a requirement, in any project. Nothing changes until you press the button.</p></div>
+          <table className="w-full text-[14px]" data-testid="wording-beforeafter"><thead><tr className="text-left text-muted"><th className="font-medium pb-1">Case</th><th className="font-medium pb-1">Today</th><th className="font-medium pb-1">With the rule</th></tr></thead>
+            <tbody>{p.beforeAfter.map((r: any, i: number) => <tr key={i} className="border-t border-line align-top"><td className="py-1.5 pr-3"><b className="font-medium">{r.label}</b><span className="block t-meta">“{r.sentence}”</span></td><td className="py-1.5 pr-3">{r.before}</td><td className="py-1.5 text-accent font-medium">{r.after}</td></tr>)}</tbody></table>
+          <p className="t-meta" data-testid="wording-eval">Tried on {p.eval.cases.length} fixed cases: {p.eval.reason} It ignores the same words in a question, as a suggestion, or after a waiver. {p.matchesElsewhere.length > 0 ? `The phrase also appears in: ${p.matchesElsewhere.map((m: any) => `“${m.title}”${m.project ? ` (${m.project})` : ""}`).join(", ")}.` : ""}</p>
+          <p className="t-meta" data-testid="wording-permissions"><b className="text-fg font-medium">No new permission.</b> It reads the same notes the brief already reads and can only add this exact phrase. {p.sameCapabilities ? "Its capability list is unchanged." : ""} <Link href="/skills" className="text-accent underline underline-offset-4">See it under Skills</Link>.</p>
+          <div className="flex gap-2 flex-wrap"><Button variant="primary" size="sm" busy={approve.busy} onClick={() => approve.run(p.version)} data-testid="wording-approve">Use this rule</Button><Button size="sm" busy={decline.busy} onClick={() => decline.run(p.version)} data-testid="wording-decline">Not now</Button></div>
+        </div>))}
+      {w.active && <div className="rounded-xl border border-line bg-surface px-4 py-3 flex items-center gap-3 flex-wrap text-[14.5px]" data-testid="wording-active"><Check className="size-4 text-accent" aria-hidden /><span>Rule in force: {w.active.rules.map((r: string) => `“${r}”`).join(", ")}.</span>{w.active.canRollback && <Button size="sm" variant="ghost" busy={rollback.busy} onClick={() => rollback.run()} data-testid="wording-rollback" className="ml-auto">Roll back</Button>}</div>}
+      {(approve.error || decline.error || rollback.error) && <ErrorBox error={(approve.error || decline.error || rollback.error)!} />}
+    </section>
+  );
+}
+
 function Row({ p, tz, a, now, leadKey }: { p: any; tz: string; now: string; a: any; leadKey: string | null; first: boolean }) {
   const isLead = p.key === leadKey;
   const [open, setOpen] = useState(false); const [fix, setFix] = useState(false); const [due, setDue] = useState(""); const [est, setEst] = useState("");
@@ -232,6 +285,7 @@ function Row({ p, tz, a, now, leadKey }: { p: any; tz: string; now: string; a: a
             <label className="block text-[14px]">Correct deadline<input type="datetime-local" className="block mt-1 w-full rounded-lg bg-bg border border-line px-3 py-2 text-[15px]" value={due} onChange={(e) => setDue(e.target.value)} data-testid="brief-fix-due" /></label>
             <label className="block text-[14px]">Correct estimate (minutes)<input type="number" min={5} max={1200} className="block mt-1 w-full rounded-lg bg-bg border border-line px-3 py-2 text-[15px]" value={est} onChange={(e) => setEst(e.target.value)} data-testid="brief-fix-est" /></label>
             <Button size="sm" variant="primary" busy={correct.busy} disabled={!due && !est} onClick={() => correct.run()} data-testid="brief-fix-save">Save and rebuild</Button>{correct.error && <ErrorBox error={correct.error} />}</div>}
+          <FeedbackBar p={p} tz={tz} />
           {(dismiss.error || reserve.error) && <ErrorBox error={(dismiss.error || reserve.error)!} />}
         </div></div>
       </div>

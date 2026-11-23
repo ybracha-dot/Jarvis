@@ -13,6 +13,7 @@ import { saveResult, verifyResult } from "./assistant";
 import { enqueue } from "./notify";
 import { deepLinkBase } from "./capture";
 import { grantResult, revokeResult, resultShared, resultAccess } from "./share";
+import { activeWordingPhrases, matchesPhrase, phraseFor, proposeFromCorrection, wordingState } from "./wording-skill";
 
 // ---------- types ----------
 export interface BriefSource { itemId: string; revision: number; title: string; kind: string; at: string; sourceLabel: string; mode: string; role: string; quote: string; shareable: boolean }
@@ -37,10 +38,12 @@ export interface Priority {
   review?: ReviewItem[];
   blocks: BlockProposal[]; blockNote: string | null; reserved: { id: string; start: string; end: string; label: string }[]; asks: string[]; shareable: boolean; changed: string[];
 }
+export interface Because { key: string; kind: string; text: string; href: string | null; project: string | null; resultHref: string | null; at: string }
 export interface InputStatus { label: string; kind: string; state: "live" | "imported" | "stale" | "unavailable"; readAt: string | null; detail: string }
 export interface BriefAnalysis {
   type: "brief"; version: 1; view: "full" | "shared"; occurrenceKey: string; kind: "scheduled" | "ondemand"; builtAt: string; tz: string; baseline: boolean; lastBriefAt: string | null;
   lead: Change | null; leadText: string; changes: Change[]; priorities: Priority[]; alsoDue: { key: string; title: string; due: string | null; label: string; href: string | null }[]; alsoDueMore: number;
+  because?: Because[];
   review?: { id: string; key: string; title: string; kind: "requirement" | "date"; sentence: string; href: string }[];
   dismissed: { key: string; title: string }[]; owedBeforeTomorrow: number; inputs: InputStatus[]; coverage: Coverage[]; gaps: string[]; leftOut: string[]; modelCalls: 0; shareableCount: number; unshareableCount: number;
 }
@@ -51,7 +54,7 @@ const CHANGE_LANG = /\b(now due|is now|moved|moves|moving|extended|extension|pos
 const REQ_VERB = /\b(bring|print(?:ed)?|printout|hard ?copy|submit|upload|hand in|turn in|attach|include|email|sign|cite)\b/i;
 const REQ_FORCE = /\b(please|must|need(?:s)? to|should|required|requirement|make sure|be sure|remember to|don'?t forget|bring|include|attach|upload|submit)\b/i;
 const OPTIONAL = /\b(optional|if you (?:like|wish|want|prefer)|consider|may (?:want|choose|wish)|you can|suggest(?:ed)?|recommended|helpful to)\b/i;
-const WAIVER = /\b(no longer (?:need|required|have|necessary)|do(?:es)? not need|don'?t need|waive[sd]?|not (?:be )?required|no need|is (?:cancell?ed|dropped)|no (?:paper|printed|hard)[ -]?copies|no printing|online[- ]only)\b/i;
+const WAIVER = /\b(no longer (?:need(?:ed)?|required|have|necessary)|do(?:es)? not need|don'?t need|waive[sd]?|not (?:be )?required|no need|is (?:cancell?ed|dropped)|no (?:paper|printed|hard)[ -]?copies|no printing|online[- ]only)\b/i;
 const GENERIC = new Set("due deadline submit submitted turn hand now new class please assignment note update reminder moved extended earlier later instead bring print printed copy copies include attach upload email sign cite will must need needs should have this that from with your you the".split(" "));
 /** Sentences the rules above did not classify, but whose wording suggests an obligation: they are shown for review, never silently dropped. */
 const CAND_CUE = /\b(expect(?:ed|s)?|require[sd]?|requirement|mandatory|compulsory|necessary|obligatory|must|have to|has to|will not be accepted|not accepted|no late|late (?:work|submissions?|penalt\w+)|penalt(?:y|ies)|deduct\w*|allowed|permitted|prohibited|forbidden|stapled|typed|double[- ]spaced|single[- ]spaced|word limit|\d+\s*(?:words|pages)|hard ?cop(?:y|ies)|on paper|paper cop(?:y|ies)|in class|start of class|at the beginning of class|formatted|format|font|margins?|cover (?:page|sheet)|reference list|bibliography|citations?|rubric|laptops?|devices?|calculators?|id card|photo id)\b/i;
@@ -62,6 +65,8 @@ const reviewKind = (sentence: string, hadDate: boolean): "requirement" | "date" 
   if (CAND_CUE.test(sentence) && !OPTIONAL.test(sentence)) return "requirement";
   return null;
 };
+/** The fixed rules' own test for a requirement sentence. A learned rule can only ADD to it, never loosen it. */
+export const baseRequirement = (sentence: string) => REQ_VERB.test(sentence) && REQ_FORCE.test(sentence) && !/\?\s*$/.test(sentence) && !OPTIONAL.test(sentence);
 const FIRSTNAME = (n: string) => n.trim().split(/\s+/)[0].toLowerCase();
 
 export function dueDates(sentence: string, at: string, tz: string): { iso: string; timeAssumed: boolean; text: string }[] {
@@ -101,6 +106,7 @@ export function collectObligations(ctx: Ctx): Collected {
   const rows = all(ctx.db, `SELECT i.*, s.label slabel, s.mode smode, s.shareable, s.local_only, s.revoked_at srev, s.id sid FROM evidence_items i JOIN evidence_sources s ON s.id=i.source_id WHERE i.owner_id=? AND i.tombstone=0 AND s.revoked_at IS NULL AND i.kind NOT IN ('claude') ORDER BY i.at, i.revision, i.rowid`, ctx.owner);
   const byId = new Map(rows.map((r) => [r.id as string, r])); const rootOf = (id: string) => { let cur = id; const seen = new Set<string>(); while (byId.get(cur)?.corrects && byId.has(byId.get(cur)!.corrects as string) && !seen.has(cur)) { seen.add(cur); cur = byId.get(cur)!.corrects as string; } return cur; };
   const chains = new Map<string, any[]>(); for (const r of rows) { const k = rootOf(r.id as string); chains.set(k, [...(chains.get(k) ?? []), r]); }
+  const rulePhrases = activeWordingPhrases(ctx);
   const out: Obligation[] = []; const leftOut: string[] = [];
   const calUnits: Obligation[] = []; const noteObl: Obligation[] = [];
 
@@ -121,6 +127,7 @@ export function collectObligations(ctx: Ctx): Collected {
         const ds = DUE_CUE.test(sentence) ? dueDates(sentence, it.at as string, tz) : [];
         if (ds.length) { const other = assignedToOther(sentence, me); if (other) { leftOut.push(`“${sentence.slice(0, 90)}” is assigned to ${other}, not to you.`); continue; } for (const d of ds.slice(0, 1)) units.push({ sentence, at: d.iso, assumed: d.timeAssumed, item: it, topic: topicTokens(sentence, titleToks), change: CHANGE_LANG.test(sentence) }); }
         if (REQ_VERB.test(sentence) && REQ_FORCE.test(sentence) && !/\?\s*$/.test(sentence) && !OPTIONAL.test(sentence) && !ds.some(() => /^(?:the )?(?:essay|paper|assignment)\b.*\bis due\b/i.test(sentence) && !REQ_VERB.test(sentence)) && !(assignedToOther(sentence, me)) && !reqs.some((r) => r.quote === sentence)) reqs.push({ text: sentence, action: requirementAction(sentence), quote: sentence, source: srcOf(it, "requirement", sentence), mandatory: true });
+        if (!isCal && reqs.length === reqBefore && rulePhrases.length) { const hit = matchesPhrase(sentence, rulePhrases); if (hit && !reqs.some((r) => r.quote === sentence)) reqs.push({ text: sentence, action: requirementAction(sentence), quote: sentence, source: srcOf(it, `requirement (your rule: “${hit}”)`, sentence), mandatory: true }); }
         if (!isCal && units.length === unitsBefore && (reqs.length === reqBefore ? !reqs.some((r) => r.quote === sentence) : (!ds.length && DUE_CUE.test(sentence) && DATE_CUE.test(sentence)))) { const rk = reqs.length === reqBefore ? reviewKind(sentence, ds.length > 0) : "date"; const id = sha(`${rootId}|${sentence}`).slice(0, 10); if (rk && !cand.some((c) => c.id === id)) cand.push({ id, kind: rk, sentence, source: srcOf(it, "to review", sentence) }); }
       }
       for (const u of units) {
@@ -270,6 +277,30 @@ function priorityOf(ctx: Ctx, o: Obligation, rank: number, cov: Coverage[], chan
     blocks: pl.blocks, blockNote: pl.note, reserved, asks: o.requirementsKnown ? [] : ["Paste the original instructions, or a notification email you are allowed to forward, so Jarvis can tell what to hand in."], shareable: o.shareable, changed: changes.filter((c) => c.key === o.key).map((c) => c.text) };
 }
 
+
+/** Why this brief differs from the last one because of what YOU said: each line names the exact sentence it is about, its project, and the earlier brief it was given on. */
+function explainFeedback(ctx: Ctx, obls: Obligation[], fbs: any[], since: string | null, tz: string): Because[] {
+  const out: Because[] = []; const q = (t: string, n = 70) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+  for (const f of fbs) {
+    if (since && String(f.created_at) <= since) continue;
+    const o = obls.find((x) => x.key === f.obligation_key); if (!o) continue;
+    const item = f.item_id ? (get(ctx.db, "SELECT i.id, i.title, p.name pname FROM evidence_items i LEFT JOIN projects p ON p.id=i.project_id WHERE i.id=?", f.item_id) as any) : null;
+    const from = item ? ` (from “${item.title}”${item.pname ? `, project ${item.pname}` : ""})` : "";
+    const sentence = f.quote ? `“${q(String(f.quote))}”` : "";
+    let text: string | null = null;
+    if (f.kind === "useful") text = `You marked “${o.title}” useful${from}. It stays as it is.`;
+    else if (f.kind === "wrong") { const later = fbs.some((x) => x.obligation_key === f.obligation_key && ["due", "estimate", "req_add", "req_ignore", "dismiss"].includes(x.kind) && fbs.indexOf(x) > fbs.indexOf(f)); text = `You said “${o.title}” was wrong: “${q(String(f.note ?? ""), 90)}”${from}. ${later ? "You then corrected it, and this brief uses your correction." : "It is still as the source says: correct its deadline or what it asks for from its row."}`; }
+    else if (f.kind === "due") text = `You corrected the deadline of “${o.title}” to ${fmtDueLabel(String(f.value), false, tz)}${from}. Your date is used; the source's date is kept as history.`;
+    else if (f.kind === "estimate") text = `You set the time for “${o.title}” to ${f.value} minutes. Suggestions use it.`;
+    else if (f.kind === "dismiss") text = `You dismissed “${o.title}”${from}. It returns if its deadline moves earlier.`;
+    else if (f.kind === "req_add") text = `You confirmed ${sentence} is a requirement${from}. It is now listed under “${o.title}” with that sentence as its source.`;
+    else if (f.kind === "req_ignore") text = `You said ${sentence} is not a requirement${from}. It is no longer listed for review.`;
+    if (!text) continue;
+    out.push({ key: o.key, kind: String(f.kind), text, href: item ? `/evidence/${item.id}${f.quote ? `?q=${encodeURIComponent(String(f.quote).slice(0, 80))}` : ""}` : null, project: item?.pname ?? null, resultHref: f.result_id ? `/results/${f.result_id}` : null, at: String(f.created_at) });
+  }
+  return out.slice(-8);
+}
+
 export function buildBrief(ctx: Ctx, opts: BuildOpts): { analysis: BriefAnalysis; sources: BriefSource[] } {
   const tz = plannerSettings(ctx).tz; const now = ctx.now(); const view = opts.view ?? "full";
   const coll = collectObligations(ctx); const cov = availabilityCoverage(ctx); const fbs = feedback(ctx);
@@ -286,6 +317,7 @@ export function buildBrief(ctx: Ctx, opts: BuildOpts): { analysis: BriefAnalysis
   const acknowledged: Change[] = []; if (view === "full") for (const f of fbs) if (prevRun && String(f.created_at) >= String(prevRun.built_at) && (f.kind === "due" || f.kind === "dismiss")) { const o = coll.obligations.find((x) => x.key === f.obligation_key); if (o) acknowledged.push({ type: f.kind === "due" ? "you_corrected" : "you_dismissed", key: o.key, title: o.title, text: f.kind === "due" ? `You corrected ${o.title}: now ${fmtDueLabel(String(f.value), false, tz)}.` : `You dismissed ${o.title}.`, score: 5, source: null }); }
   // Anything whose source could not be refreshed keeps its previous comparison point: it is shown, flagged, and its change is still to come.
   const downKeys = new Set(obls.filter((o) => sourceDown(ctx, o.sourceIds)).map((o) => o.key));
+  const because = view === "full" ? explainFeedback(ctx, coll.obligations, fbs, prevRun ? String(prevRun.built_at) : null, tz) : [];
   const changes = changesAll.filter((c) => !downKeys.has(c.key)); const lead = changes[0] && changes[0].score >= 30 ? changes[0] : null;
 
   const live = obls.filter((o) => !dismissedKeys.has(o.key) && (!o.due || Date.parse(o.due.at) > now.getTime() - 14 * 86400000));
@@ -306,7 +338,7 @@ export function buildBrief(ctx: Ctx, opts: BuildOpts): { analysis: BriefAnalysis
   const leadText = baseline ? "This is your first brief, so it is a baseline: there is nothing earlier to compare with. Changes will show from the next one." : lead ? lead.text : prevRun ? `No material change since your last brief (${fmtDateTime(String(prevRun.built_at), tz)}).` : "No material change.";
   const sourcesOut: BriefSource[] = []; const seenSrc = new Set<string>(); for (const o of [...top, ...ranked.slice(3, 3)]) for (const s of o.sources) { if (s.itemId.startsWith("task:") || s.itemId.startsWith("commitment:") || seenSrc.has(`${s.itemId}|${s.quote}`)) continue; seenSrc.add(`${s.itemId}|${s.quote}`); sourcesOut.push(s); }
   const seenRv = new Set<string>(); const reviewAll = view === "full" ? live.flatMap((o) => o.review.map((r) => ({ id: r.id, key: o.key, title: o.title, kind: r.kind, sentence: r.sentence, href: `${href(r.source)}?q=${encodeURIComponent(r.sentence.slice(0, 80))}` }))).filter((r) => !seenRv.has(r.id) && !!seenRv.add(r.id)).slice(0, 8) : [];
-  const analysis: BriefAnalysis = { type: "brief", version: 1, view, occurrenceKey: opts.occurrenceKey, kind: opts.kind, builtAt: now.toISOString(), tz, baseline, lastBriefAt: prevRun ? String(prevRun.built_at) : null, lead, leadText, changes: [...changes, ...acknowledged].slice(0, 12), priorities, alsoDue, alsoDueMore: Math.max(0, rest.length - alsoDue.length), review: reviewAll, dismissed: dismissedList,
+  const analysis: BriefAnalysis = { type: "brief", version: 1, view, occurrenceKey: opts.occurrenceKey, kind: opts.kind, builtAt: now.toISOString(), tz, baseline, lastBriefAt: prevRun ? String(prevRun.built_at) : null, lead, leadText, changes: [...changes, ...acknowledged].slice(0, 12), priorities, alsoDue, alsoDueMore: Math.max(0, rest.length - alsoDue.length), review: reviewAll, because, dismissed: dismissedList,
     owedBeforeTomorrow, inputs, coverage: view === "full" ? cov : [], gaps, leftOut: view === "full" ? coll.leftOut : [], modelCalls: 0, shareableCount: obls.filter((o) => o.shareable).length, unshareableCount: coll.obligations.filter((o) => !o.shareable).length };
   if (view === "shared") { for (const p of analysis.priorities) { p.blocks = []; p.blockNote = null; p.reserved = []; } analysis.coverage = []; analysis.gaps = []; analysis.leftOut = []; }
   return { analysis, sources: sourcesOut };
@@ -425,25 +457,38 @@ export function briefToday(ctx: Ctx, sch: { enabled: boolean; paused: boolean; w
   const sharedRuns = all(ctx.db, "SELECT * FROM brief_runs WHERE view='shared' AND status='ok' ORDER BY built_at DESC, rowid DESC LIMIT 12"); const shared = sharedRuns.find((r) => resultAccess(ctx, r.result_id as string).allowed) ?? sharedRuns[0] ?? null;
   return { tz, enabled: getSetting(ctx.db, "brief_enabled", ctx.mode === "personal"), analysis: analysis ? (JSON.parse(analysis) as BriefAnalysis) : null, resultId: (run1?.result_id as string | null) ?? null, builtAt: (run1?.built_at as string | null) ?? null, occurrenceKey: (run1?.occurrence_key as string | null) ?? null,
     agenda: agendaFor(ctx, analysis ? (JSON.parse(analysis) as BriefAnalysis) : null), hasNotes: (get(ctx.db, "SELECT COUNT(*) n FROM evidence_items WHERE owner_id=? AND tombstone=0 AND kind NOT IN ('calendar','claude')", ctx.owner)?.n as number) > 0, hasCalendar: availabilityCoverage(ctx).some((c) => c.trusted), now: ctx.now().toISOString(), scheduleWarning: scheduleWarning(ctx, sch, tz),
-    scheduler: { enabled: sch.enabled, paused: sch.paused, workerActive: sch.workerActive, lastHeartbeat: sch.lastHeartbeat, nextRun: sch.nextRun, lastRun: sch.lastRun, message: sch.message, quietNow: sch.quietNow }, lastSuccessAt: (run1?.built_at as string | null) ?? null, recentMisses, sharedResultId: (shared?.result_id as string | null) ?? null, link: deepLinkBase() };
+    scheduler: { enabled: sch.enabled, paused: sch.paused, workerActive: sch.workerActive, lastHeartbeat: sch.lastHeartbeat, nextRun: sch.nextRun, lastRun: sch.lastRun, message: sch.message, quietNow: sch.quietNow }, lastSuccessAt: (run1?.built_at as string | null) ?? null, wording: wordingState(ctx, baseRequirement), recentMisses, sharedResultId: (shared?.result_id as string | null) ?? null, link: deepLinkBase() };
 }
 
 // ---------- what the user can do with it ----------
-export function briefFeedback(ctx: Ctx, o: { key: string; kind: "dismiss" | "undismiss" | "due" | "estimate" | "done" | "undo" | "req_add" | "req_ignore" | "req_undo"; value?: string | number | null; note?: string | null }) {
+export function briefFeedback(ctx: Ctx, o: { key: string; kind: "dismiss" | "undismiss" | "due" | "estimate" | "done" | "undo" | "req_add" | "req_ignore" | "req_undo" | "useful" | "wrong"; value?: string | number | null; note?: string | null }) {
   const known = collectObligations(ctx).obligations.find((x) => x.key === o.key); if (!known) throw new HttpError(404, "That item is not in your sources any more.");
   if (o.kind === "undismiss" || o.kind === "undo") { run(ctx.db, "UPDATE brief_feedback SET undone_at=? WHERE obligation_key=? AND kind IN ('dismiss','done') AND undone_at IS NULL", ctx.now().toISOString(), o.key); return { ok: true }; }
   if (o.kind === "req_undo") { run(ctx.db, "UPDATE brief_feedback SET undone_at=? WHERE obligation_key=? AND kind IN ('req_add','req_ignore') AND value=? AND undone_at IS NULL", ctx.now().toISOString(), o.key, String(o.value ?? "")); return { ok: true }; }
   if (o.kind === "req_add" || o.kind === "req_ignore") { if (!known.review.some((r) => r.id === String(o.value))) throw new HttpError(404, "That sentence is not waiting for review any more."); }
   if (o.kind === "due") { const t = Date.parse(String(o.value)); if (Number.isNaN(t)) throw new HttpError(422, "Give the corrected deadline as a date and time."); }
   if (o.kind === "estimate") { const m = Number(o.value); if (!Number.isFinite(m) || m < 5 || m > 1200) throw new HttpError(422, "An estimate is between 5 and 1200 minutes."); }
-  run(ctx.db, "INSERT INTO brief_feedback(id,obligation_key,kind,value,note,created_at) VALUES(?,?,?,?,?,?)", uid("bf"), o.key, o.kind, o.kind === "dismiss" ? (known.due?.at ?? null) : o.value == null ? null : String(o.value), o.note ?? null, ctx.now().toISOString());
-  logActivity(ctx, "brief_feedback", o.key, `${o.kind}: ${known.title}`); return { ok: true };
+  if (o.kind === "wrong" && String(o.note ?? "").trim().length < 3) throw new HttpError(422, "Say what was wrong, in a few words, so the next brief can use it.");
+  // Tie it to the exact sentence it is about, the project that sentence belongs to, and the brief it was given on.
+  const rv = (o.kind === "req_add" || o.kind === "req_ignore") ? known.review.find((r) => r.id === String(o.value)) : null;
+  const src = rv?.source ?? known.dueSource ?? known.requirements[0]?.source ?? known.sources[0] ?? null;
+  const itemId = src && !src.itemId.startsWith("task:") && !src.itemId.startsWith("commitment:") ? src.itemId : null;
+  const project = itemId ? (get(ctx.db, "SELECT i.project_id pid, p.name pname FROM evidence_items i LEFT JOIN projects p ON p.id=i.project_id WHERE i.id=?", itemId) as any) : null;
+  const lr = lastRun(ctx, "full"); const quote = rv?.sentence ?? src?.quote ?? null;
+  run(ctx.db, "INSERT INTO brief_feedback(id,obligation_key,kind,value,note,created_at,result_id,item_id,project_id,quote,run_key) VALUES(?,?,?,?,?,?,?,?,?,?,?)", uid("bf"), o.key, o.kind, o.kind === "dismiss" ? (known.due?.at ?? null) : o.value == null ? null : String(o.value), o.note ?? null, ctx.now().toISOString(), (lr?.result_id as string | null) ?? null, itemId, (project?.pid as string | null) ?? null, quote ? String(quote).slice(0, 300) : null, (lr?.occurrence_key as string | null) ?? null);
+  logActivity(ctx, "brief_feedback", o.key, `${o.kind}: ${known.title}`);
+  const receipt = { obligation: known.title, kind: o.kind, source: src ? { title: src.title, href: href(src), quote: quote ? String(quote).slice(0, 160) : null } : null, project: (project?.pname as string | null) ?? null,
+    result: lr ? { id: String(lr.result_id), builtAt: String(lr.built_at), href: `/results/${lr.result_id}` } : null };
+  // A confirmed requirement in unusual wording teaches ONE narrow rule, proposed (never switched on) with its own evidence.
+  let proposal = null;
+  if (o.kind === "req_add" && rv && rv.kind === "requirement") proposal = proposeFromCorrection(ctx, { sentence: rv.sentence, phrase: phraseFor(rv.sentence, CAND_CUE), project: (project?.pname as string | null) ?? null, sourceTitle: src?.title ?? null, base: baseRequirement });
+  return { ok: true, receipt, proposal };
 }
 /** Rebuild now, as a new on-demand brief that reflects the correction. A repeat within the same minute and the same inputs returns the same brief. */
 export function briefNow(ctx: Ctx) {
   const fb = (get(ctx.db, "SELECT COUNT(*) n, MAX(created_at) m FROM brief_feedback WHERE undone_at IS NULL")?.n as number) ?? 0;
   const undone = (get(ctx.db, "SELECT COUNT(*) n FROM brief_feedback WHERE undone_at IS NOT NULL")?.n as number) ?? 0;
-  const itemSig = sha(JSON.stringify(all(ctx.db, "SELECT id,revision FROM evidence_items WHERE tombstone=0 ORDER BY id").map((r) => `${r.id}@${r.revision}`)) + JSON.stringify(all(ctx.db, "SELECT COUNT(*) n, MAX(start_at) m FROM blocks WHERE state='active'")) + JSON.stringify(all(ctx.db, "SELECT id,state,mode,last_success_at,revoked_at,shareable,local_only FROM evidence_sources ORDER BY id")) + JSON.stringify(all(ctx.db, "SELECT provider,state,last_success_at FROM source_status ORDER BY provider"))).slice(0, 8);
+  const itemSig = sha(JSON.stringify(all(ctx.db, "SELECT id,revision FROM evidence_items WHERE tombstone=0 ORDER BY id").map((r) => `${r.id}@${r.revision}`)) + JSON.stringify(all(ctx.db, "SELECT COUNT(*) n, MAX(start_at) m FROM blocks WHERE state='active'")) + JSON.stringify(all(ctx.db, "SELECT id,state,mode,last_success_at,revoked_at,shareable,local_only FROM evidence_sources ORDER BY id")) + JSON.stringify(all(ctx.db, "SELECT provider,state,last_success_at FROM source_status ORDER BY provider")) + JSON.stringify(all(ctx.db, "SELECT version,status FROM skills WHERE name='brief-requirement-wording' ORDER BY version"))).slice(0, 8);
   return runBrief(ctx, { occurrenceKey: `ondemand:${ctx.now().toISOString().slice(0, 16)}:f${fb}.${undone}:${itemSig}`, kind: "ondemand" });
 }
 
