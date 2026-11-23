@@ -19,7 +19,7 @@ Jarvis is running.   build dd8499a  (built 11/23/2026, 5:28 AM)
   Data       /path/to/Jarvis folder/data
 ```
 
-The build identifier is also on screen: bottom of the sidebar (and under More on a phone), next to "Worker running".
+From a downloaded ZIP (no git) the identifier is `src-` plus a fingerprint of the code, so two different ZIPs never look alike. It is also on screen: bottom of the sidebar (and under More on a phone), next to "Worker running".
 
 | Do this | Command |
 |---|---|
