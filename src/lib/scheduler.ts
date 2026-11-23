@@ -197,7 +197,7 @@ export function schedulerStatus(ctx: Ctx) {
   if (!enabled) message = "Schedules are off. Nothing runs on its own. Use Run now, or turn schedules on.";
   else if (paused) message = "Paused. Nothing runs until you resume.";
   else if (workerActive) message = `Worker running (pid ${hb!.pid}, heartbeat ${Math.round(ageMs! / 1000)} s ago). Next check ${next ? fmtDateTime(next.at.toISOString()) : "none"}.`;
-  else message = "No worker is running, so checks only run when you click Run now. Start one with: npm run worker";
+  else message = "No worker is running, so checks only run when you click Run now. Start Jarvis with: node scripts/jarvis.mjs (it starts the worker too)";
   return { enabled, paused, workerActive, lastHeartbeat: hb?.at ?? null, active: enabled && !paused && workerActive, lastRun: last ?? null, nextRun: next ? { key: next.key, kind: next.kind, at: next.at.toISOString() } : null, missedCycles: missed, message, quietNow: quietUntil(ctx, ctx.now())?.toISOString() ?? null };
 }
 

@@ -68,6 +68,7 @@ export function BriefCard() {
           {!a ? <FirstLaunch d={d} run={run} /> : <>
             <Lead a={a} d={d} tz={tz} now={now} />
             <Priorities a={a} tz={tz} now={now} />
+            <ReviewPanel items={a.review ?? []} />
             <Secondary a={a} tz={tz} resultId={d.resultId} />
           </>}
           <ClaudeRow d={d} />
@@ -98,7 +99,7 @@ function Machinery({ d, tz }: { d: any; tz: string }) {
         </summary>
         <div className="mt-2 rounded-xl border border-line bg-surface px-4 py-3 text-[14px] space-y-2">
           <p className="sm:hidden">Last check {d.lastSuccessAt ? when(d.lastSuccessAt, tz) : "never"}. Next {nextText === "off" ? "none: private schedules are off" : nextText}.</p>
-          {sch.workerActive ? <p>The worker's heartbeat was {when(sch.lastHeartbeat, tz)}.</p> : <p>A worker runs scheduled briefs. Start one in Terminal with <span className="mono">npm run worker</span>.</p>}
+          {sch.workerActive ? <p>The worker's heartbeat was {when(sch.lastHeartbeat, tz)}.</p> : <p>A worker runs scheduled briefs. Start Jarvis with <span className="mono">node scripts/jarvis.mjs</span>; it starts the worker too.</p>}
           {!sch.enabled && <p>Private schedules are off until you choose. <Link href="/settings#brief" className="text-accent underline underline-offset-2">Turn them on</Link>.</p>}
           {sch.quietNow && <p>Quiet time you set, until {when(sch.quietNow, tz)}. Scheduled work waits.</p>}
           {a?.inputs?.length > 0 && <ul className="space-y-1" data-testid="brief-inputs">{a.inputs.map((i: any, k: number) => <li key={k} className="flex gap-2 items-baseline min-w-0"><Badge tone={i.state === "live" ? "accent" : i.state === "unavailable" ? "danger" : i.state === "stale" ? "amber" : "neutral"}>{i.state}</Badge><span className="break-words min-w-0">{i.label}<span className="t-meta"> · {i.detail}</span></span></li>)}</ul>}
@@ -110,16 +111,48 @@ function Machinery({ d, tz }: { d: any; tz: string }) {
 
 // ---------- first launch ----------
 function FirstLaunch({ d, run }: { d: any; run: any }) {
+  const step = (n: number, done: boolean, active: boolean) => cx("grid place-items-center size-7 rounded-full text-[13px] font-semibold shrink-0", done ? "bg-accent text-on-accent" : active ? "border-2 border-accent text-accent" : "border border-line text-muted");
   return (
-    <div data-testid="brief-empty" className="max-w-[34rem]">
+    <div data-testid="brief-empty" className="max-w-[36rem]">
       <p className="t-lead">{d.hasNotes ? "Your note is saved. Build your first brief." : "Start with one note about something due this week."}</p>
-      <p className="t-body text-muted mt-3">{d.hasNotes ? "The first brief is a baseline: it shows what you owe now. From the next one it can say what changed." : "Paste an assignment or a project note. It stays on this computer, and the first brief is a baseline you can check against it."}</p>
-      <div className="mt-6 flex items-center gap-4 flex-wrap">
-        {d.hasNotes ? <Button variant="primary" busy={run.busy} onClick={() => run.run()} data-testid="brief-build" className="min-h-11 px-5 text-base"><RefreshCw className="size-4" aria-hidden />Build my first brief</Button>
-          : <Link href="/try" data-testid="brief-add-note" className="touch inline-flex items-center gap-2 rounded-lg bg-accent text-on-accent font-medium px-5 min-h-11 text-base hover:brightness-110">Add your first note</Link>}
-        {!d.hasCalendar && <Link href="/sources" className="text-[15px] text-accent underline underline-offset-4" data-testid="brief-add-calendar">Connect a calendar</Link>}
-      </div>
+      <p className="t-body text-muted mt-3">{d.hasNotes ? "The first brief is a baseline: it shows what you owe now, with the sentence behind each line. From the next one it can say what changed." : "A note you paste, or a notification email. It stays on this computer, and the first brief is a baseline you can check against it."}</p>
+      <ol className="mt-6 space-y-4" data-testid="first-steps">
+        <li className="flex gap-3 items-start" data-testid="first-step-1" data-done={d.hasNotes ? "1" : "0"}><span className={step(1, d.hasNotes, !d.hasNotes)} aria-hidden>{d.hasNotes ? <Check className="size-4" /> : 1}</span><div className="min-w-0"><p className="text-[16px] font-medium">One note or notification {d.hasNotes && <span className="t-meta font-normal">saved</span>}</p>
+          {!d.hasNotes && <><p className="t-meta mt-0.5">An assignment, an announcement, or the text of a Blackboard notification email.</p><Link href="/try" data-testid="brief-add-note" className="touch inline-flex items-center gap-2 rounded-lg bg-accent text-on-accent font-medium px-5 min-h-11 text-base hover:brightness-110 mt-3">Add your first note</Link></>}</div></li>
+        <li className="flex gap-3 items-start" data-testid="first-step-2" data-done={d.hasCalendar ? "1" : "0"}><span className={step(2, d.hasCalendar, d.hasNotes && !d.hasCalendar)} aria-hidden>{d.hasCalendar ? <Check className="size-4" /> : 2}</span><div className="min-w-0"><p className="text-[16px] font-medium">A calendar <span className="t-meta font-normal">{d.hasCalendar ? "read" : "optional"}</span></p>
+          {!d.hasCalendar && <p className="t-meta mt-0.5">Without one, Jarvis proposes no time slot: free time would be a guess. <Link href="/sources" className="text-accent underline underline-offset-4" data-testid="brief-add-calendar">Import a calendar file</Link> or <Link href="/connections#blackboard" className="text-accent underline underline-offset-4" data-testid="brief-add-feed">paste a Blackboard calendar link</Link>.</p>}</div></li>
+        <li className="flex gap-3 items-start" data-testid="first-step-3"><span className={step(3, false, d.hasNotes)} aria-hidden>3</span><div className="min-w-0"><p className="text-[16px] font-medium">Your first brief</p>
+          {d.hasNotes ? <Button variant="primary" busy={run.busy} onClick={() => run.run()} data-testid="brief-build" className="min-h-11 px-5 text-base mt-2"><RefreshCw className="size-4" aria-hidden />Build my first brief</Button> : <p className="t-meta mt-0.5">Cited, with a link to the exact sentence for every line. Then correct anything it got wrong.</p>}</div></li>
+      </ol>
     </div>
+  );
+}
+
+/** Sentences the rules could not classify. They are listed with the note they came from so nothing important is hidden by wording, and you decide. */
+function ReviewPanel({ items }: { items: any[] }) {
+  if (!items.length) return null;
+  return (
+    <section aria-label="Please check these sentences" data-testid="brief-review" className="rounded-2xl border border-amber-dim bg-amber-soft p-4 md:p-5 space-y-3">
+      <div><h2 className="text-[16px] font-semibold">Please check {items.length === 1 ? "this sentence" : `these ${items.length} sentences`}</h2><p className="t-meta mt-0.5">Jarvis could not tell whether {items.length === 1 ? "it asks" : "they ask"} something of you. Nothing is hidden: tell it, and the next brief uses your answer.</p></div>
+      <ul className="space-y-3">{items.map((r) => <ReviewRow key={r.id} r={r} />)}</ul>
+    </section>
+  );
+}
+function ReviewRow({ r }: { r: any }) {
+  const [when, setWhen] = useState("");
+  const send = useAction(async (kind: string, value?: string) => { await api("/brief/feedback", { body: { key: r.key, kind, value: value ?? r.id, note: kind === "due" ? `from the note: ${r.sentence.slice(0, 120)}` : undefined } }); });
+  return (
+    <li className="rounded-xl bg-surface border border-line p-3.5 space-y-2.5" data-testid="review-item" data-kind={r.kind}>
+      <p className="text-[15.5px] leading-snug">“{r.sentence}”</p>
+      <p className="t-meta"><Link href={r.href} className="text-accent underline underline-offset-4" data-testid="review-source">Open the note</Link> · {r.title} · {r.kind === "date" ? "I could not read a date in this" : "wording I do not recognise"}</p>
+      {r.kind === "requirement" ? (
+        <div className="flex gap-2 flex-wrap"><Button size="sm" variant="primary" busy={send.busy} onClick={() => send.run("req_add")} data-testid="review-yes">Yes, I must do this</Button><Button size="sm" busy={send.busy} onClick={() => send.run("req_ignore")} data-testid="review-no">No, ignore it</Button></div>
+      ) : (
+        <div className="flex gap-2 flex-wrap items-end"><label className="text-[13px] text-muted grid gap-1">Deadline it states<input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[15px] text-fg" data-testid="review-date" /></label>
+          <Button size="sm" variant="primary" busy={send.busy} disabled={!when} onClick={() => send.run("due", when)} data-testid="review-set">Set this deadline</Button><Button size="sm" busy={send.busy} onClick={() => send.run("req_ignore")} data-testid="review-no">It is not a deadline</Button></div>
+      )}
+      {send.error && <ErrorBox error={send.error} />}
+    </li>
   );
 }
 

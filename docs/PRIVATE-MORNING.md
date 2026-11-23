@@ -55,6 +55,10 @@ Claude sees nothing else: your notes stay local-only unless you press **Let Clau
 
 **6. The next morning.** With the worker running and private schedules on, the brief builds itself at your time. If the computer was asleep, it runs once when the worker wakes and Today shows the gap ("Ran 2 h 12 min after its slot…"). If you set a Shabbat or prayer interval, scheduled work waits until it ends.
 
+
+## When the wording is unusual (nothing is hidden)
+Jarvis reads deadlines and requirements with fixed rules, not a model. Anything those rules do not recognise but whose wording suggests an obligation ("outlines are expected on paper, stapled", "late work will not be accepted") or a date it cannot read ("due the 3rd of December") is listed on Today under **Please check these sentences**, in full, with a link to the note. For each: **Yes, I must do this** (it becomes a requirement, cited to that sentence), **No, ignore it**, or, for a date, type the deadline it states. Your answer is kept, shown as yours, and used by every later brief. Optional wording ("if you like") and questions are not listed.
+
 ## What was tested here and what only you can check
 
 - Tested on invented material on this machine: the builder, deadline supersession, requirements, calendar coverage, reservations, corrections and dismissals; the worker (scheduled run, duplicate delivery, claimed-then-died run, restart, catch-up, quiet intervals, failed build retried); the connector boundary through two fresh clients; the browser journey at laptop and phone width; the Mac setup helper against a copy of a config file.

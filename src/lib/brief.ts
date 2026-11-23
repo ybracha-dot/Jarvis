@@ -16,6 +16,7 @@ import { grantResult, revokeResult, resultShared, resultAccess } from "./share";
 
 // ---------- types ----------
 export interface BriefSource { itemId: string; revision: number; title: string; kind: string; at: string; sourceLabel: string; mode: string; role: string; quote: string; shareable: boolean }
+export interface ReviewItem { id: string; kind: "requirement" | "date"; sentence: string; source: BriefSource }
 export interface Obligation {
   key: string; kind: "note" | "task" | "calendar" | "commitment"; title: string;
   due: { at: string; timeAssumed: boolean } | null; dueSource: BriefSource | null; dueBasis: string;
@@ -25,6 +26,7 @@ export interface Obligation {
   waived: { quote: string; source: BriefSource }[];
   requirementsKnown: boolean; sources: BriefSource[]; shareable: boolean; sourceIds: string[]; link: string | null; text: string;
   userDue?: { at: string; note: string | null } | null; leftOutNote?: string | null;
+  review: ReviewItem[];
 }
 export interface Change { type: "new_item" | "due_moved" | "requirement_added" | "requirement_removed" | "conflict" | "removed" | "you_corrected" | "you_dismissed"; key: string; title: string; text: string; score: number; days?: number; source: BriefSource | null; due?: string | null; previousDue?: string | null }
 export interface BlockProposal { start: string; end: string; minutes: number; label: string; step: "work" | "print" }
@@ -32,12 +34,14 @@ export interface Priority {
   key: string; rank: number; title: string; kind: string; next: string; due: { at: string; label: string; relative: string; assumedTime: boolean } | null; why: string[];
   estimate: { minutes: number; basis: "default" | "user"; label: string }; evidence: { label: string; href: string; quote: string; role: string }[];
   deadlineHistory: { label: string; by: string; href: string }[]; conflicts: { label: string; href: string }[]; requirements: { text: string; href: string }[];
+  review?: ReviewItem[];
   blocks: BlockProposal[]; blockNote: string | null; reserved: { id: string; start: string; end: string; label: string }[]; asks: string[]; shareable: boolean; changed: string[];
 }
 export interface InputStatus { label: string; kind: string; state: "live" | "imported" | "stale" | "unavailable"; readAt: string | null; detail: string }
 export interface BriefAnalysis {
   type: "brief"; version: 1; view: "full" | "shared"; occurrenceKey: string; kind: "scheduled" | "ondemand"; builtAt: string; tz: string; baseline: boolean; lastBriefAt: string | null;
   lead: Change | null; leadText: string; changes: Change[]; priorities: Priority[]; alsoDue: { key: string; title: string; due: string | null; label: string; href: string | null }[]; alsoDueMore: number;
+  review?: { id: string; key: string; title: string; kind: "requirement" | "date"; sentence: string; href: string }[];
   dismissed: { key: string; title: string }[]; owedBeforeTomorrow: number; inputs: InputStatus[]; coverage: Coverage[]; gaps: string[]; leftOut: string[]; modelCalls: 0; shareableCount: number; unshareableCount: number;
 }
 
@@ -49,6 +53,15 @@ const REQ_FORCE = /\b(please|must|need(?:s)? to|should|required|requirement|make
 const OPTIONAL = /\b(optional|if you (?:like|wish|want|prefer)|consider|may (?:want|choose|wish)|you can|suggest(?:ed)?|recommended|helpful to)\b/i;
 const WAIVER = /\b(no longer (?:need|required|have|necessary)|do(?:es)? not need|don'?t need|waive[sd]?|not (?:be )?required|no need|is (?:cancell?ed|dropped)|no (?:paper|printed|hard)[ -]?copies|no printing|online[- ]only)\b/i;
 const GENERIC = new Set("due deadline submit submitted turn hand now new class please assignment note update reminder moved extended earlier later instead bring print printed copy copies include attach upload email sign cite will must need needs should have this that from with your you the".split(" "));
+/** Sentences the rules above did not classify, but whose wording suggests an obligation: they are shown for review, never silently dropped. */
+const CAND_CUE = /\b(expect(?:ed|s)?|require[sd]?|requirement|mandatory|compulsory|necessary|obligatory|must|have to|has to|will not be accepted|not accepted|no late|late (?:work|submissions?|penalt\w+)|penalt(?:y|ies)|deduct\w*|allowed|permitted|prohibited|forbidden|stapled|typed|double[- ]spaced|single[- ]spaced|word limit|\d+\s*(?:words|pages)|hard ?cop(?:y|ies)|on paper|paper cop(?:y|ies)|in class|start of class|at the beginning of class|formatted|format|font|margins?|cover (?:page|sheet)|reference list|bibliography|citations?|rubric|laptops?|devices?|calculators?|id card|photo id)\b/i;
+const DATE_CUE = /\b(next (?:mon|tues|wednes|thurs|fri|satur|sun)day|this (?:mon|tues|wednes|thurs|fri|satur|sun)day|end of (?:the )?(?:day|week|month|term|semester)|eod|eow|the \d{1,2}(?:st|nd|rd|th)(?: of \w+)?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|tomorrow|tonight|next week|in (?:two|three|\d+) (?:days|weeks)|midnight|noon)\b/i;
+const reviewKind = (sentence: string, hadDate: boolean): "requirement" | "date" | null => {
+  if (sentence.length < 12 || /\?\s*$/.test(sentence)) return null;
+  if (!hadDate && DUE_CUE.test(sentence) && DATE_CUE.test(sentence)) return "date";
+  if (CAND_CUE.test(sentence) && !OPTIONAL.test(sentence)) return "requirement";
+  return null;
+};
 const FIRSTNAME = (n: string) => n.trim().split(/\s+/)[0].toLowerCase();
 
 export function dueDates(sentence: string, at: string, tz: string): { iso: string; timeAssumed: boolean; text: string }[] {
@@ -96,10 +109,11 @@ export function collectObligations(ctx: Ctx): Collected {
     const titleToks = new Set(tokens(String(root.title)));
     type U = { sentence: string; at: string; assumed: boolean; item: any; topic: string[]; change: boolean };
     let current: (U & { superseded: Obligation["superseded"] })[] = [];
-    const reqs: Obligation["requirements"] = []; const waived: Obligation["waived"] = [];
+    const reqs: Obligation["requirements"] = []; const waived: Obligation["waived"] = []; const cand: ReviewItem[] = [];
     for (const it of members) {
       const units: U[] = []; let sentences = splitSentences(String(it.body)); if (isCal) sentences = sentences.filter((s) => !/\(cancelled\)|no longer appears in the feed/i.test(s) || true);
       for (const sentence of sentences) {
+        const reqBefore = reqs.length, unitsBefore = units.length;
         if (WAIVER.test(sentence) && (REQ_VERB.test(sentence) || /print|paper|copy|copies/i.test(sentence))) {
           for (let i = reqs.length - 1; i >= 0; i--) if (/(print|bring|hard ?copy|paper|copy|copies)/i.test(sentence) === /(print|bring|hard ?copy|paper|copy|copies)/i.test(reqs[i].quote) && (reqs[i].source.itemId !== it.id)) { waived.push({ quote: sentence, source: srcOf(it, "waiver", sentence) }); reqs.splice(i, 1); }
           continue;
@@ -107,6 +121,7 @@ export function collectObligations(ctx: Ctx): Collected {
         const ds = DUE_CUE.test(sentence) ? dueDates(sentence, it.at as string, tz) : [];
         if (ds.length) { const other = assignedToOther(sentence, me); if (other) { leftOut.push(`“${sentence.slice(0, 90)}” is assigned to ${other}, not to you.`); continue; } for (const d of ds.slice(0, 1)) units.push({ sentence, at: d.iso, assumed: d.timeAssumed, item: it, topic: topicTokens(sentence, titleToks), change: CHANGE_LANG.test(sentence) }); }
         if (REQ_VERB.test(sentence) && REQ_FORCE.test(sentence) && !/\?\s*$/.test(sentence) && !OPTIONAL.test(sentence) && !ds.some(() => /^(?:the )?(?:essay|paper|assignment)\b.*\bis due\b/i.test(sentence) && !REQ_VERB.test(sentence)) && !(assignedToOther(sentence, me)) && !reqs.some((r) => r.quote === sentence)) reqs.push({ text: sentence, action: requirementAction(sentence), quote: sentence, source: srcOf(it, "requirement", sentence), mandatory: true });
+        if (!isCal && units.length === unitsBefore && (reqs.length === reqBefore ? !reqs.some((r) => r.quote === sentence) : (!ds.length && DUE_CUE.test(sentence) && DATE_CUE.test(sentence)))) { const rk = reqs.length === reqBefore ? reviewKind(sentence, ds.length > 0) : "date"; const id = sha(`${rootId}|${sentence}`).slice(0, 10); if (rk && !cand.some((c) => c.id === id)) cand.push({ id, kind: rk, sentence, source: srcOf(it, "to review", sentence) }); }
       }
       for (const u of units) {
         const sameTopic = current.findIndex((c) => (u.topic.length && c.topic.length ? u.topic.filter((t) => c.topic.includes(t)).length / Math.min(u.topic.length, c.topic.length) >= 0.5 : false));
@@ -121,12 +136,12 @@ export function collectObligations(ctx: Ctx): Collected {
       const shareable = members.every((m) => !!m.shareable && !m.local_only);
       const srcs = [srcOf(u.item, "deadline", u.sentence), ...u.superseded.map((s) => s.source), ...reqs.map((r) => r.source)];
       const o: Obligation = { key: `${isCal ? "cal" : "note"}:${rootId}${multi ? `:${sha(u.topic.join(" ")).slice(0, 6)}` : ""}`, kind: isCal ? "calendar" : "note", title, due: { at: u.at, timeAssumed: u.assumed }, dueSource: srcOf(u.item, "deadline", u.sentence),
-        dueBasis: u.superseded.length ? `Replaced the earlier deadline in “${u.superseded[0].source.title}”.` : "", superseded: u.superseded, conflicts: [], requirements: isCal ? [] : reqs.filter((r) => !multi || !r.quote || true), waived, requirementsKnown: !isCal || false,
+        dueBasis: u.superseded.length ? `Replaced the earlier deadline in “${u.superseded[0].source.title}”.` : "", superseded: u.superseded, conflicts: [], requirements: isCal ? [] : reqs.filter((r) => !multi || !r.quote || true), waived, review: isCal ? [] : cand, requirementsKnown: !isCal || false,
         sources: srcs, shareable, sourceIds: [...new Set(members.map((m) => m.sid as string))], link: `/evidence/${u.item.id}`, text: `${title}. ${u.sentence}` };
       (isCal ? calUnits : noteObl).push(o);
     }
     // A note that asks for something but states no deadline is still shown, without a date, if it carries a requirement.
-    if (!current.length && !isCal && reqs.length) { const it = members[members.length - 1]; noteObl.push({ key: `note:${rootId}`, kind: "note", title: String(root.title), due: null, dueSource: null, dueBasis: "", superseded: [], conflicts: [], requirements: reqs, waived, requirementsKnown: true, sources: reqs.map((r) => r.source), shareable: members.every((m) => !!m.shareable && !m.local_only), sourceIds: [...new Set(members.map((m) => m.sid as string))], link: `/evidence/${it.id}`, text: String(root.title) }); }
+    if (!current.length && !isCal && (reqs.length || cand.length)) { const it = members[members.length - 1]; noteObl.push({ key: `note:${rootId}`, kind: "note", title: String(root.title), due: null, dueSource: null, dueBasis: "", superseded: [], conflicts: [], requirements: reqs, waived, review: cand, requirementsKnown: reqs.length > 0, sources: [...reqs.map((r) => r.source), ...cand.map((c) => c.source)], shareable: members.every((m) => !!m.shareable && !m.local_only), sourceIds: [...new Set(members.map((m) => m.sid as string))], link: `/evidence/${it.id}`, text: String(root.title) }); }
   }
   // A calendar event for the same work as a note either agrees with it, or disagrees without either replacing the other: that is a conflict, shown, never resolved silently.
   for (const c of calUnits) {
@@ -144,16 +159,22 @@ export function collectObligations(ctx: Ctx): Collected {
     const hist = all(ctx.db, "SELECT h.due_at, h.kind, h.recorded_at, h.note FROM task_due_history h WHERE h.task_id=? ORDER BY h.recorded_at, h.rowid", t.id);
     const q = (s: string) => ({ itemId: `task:${t.id}`, revision: 1, title: String(t.title), kind: "task", at: String(t.created_at), sourceLabel: "Course record", mode: "imported", role: s, quote: String(t.title), shareable: false } as BriefSource);
     out.push({ key: `task:${t.id}`, kind: "task", title: `${t.ccode ? `${t.ccode}: ` : ""}${t.title}`, due: { at: String(t.due_at), timeAssumed: false }, dueSource: q("deadline"), dueBasis: "From your course record.", superseded: hist.filter((h) => h.due_at !== t.due_at).map((h) => ({ at: String(h.due_at), timeAssumed: false, source: q("superseded deadline"), by: String(h.note ?? "a later update") })),
-      conflicts: [], requirements: all(ctx.db, "SELECT text, quote FROM requirements WHERE task_id=? AND status='active'", t.id).map((r) => ({ text: String(r.text), action: String(r.text), quote: String(r.quote), source: q("requirement"), mandatory: true })), waived: [], requirementsKnown: true, sources: [], shareable: false, sourceIds: [], link: `/?drawer=task&id=${t.id}`, text: String(t.title) });
+      conflicts: [], requirements: all(ctx.db, "SELECT text, quote FROM requirements WHERE task_id=? AND status='active'", t.id).map((r) => ({ text: String(r.text), action: String(r.text), quote: String(r.quote), source: q("requirement"), mandatory: true })), waived: [], review: [], requirementsKnown: true, sources: [], shareable: false, sourceIds: [], link: `/?drawer=task&id=${t.id}`, text: String(t.title) });
   }
   for (const c of all(ctx.db, "SELECT * FROM commitments WHERE owner_id=? AND status!='resolved' AND due_date IS NOT NULL", ctx.owner)) {
     if (FIRSTNAME(String(c.who)) !== FIRSTNAME(me)) continue;
     const q = (s: string) => ({ itemId: `commitment:${c.id}`, revision: 1, title: String(c.action), kind: "commitment", at: String(c.created_at ?? ""), sourceLabel: "Your promise", mode: "imported", role: s, quote: String(c.action), shareable: false } as BriefSource);
-    out.push({ key: `commitment:${c.id}`, kind: "commitment", title: `${c.action} (to ${c.owed_to})`, due: { at: parseLocal(String(c.due_date), "17:00", tz).toISOString(), timeAssumed: true }, dueSource: q("deadline"), dueBasis: "A promise you made.", superseded: [], conflicts: [], requirements: [], waived: [], requirementsKnown: true, sources: [], shareable: false, sourceIds: [], link: `/tasks?tab=followups&focus=${c.id}`, text: String(c.action) });
+    out.push({ key: `commitment:${c.id}`, kind: "commitment", title: `${c.action} (to ${c.owed_to})`, due: { at: parseLocal(String(c.due_date), "17:00", tz).toISOString(), timeAssumed: true }, dueSource: q("deadline"), dueBasis: "A promise you made.", superseded: [], conflicts: [], requirements: [], waived: [], review: [], requirementsKnown: true, sources: [], shareable: false, sourceIds: [], link: `/tasks?tab=followups&focus=${c.id}`, text: String(c.action) });
   }
   // The user's own corrections sit on top of every source.
   const fb = feedback(ctx);
   for (const o of out) for (const f of fb) if (f.obligation_key === o.key && f.kind === "due" && f.value) { if (o.due) o.superseded.push({ at: o.due.at, timeAssumed: o.due.timeAssumed, source: o.dueSource ?? { itemId: "", revision: 1, title: o.title, kind: o.kind, at: String(f.created_at), sourceLabel: "Earlier", mode: "imported", role: "superseded deadline", quote: o.title, shareable: false }, by: "you" }); o.due = { at: String(f.value), timeAssumed: false }; o.userDue = { at: String(f.value), note: (f.note as string | null) ?? null }; o.conflicts = []; o.dueBasis = "You corrected this deadline."; }
+  // Sentences Jarvis could not classify: shown for review. What you decide is kept, and a confirmed one becomes a requirement with its source.
+  const ign = new Set(fb.filter((f) => f.kind === "req_ignore").map((f) => String(f.value))); const addd = new Set(fb.filter((f) => f.kind === "req_add").map((f) => String(f.value)));
+  for (const o of out) o.review = o.review.filter((r) => {
+    if (ign.has(r.id)) return false; if (r.kind === "date" && o.userDue) return false;
+    if (r.kind === "requirement" && addd.has(r.id)) { const src = { ...r.source, role: "requirement you confirmed" }; o.requirements.push({ text: r.sentence, action: requirementAction(r.sentence), quote: r.sentence, source: src, mandatory: true }); o.sources.push(src); o.requirementsKnown = true; return false; }
+    return true; });
   void now; return { obligations: out, leftOut: [...new Set(leftOut)].slice(0, 6), unreadable: [] };
 }
 
@@ -245,7 +266,7 @@ function priorityOf(ctx: Ctx, o: Obligation, rank: number, cov: Coverage[], chan
   const ev: Priority["evidence"] = []; const seen = new Set<string>(); for (const s of o.sources) { const k = `${s.itemId}|${s.role}`; if (seen.has(k) || s.role === "superseded deadline") continue; seen.add(k); ev.push({ label: `${s.title} (${s.role})`, href: href(s), quote: s.quote.slice(0, 220), role: s.role }); }
   return { key: o.key, rank, title: o.title, kind: o.kind, next, due: dueLabel, why, estimate, evidence: ev,
     deadlineHistory: o.superseded.map((s) => ({ label: `Was ${fmtDueLabel(s.at, s.timeAssumed, tz)} (“${s.source.title}”). Replaced ${s.by === "you" ? "by your correction" : `by “${s.by}”`}.`, by: s.by, href: href(s.source) })),
-    conflicts: o.conflicts.map((c) => ({ label: `${c.source.sourceLabel} says ${fmtDueLabel(c.at, c.timeAssumed, tz)}.`, href: href(c.source) })), requirements: o.requirements.map((r) => ({ text: r.action, href: href(r.source) })),
+    conflicts: o.conflicts.map((c) => ({ label: `${c.source.sourceLabel} says ${fmtDueLabel(c.at, c.timeAssumed, tz)}.`, href: href(c.source) })), requirements: o.requirements.map((r) => ({ text: r.action, href: href(r.source) })), review: o.review,
     blocks: pl.blocks, blockNote: pl.note, reserved, asks: o.requirementsKnown ? [] : ["Paste the original instructions, or a notification email you are allowed to forward, so Jarvis can tell what to hand in."], shareable: o.shareable, changed: changes.filter((c) => c.key === o.key).map((c) => c.text) };
 }
 
@@ -284,7 +305,8 @@ export function buildBrief(ctx: Ctx, opts: BuildOpts): { analysis: BriefAnalysis
   const noteCount = coll.obligations.length; if (!noteCount) gaps.push("Nothing with a deadline was found in your notes or calendar yet.");
   const leadText = baseline ? "This is your first brief, so it is a baseline: there is nothing earlier to compare with. Changes will show from the next one." : lead ? lead.text : prevRun ? `No material change since your last brief (${fmtDateTime(String(prevRun.built_at), tz)}).` : "No material change.";
   const sourcesOut: BriefSource[] = []; const seenSrc = new Set<string>(); for (const o of [...top, ...ranked.slice(3, 3)]) for (const s of o.sources) { if (s.itemId.startsWith("task:") || s.itemId.startsWith("commitment:") || seenSrc.has(`${s.itemId}|${s.quote}`)) continue; seenSrc.add(`${s.itemId}|${s.quote}`); sourcesOut.push(s); }
-  const analysis: BriefAnalysis = { type: "brief", version: 1, view, occurrenceKey: opts.occurrenceKey, kind: opts.kind, builtAt: now.toISOString(), tz, baseline, lastBriefAt: prevRun ? String(prevRun.built_at) : null, lead, leadText, changes: [...changes, ...acknowledged].slice(0, 12), priorities, alsoDue, alsoDueMore: Math.max(0, rest.length - alsoDue.length), dismissed: dismissedList,
+  const seenRv = new Set<string>(); const reviewAll = view === "full" ? live.flatMap((o) => o.review.map((r) => ({ id: r.id, key: o.key, title: o.title, kind: r.kind, sentence: r.sentence, href: `${href(r.source)}?q=${encodeURIComponent(r.sentence.slice(0, 80))}` }))).filter((r) => !seenRv.has(r.id) && !!seenRv.add(r.id)).slice(0, 8) : [];
+  const analysis: BriefAnalysis = { type: "brief", version: 1, view, occurrenceKey: opts.occurrenceKey, kind: opts.kind, builtAt: now.toISOString(), tz, baseline, lastBriefAt: prevRun ? String(prevRun.built_at) : null, lead, leadText, changes: [...changes, ...acknowledged].slice(0, 12), priorities, alsoDue, alsoDueMore: Math.max(0, rest.length - alsoDue.length), review: reviewAll, dismissed: dismissedList,
     owedBeforeTomorrow, inputs, coverage: view === "full" ? cov : [], gaps, leftOut: view === "full" ? coll.leftOut : [], modelCalls: 0, shareableCount: obls.filter((o) => o.shareable).length, unshareableCount: coll.obligations.filter((o) => !o.shareable).length };
   if (view === "shared") { for (const p of analysis.priorities) { p.blocks = []; p.blockNote = null; p.reserved = []; } analysis.coverage = []; analysis.gaps = []; analysis.leftOut = []; }
   return { analysis, sources: sourcesOut };
@@ -385,7 +407,7 @@ export function agendaFor(ctx: Ctx, a: BriefAnalysis | null): { days: AgendaDay[
 function scheduleWarning(ctx: Ctx, sch: { enabled: boolean; paused: boolean; workerActive: boolean; nextRun: any }, tz: string): { text: string; fix: string } | null {
   if (!sch.enabled || !sch.nextRun) return null; const when = fmtDateTime(sch.nextRun.at, tz);
   if (sch.paused) return { text: `Scheduled briefs are paused, so the one due ${when} will not run.`, fix: "Resume them in Settings." };
-  if (!sch.workerActive && Date.parse(sch.nextRun.at) - ctx.now().getTime() < 36 * 3600_000) return { text: `The brief due ${when} will not run: no worker is running.`, fix: "Start one in Terminal: npm run worker" };
+  if (!sch.workerActive && Date.parse(sch.nextRun.at) - ctx.now().getTime() < 36 * 3600_000) return { text: `The brief due ${when} will not run: no worker is running.`, fix: "Start Jarvis with: node scripts/jarvis.mjs (it starts the worker too)" };
   return null;
 }
 
@@ -407,9 +429,11 @@ export function briefToday(ctx: Ctx, sch: { enabled: boolean; paused: boolean; w
 }
 
 // ---------- what the user can do with it ----------
-export function briefFeedback(ctx: Ctx, o: { key: string; kind: "dismiss" | "undismiss" | "due" | "estimate" | "done" | "undo"; value?: string | number | null; note?: string | null }) {
+export function briefFeedback(ctx: Ctx, o: { key: string; kind: "dismiss" | "undismiss" | "due" | "estimate" | "done" | "undo" | "req_add" | "req_ignore" | "req_undo"; value?: string | number | null; note?: string | null }) {
   const known = collectObligations(ctx).obligations.find((x) => x.key === o.key); if (!known) throw new HttpError(404, "That item is not in your sources any more.");
   if (o.kind === "undismiss" || o.kind === "undo") { run(ctx.db, "UPDATE brief_feedback SET undone_at=? WHERE obligation_key=? AND kind IN ('dismiss','done') AND undone_at IS NULL", ctx.now().toISOString(), o.key); return { ok: true }; }
+  if (o.kind === "req_undo") { run(ctx.db, "UPDATE brief_feedback SET undone_at=? WHERE obligation_key=? AND kind IN ('req_add','req_ignore') AND value=? AND undone_at IS NULL", ctx.now().toISOString(), o.key, String(o.value ?? "")); return { ok: true }; }
+  if (o.kind === "req_add" || o.kind === "req_ignore") { if (!known.review.some((r) => r.id === String(o.value))) throw new HttpError(404, "That sentence is not waiting for review any more."); }
   if (o.kind === "due") { const t = Date.parse(String(o.value)); if (Number.isNaN(t)) throw new HttpError(422, "Give the corrected deadline as a date and time."); }
   if (o.kind === "estimate") { const m = Number(o.value); if (!Number.isFinite(m) || m < 5 || m > 1200) throw new HttpError(422, "An estimate is between 5 and 1200 minutes."); }
   run(ctx.db, "INSERT INTO brief_feedback(id,obligation_key,kind,value,note,created_at) VALUES(?,?,?,?,?,?)", uid("bf"), o.key, o.kind, o.kind === "dismiss" ? (known.due?.at ?? null) : o.value == null ? null : String(o.value), o.note ?? null, ctx.now().toISOString());

@@ -102,6 +102,25 @@ async function main() {
   ok(t.code === 1 && /older than its source/.test(t.out) && !(await health(3450)), "source newer than the build: it says to rebuild and does not run stale code");
   const dr = launcher(NEW, ["doctor", "--port", "3460"]); ok(dr.code === 0 && /Node .* ok/.test(dr.out) && /Port 3460: free/.test(dr.out), "doctor checks without starting anything");
 
+  step("A missed scheduled brief catches up once after a restart, and Today shows the last successful check");
+  const catchData = path.join(BASE, "catchup-data"); fs.mkdirSync(catchData, { recursive: true });
+  { // an install whose private schedule was due at 00:01 today while nothing was running (cursor set to yesterday)
+    const first = launcher(NEW, ["--no-open", "--port", "3480", "--data", catchData]); const pids0 = pidsOf(first.out); launcher(NEW, ["stop", "--port", "3480", "--data", catchData]); await sleep(800);
+    const dbp = path.join(catchData, "personal", "jarvis.db"); const { DatabaseSync: DS } = await import("node:sqlite"); const cdb = new DS(dbp);
+    const put = (k: string, v: unknown) => cdb.prepare("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)").run(k, JSON.stringify(v));
+    put("brief_enabled", true); put("scheduler_enabled", true); put("check_times", ["00:01", "16:00"]); put("scheduler_cursor", new Date(Date.now() - 36 * 3600_000).toISOString()); cdb.close();
+    void pids0;
+    const again = launcher(NEW, ["--no-open", "--port", "3480", "--data", catchData]); ok(again.code === 0, "restart on the data that missed its morning slot");
+    let today: any = null; for (let i = 0; i < 60 && !today?.lastSuccessAt; i++) { await sleep(1000); today = await (await fetch("http://127.0.0.1:3480/api/brief", { headers: { cookie: "jarvis_mode=personal" } })).json().catch(() => null); }
+    ok(!!today?.lastSuccessAt && /^morning:/.test(today.occurrenceKey ?? ""), `the worker ran the missed morning brief on restart (${today?.occurrenceKey})`);
+    ok(today?.recentMisses?.some((m: any) => /after its|Nothing ran for this slot/.test(m.detail ?? "")), "Today shows the gap instead of a silent success");
+    launcher(NEW, ["stop", "--port", "3480", "--data", catchData]); await sleep(800);
+    const count1 = ((new DS(dbp, { readOnly: true })).prepare("SELECT COUNT(*) n FROM brief_runs WHERE kind='scheduled'").get() as any).n;
+    launcher(NEW, ["--no-open", "--port", "3480", "--data", catchData]); await sleep(12000); launcher(NEW, ["stop", "--port", "3480", "--data", catchData]); await sleep(800);
+    const count2 = ((new DS(dbp, { readOnly: true })).prepare("SELECT COUNT(*) n FROM brief_runs WHERE kind='scheduled'").get() as any).n;
+    ok(count1 === 1 && count2 === 1, `restarting again makes no second brief for the same slot (${count1} then ${count2})`);
+  }
+
   step("Upgrade: an older install with a saved result, migrated explicitly, the old folder untouched");
   const old = launcher(OLD, ["--no-open", "--port", "3430"]); ok(old.code === 0, "the older install starts");
   const cookie = "jarvis_mode=personal"; const post = (p: string, body: unknown) => fetch(`http://127.0.0.1:3430/api${p}`, { method: "POST", headers: { "content-type": "application/json", origin: "http://127.0.0.1:3430", cookie }, body: JSON.stringify(body) });

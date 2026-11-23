@@ -888,6 +888,23 @@ async function journeyBrief(browser: Browser) {
   ok(/no calendar has been read/.test(await B.getByTestId("brief-no-block").innerText()) && (await B.getByTestId("brief-add-calendar").first().isVisible()), "with no calendar, no time is proposed, the page says why, and the one action is Add a calendar");
   ok(/due before tomorrow ends/.test(await B.getByTestId("brief-owed").innerText()), "what is owed before tomorrow ends is stated");
 
+  // 3c. unusual wording is shown for review, never quietly dropped; the date I cannot read becomes a date I can set
+  await apiP("/evidence/import", { kind: "note", title: "Lab report 3 format", text: "Reports must be typed and double-spaced, no more than 1200 words. Late work will not be accepted.", at: new Date().toISOString(), label: "My class notes" });
+  await apiP("/evidence/import", { kind: "note", title: "Memo draft", text: "The memo is due the 3rd of December.", at: new Date().toISOString(), label: "My class notes" });
+  await B.reload(); await B.getByTestId("brief-build").click(); await B.getByTestId("brief-review").waitFor({ timeout: 20000 });
+  const rv = await B.getByTestId("brief-review").innerText();
+  ok(/typed and double-spaced/.test(rv) && /Late work will not be accepted/.test(rv) && /3rd of December/.test(rv), "the sentences the rules could not classify are listed in full, with the date I could not read");
+  ok((await B.getByTestId("review-source").first().getAttribute("href"))!.startsWith("/evidence/"), "each opens the note it came from");
+  await shot(B, "62-brief-review-laptop.png");
+  await B.getByTestId("review-item").filter({ hasText: "typed and double-spaced" }).getByTestId("review-yes").click();
+  await B.getByTestId("review-item").filter({ hasText: "typed and double-spaced" }).waitFor({ state: "detached", timeout: 15000 });
+  await B.getByTestId("review-item").filter({ hasText: "Late work will not be accepted" }).getByTestId("review-no").click();
+  await B.getByTestId("review-item").filter({ hasText: "Late work will not be accepted" }).waitFor({ state: "detached", timeout: 15000 });
+  const dateRow = B.getByTestId("review-item").filter({ hasText: "3rd of December" }); await dateRow.getByTestId("review-date").fill(`${new Date().getFullYear()}-12-03T23:59`); await dateRow.getByTestId("review-set").click();
+  await B.getByTestId("brief-review").waitFor({ state: "detached", timeout: 15000 }); ok(true, "after you answer each one the review list is empty");
+  await B.reload(); await B.getByTestId("brief-also-due").locator("summary").click().catch(() => {}); ok(/Memo draft/.test(await B.getByTestId("brief-card").innerText()), "the memo now appears with the deadline you set");
+  const apiBrief: any = await (await rq.get(base + "/api/brief")).json(); ok(apiBrief.analysis.review.length === 0, "the saved brief carries no unreviewed sentences");
+
   // 3b. an export that lists events on only two days (think Monday and Friday): the days between are unknown, not free, until you confirm them
   const evS = (day: string, a: string, b: string, t: string) => ["BEGIN:VEVENT", `UID:${t.replace(/\W/g, "")}${day}`, `SUMMARY:${t}`, `DTSTART;TZID=America/New_York:${day.replace(/-/g, "")}T${a}00`, `DTEND;TZID=America/New_York:${day.replace(/-/g, "")}T${b}00`, "END:VEVENT"];
   const sparse = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//e2e//EN", ...evS(addD(D0, 2), "1900", "2000", "Study group"), ...evS(addD(D0, 4), "1900", "2000", "Pickup"), "END:VCALENDAR"].join("\r\n");

@@ -16,7 +16,7 @@ export function runnerStatus(mode: Mode) {
   const age = r ? Date.now() - r.at : null;
   return { runner: r, alive: age != null && age < 20_000, message: r && age != null && age < 20_000
     ? (r.kind === "worker" ? `Worker process running (pid ${r.pid}).` : `Running inside this app server (pid ${r.pid}). It stops when the server stops.`)
-    : "No runner active. Jobs wait until the app server or `npm run worker` picks them up." };
+    : "No runner active. Jobs wait until the app server or the worker (`node scripts/jarvis.mjs`) picks them up." };
 }
 
 /** Run everything that is ready, in the background. Safe to call often. */
