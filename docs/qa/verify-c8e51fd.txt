@@ -1,0 +1,13 @@
+Clean-checkout verification of c8e51fd9452cbb97a4e177188817f79bcee1e375
+Started 2026-11-23T06:22:43Z in /tmp/jarvis clean checkout LCNu (a path with spaces)
+Node v22.23.5, npm 10.9.9
+
+clean tree: 0 uncommitted files
+npm-ci: exit 0
+verify: exit 0
+   Test Files  39 passed (39)
+        Tests  427 passed (427)
+e2e: exit 0
+  473 checks passed, 0 problems (5 expected failures from deliberate break tests ignored)
+
+Finished 2026-11-23T06:30:33Z. Full logs: /tmp/jarvis clean checkout LCNu

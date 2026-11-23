@@ -2,7 +2,53 @@
 
 Branch `claude/upbeat-cannon-wf5kxf`. No pull request. Sections, newest first: **Office, the TAMID thread, and the scheduling words** (this round), **Interface redesign: Today, the shell, light and dark**, **The first private morning brief**, **Handoff completeness: Finished means every open assignment is accounted for**, **Reader field check: quantities and who submitted**, **Let Claude read the notes, and make completion verifiable**, **Project scope fix and the handoff table**, **Field test: finish the calculation before drafting**, **From finding evidence to finishing the job**, **Next build: a general assistant**, **Redesign build**, **Addendum build**, **Overnight build**.
 
-# Office, the TAMID thread, and the scheduling words (latest)
+# START HERE: overnight release, Monday November 23
+
+**Verified commit: `c8e51fd`** (branch `claude/upbeat-cannon-wf5kxf`; the commits after it change only documents and the QA records). No pull request, no deployment, no paid model call (every journey asserts zero), nothing sent, nothing submitted, no private account touched. Every input was invented.
+
+## One launch command
+In the downloaded project folder (quote the path if it has spaces), or double-click `Jarvis.command` in Finder:
+```bash
+node scripts/jarvis.mjs
+```
+It checks Node, installs dependencies if missing, builds if the source is newer, backs your data up before migrating an older database, starts the **app and the worker**, waits until both answer, opens **private Today** and prints:
+```
+Jarvis is running.   build c8e51fd  (built ...)
+  App        pid ...   http://127.0.0.1:3000   healthy
+  Worker     pid ...   heartbeat 0 s ago   healthy
+  Workspace  ws_...   app and worker are on the same workspace
+```
+The build identifier is also at the bottom of the sidebar (and under More on a phone) next to "Worker running". `node scripts/jarvis.mjs stop | restart | status | doctor`. Port 3000 busy (another app, or an earlier Jarvis)? It leaves that alone and takes the next free port, and says so. It never signals a process it did not start. Details: `docs/LAUNCH.md`.
+**Upgrading from a previous ZIP:** unzip the new one beside it, then `node scripts/jarvis.mjs upgrade --from "/path/to/old folder"`: hash-verified backup first, the old folder only read, the migration printed (for example "schema v9 -> v12") and recoverable.
+
+## Your first three actions
+1. **Launch** (above) and read the summary: both healthy, same workspace, a build id. Today opens in the private workspace.
+2. **Give it one real note or notification** (Today walks you through three steps; the calendar is optional), press **Build my first brief**, open the source link on each line, and answer anything under **Please check these sentences**. Mark a line **Useful** or **Wrong** and rebuild: the next brief starts with *Because of what you told Jarvis*.
+3. **Share one project with Claude on purpose:** Projects → the project → *Share … with Claude* (preview exactly what Claude would see, tick what to share, Share). Paste the prompt it shows into a **new** Claude Desktop chat (after `node scripts/desktop-config.mjs --write` and ⌘Q). Then **Stop sharing everything** and paste it again: Claude is refused.
+
+## Results (clean checkout of `c8e51fd`: `docs/qa/verify-c8e51fd.txt`)
+- `npm ci` exit 0; `npm run verify` exit 0 (typecheck, **427 unit tests in 39 files**, build); `npm run e2e` exit 0, **473 checks, 0 problems** (Chromium; 5 expected failures from deliberate break tests are ignored by design). Full logs stayed in the temp folder; the summary lines are in the record.
+- `npx tsx scripts/launch-qa.ts`: exit 0, **39 checks, 0 problems** on disposable installs under paths with spaces: start, relaunch, restart, graceful stop, an unrelated app on the port, an earlier Jarvis on the port, missing dependencies, a stale build, a missed scheduled brief caught up once after a restart, and an upgrade of a schema-v9 install holding a saved result (old folder byte-identical). A real `npm ci` + build + start from a bare copy also worked.
+- `npx tsx scripts/qa-inspect.ts`: **20 views, 0 problems** (`docs/qa/inspect-report.md`).
+- Study flake: three study journeys and three `quizlatency` runs back to back, all clean (not reproduced). Connections button: reproduced through the real UI (added 1, removed 1), fixed (added 0, removed 0). See `docs/qa/RELEASE-QA.md`.
+
+## What was built, by item
+1. **Launch and upgrade**: `scripts/jarvis.mjs`, `Jarvis.command`, `/api/health` (build id, worker heartbeat on the same data folder, the worker's pid must be alive), `/open/private`.
+2. **Private intake**: guided first run; sentences the fixed rules do not recognise (a requirement in unusual wording, a date they cannot read) are listed in full for review, never dropped, and your answer is kept; tests for a printed-format requirement, a waiver, a conflicting deadline, a failed refresh and a missing calendar day; catch-up on restart shows the gap.
+3. **Claude and one project**: the share panel on the project page (preview, share, reopen in a new client, one-button revoke of every version); the local-only note, the look-alike note in another project and a revoked result stay private (`tests/project-share.test.ts` and the `share` journey use the real MCP route with fresh clients); a pitch request gives a cited draft with **one next action**, and a correction makes version 2. `docs/CLAUDE-PROJECTS.md`.
+4. **Feedback and memory**: Useful/Wrong/Correct are stored against the exact sentence, its project and the brief they were given on; the next brief says why it changed; one narrow rule (an exact phrase) is proposed from one confirmed correction, judged on eight fixed cases including a different project, with **no new permission**, and does nothing until you approve; it can be rolled back.
+5. **QA and design**: the findings above, the clean-checkout verifier `scripts/clean-checkout-verify.sh`, and the excerpt question rewritten so it reads as what it is.
+
+## What still needs your Mac or your accounts (nothing blocks the next step)
+- Run the launcher once on your Mac (Node 22.13+; `npm ci` needs the internet once).
+- **The private Claude pilot stays pending**: `jarvis-personal` in Claude Desktop with your own Claude account has never been exercised for real, only against an emulator of Claude on the real authenticated route. The earlier example-workspace evidence (`jarvis-reader-demo`) is unchanged. The five-step live check is in `docs/CLAUDE-PROJECTS.md`.
+- Your Blackboard calendar link (and Duo), your real notes and calendar export. Pixel Agents on your Mac. Real-device software-keyboard behaviour on a phone.
+- **Not tested: Safari/WebKit.** It is not installed and cannot be downloaded here. Everything is Chromium (phone views are touch emulation, not an iPhone).
+- Recorded and left alone as out of scope tonight: paid model calls and extras, any deployment, merging to `main`, any external send, any school submission, any private-account connection.
+
+---
+
+# Office, the TAMID thread, and the scheduling words (previous round)
 
 Baseline `63af5b7`; the Today layout is unchanged. Paid model calls stayed off (the whole thread run makes **zero** model calls). Every screenshot uses invented data. Open this first: **Office** in the example workspace.
 

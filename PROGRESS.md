@@ -7,9 +7,10 @@ Branch `claude/upbeat-cannon-wf5kxf`. Start commit `dd8499a`. No PR, no deploy, 
 - [x] 2. Private intake: blank -> one note + optional calendar -> cited corrected brief; unclassified sentences reviewable; catch-up once; last successful check
 - [x] 3. Claude/project continuity: share one project, preview, reopen, revoke all; privacy proofs; pitch draft versioned from a correction
 - [x] 4. Feedback and memory: feedback tied to source/project/result; why the next brief changed; one narrow skill proposal with before/after
-- [ ] 5. Release QA/design: Connections detach repro, Study flake, WebKit check, visual inspection; `npm run verify` + `npm run e2e` from a clean checkout; MORNING.md top
+- [x] 5. Release QA/design: Connections detach repro, Study flake, WebKit check, visual inspection; `npm run verify` + `npm run e2e` from a clean checkout; MORNING.md top
 
 ## Latest pushed checkpoint
+Verified: `c8e51fd` (clean checkout: npm ci 0, verify 0 with 427 tests, e2e 0 with 473 checks). Record: `docs/qa/verify-c8e51fd.txt`. Later commits are documents only.
 `dd8499a` (start); item 1 committed locally, pushed with the next checkpoint. Tests at start: typecheck clean, 413 unit tests, full e2e 437 checks 0 problems (Chromium).
 
 ## Tests run tonight
@@ -19,7 +20,7 @@ Branch `claude/upbeat-cannon-wf5kxf`. Start commit `dd8499a`. No PR, no deploy, 
 - Item 4: tests/brief-feedback.test.ts (5; fixed-case evaluation, no new capability, rollback) + brief journey 78 checks 0 problems (useful/wrong receipts, because panel, one wording rule proposed/approved/applied to another project/rolled back); 427 unit tests pass.
 
 ## Next unchecked item
-5
+none: every item has evidence; remaining work needs the Mac or the accounts (see MORNING.md top)
 
 ## Dependencies on Yonathan's account/device (recorded, never blocking)
 - Mac: run the launcher once, Claude Desktop connector, Blackboard sign-in, real notes/calendar.
@@ -28,3 +29,5 @@ Branch `claude/upbeat-cannon-wf5kxf`. Start commit `dd8499a`. No PR, no deploy, 
 ## Continuation command
 "Read PROGRESS.md and MORNING.md, inspect `git status`, run the focused tests for the first unchecked item, then continue."
 
+
+- Item 5: clean checkout `c8e51fd` verify exit 0 (427 tests), e2e exit 0 (473 checks); launch-qa exit 0 (39 checks); qa-inspect 20 views 0 problems; study x3 and quizlatency x3 clean; WebKit unavailable (download blocked).

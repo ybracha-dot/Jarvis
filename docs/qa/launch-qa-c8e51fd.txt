@@ -1,0 +1,61 @@
+# npx tsx scripts/launch-qa.ts at c8e51fd: exit 0
+Disposable installs in: /tmp/jarvis launch qa vjlDvP
+
+# Start: app and worker, one command, a path with spaces
+  ok   start exits 0 (0)
+  ok   reports app pid 23652, worker pid 23679 on port 3400
+  ok   says the app and worker are on the same workspace
+  ok   shows a short build identifier
+  ok   /api/health agrees: this install, worker beating on the same data folder
+  ok   prints the private Today address
+  ok   the private-Today address selects the private workspace and lands on Today
+  ok   another website cannot use that address to switch the workspace
+
+# Relaunch while running: no second copy, same processes
+  ok   a second launch reuses the running app and worker
+  ok   status reports it running
+
+# Restart and graceful stop
+  ok   restart replaces both processes and keeps the port
+  ok   the old processes are gone
+  ok   stop ends the app and the worker and frees the port
+  ok   stopping twice is harmless
+
+# Port occupied by another app: never touched
+  ok   uses 3411 and says 3410 belongs to another app (3411)
+  ok   the other app on 3410 is still answering
+  ok   stop left the other app and an unrelated process alone
+
+# Port occupied by an earlier Jarvis: left running, a different port is used
+  ok   the earlier install runs on 3420
+  ok   the new install names the earlier one and uses 3421
+  ok   the earlier Jarvis is the same process, unharmed
+  ok   stopping the new install did not stop the earlier Jarvis
+  ok   asked to stop a Jarvis that belongs to another folder, it refuses and says where it lives
+  ok   the earlier install stops from its own folder
+
+# Missing dependencies and a stale build
+  ok   no node_modules: it says exactly what to run and starts nothing
+  ok   source newer than the build: it says to rebuild and does not run stale code
+  ok   doctor checks without starting anything
+
+# A missed scheduled brief catches up once after a restart, and Today shows the last successful check
+  ok   restart on the data that missed its morning slot
+  ok   the worker ran the missed morning brief on restart (morning:2026-11-23@00:01)
+  ok   Today shows the gap instead of a silent success
+  ok   restarting again makes no second brief for the same slot (1 then 1)
+
+# Upgrade: an older install with a saved result, migrated explicitly, the old folder untouched
+  ok   the older install starts
+  ok   a brief (a saved result) is built in the older install
+  ok   the older install holds a saved result (res_br_7b3c6381f61f)
+  ok   upgrade reports the migration explicitly (schema v9 -> v12)
+  ok   the old ZIP folder and its database are byte-for-byte unchanged (backups were written beside the new install)
+  ok   a hash-verified backup of the old data exists
+  ok   the new install starts on the migrated data
+  ok   the saved result opens in the new install with the same body and title
+
+# Example workspace stays intact
+  ok   the example workspace exists in both installs after the upgrade
+
+39 checks passed, 0 problems

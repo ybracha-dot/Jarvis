@@ -1,0 +1,6 @@
+study run 1: 49 checks passed, 0 problems (0 expected failures from deliberate break tests ignored)
+quizlatency run 1: 4 checks passed, 0 problems (0 expected failures from deliberate break tests ignored)
+study run 2: 49 checks passed, 0 problems (0 expected failures from deliberate break tests ignored)
+quizlatency run 2: 4 checks passed, 0 problems (0 expected failures from deliberate break tests ignored)
+study run 3: 49 checks passed, 0 problems (0 expected failures from deliberate break tests ignored)
+quizlatency run 3: 4 checks passed, 0 problems (0 expected failures from deliberate break tests ignored)
