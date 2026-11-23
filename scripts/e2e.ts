@@ -1453,9 +1453,9 @@ async function journeyShare(browser: Browser) {
 }
 
 /** Item 5: reproduce "the Connections button detaches after the long journey" through the real UI, and count how often the element is replaced. */
-async function journeyDetach(page: Page, browser: Browser) {
+async function journeyDetach(page: Page, browser: Browser) { await journeyAssistant(page, browser); await checkSampleButton(browser); }
+async function checkSampleButton(browser: Browser) {
   step("Release QA: the Connections sample button after the long assistant journey (real UI; DOM insertions and removals counted)");
-  await journeyAssistant(page, browser);
   await post("/demo/reset", { confirm: "RESET DEMO" });
   const watchButton = async (url: string, label: string) => {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await ctx.newPage(); watch(p, "detach");
@@ -1730,6 +1730,7 @@ async function main() {
     await journeyMcp();
     await journeyProjects(page);
     await journeyAssistant(page, browser);
+    await checkSampleButton(browser);
     await journeyThread(browser);
     await journeyQuizLatency(page);
     await journeyDecision(page, browser);
