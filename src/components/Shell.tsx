@@ -106,6 +106,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           {demo ? <Badge tone="amber" className="whitespace-nowrap">EXAMPLE WORKSPACE</Badge> : <Badge tone="accent" className="whitespace-nowrap">PRIVATE WORKSPACE</Badge>}
           {t && <Mono className="block text-[12.5px] text-muted tnum">{demo ? "Demo clock " : ""}{fmtDateTime(t.now)}</Mono>}
           <Button size="sm" variant="ghost" busy={switchMode.busy} onClick={() => switchMode.run()} className="-ml-2">{demo ? "Open private workspace" : "Back to example"}</Button>
+          <RunBadge demo={demo} />
         </div>
       </aside>
 
@@ -144,6 +145,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             {MORE.map((n) => <Link key={n.href} href={n.href} onClick={() => setMore(false)} className="touch flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-3 text-[15px]"><n.icon className="size-4 text-muted" aria-hidden />{n.label}</Link>)}
             <Link href="/decisions" onClick={() => setMore(false)} className="touch flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-3 text-[15px]"><GitCompareArrows className="size-4 text-muted" aria-hidden />Decisions{pending ? ` (${pending})` : ""}</Link>
             <button onClick={() => switchMode.run()} className="touch flex items-center gap-2 rounded-lg border border-line bg-surface2 px-3 py-3 text-[15px] col-span-2">{demo ? "Open private workspace" : "Back to example workspace"}</button>
+            <div className="col-span-2 px-1"><RunBadge demo={demo} /></div>
           </div>
         </div>
       </div>}
@@ -158,6 +160,17 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Which build is serving, and whether a worker is beating on this workspace. Small, always there, never alarming when everything is fine. */
+function RunBadge({ demo }: { demo: boolean }) {
+  const h = useQuery<any>("/health", { poll: 15000 });
+  const d = h.data; if (!d) return null;
+  const w = d.workspaces?.[demo ? "demo" : "personal"]?.worker;
+  const ok = !!w?.running && w.sameDataFolder !== false;
+  return <div className="text-[12px] text-muted leading-snug" data-testid="run-badge" title={d.builtAt ? `Built ${new Date(d.builtAt).toLocaleString()}` : undefined}>
+    <div className="flex items-center gap-1.5"><span className={cx("size-1.5 rounded-full", ok ? "bg-accent" : "bg-amber-solid")} aria-hidden /><span data-testid="worker-state">{ok ? "Worker running" : "No worker on this workspace"}</span></div>
+    <div className="mono" data-testid="build-id">build {d.build}</div>
+  </div>;
+}
 function SideLink({ href, label, icon: Icon, active, badge }: { href: string; label: string; icon: any; active: boolean; badge?: number }) {
   return (
     <Link href={href} aria-label={label} aria-current={active ? "page" : undefined} className={cx("relative touch flex items-center gap-3 rounded-lg px-3 min-h-10 text-[15.5px] transition-colors", active ? "bg-surface text-fg font-semibold lift" : "text-muted hover:text-fg hover:bg-surface2")}>

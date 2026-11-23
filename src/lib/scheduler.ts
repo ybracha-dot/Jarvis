@@ -2,7 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { Ctx, all, get, run, tx, uid, getSetting, setSetting, modeDir, logActivity } from "./db";
+import { Ctx, all, get, run, tx, uid, getSetting, setSetting, modeDir, logActivity, makeCtx, dataRoot } from "./db";
+import { workspaceIdentity } from "./projects";
 import { addDays, dayOfWeek, localDate, parseLocal, fmtDateTime, DEFAULT_TZ } from "./time";
 import { previewImport, commitImport, MAX_BYTES } from "./imports";
 import { recordSourceStatus } from "./ingest";
@@ -167,12 +168,26 @@ export async function runNow(ctx: Ctx, transports: Record<string, Transport> = d
   return r;
 }
 
-export function heartbeat(ctx: Ctx, pid = process.pid) { setSetting(ctx.db, "worker_heartbeat", { at: new Date().toISOString(), pid }); }
+/** A heartbeat from a process that no longer exists is not a running worker, whatever its timestamp says. */
+const pidAlive = (pid: number | null | undefined) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e: any) { return e?.code === "EPERM"; } };
+export function clearHeartbeat(ctx: Ctx) { setSetting(ctx.db, "worker_heartbeat", null); }
+export function heartbeat(ctx: Ctx, pid = process.pid) { setSetting(ctx.db, "worker_heartbeat", { at: new Date().toISOString(), pid, root: dataRoot(), build: process.env.NEXT_PUBLIC_JARVIS_BUILD ?? null }); }
+
+/** What the launcher and the Today footer need: is the app up, is a worker beating on THIS workspace, and which build is serving. */
+export function runtimeHealth(modes: ("personal" | "demo")[] = ["personal", "demo"]) {
+  const workspaces: Record<string, { id: string | null; worker: { running: boolean; pid: number | null; ageSec: number | null; sameDataFolder: boolean | null; build: string | null } }> = {};
+  for (const mode of modes) {
+    const c = makeCtx(mode); const hb = getSetting<{ at: string; pid: number; root?: string; build?: string | null } | null>(c.db, "worker_heartbeat", null);
+    const age = hb ? Math.round((Date.now() - new Date(hb.at).getTime()) / 1000) : null;
+    workspaces[mode] = { id: workspaceIdentity(c).id, worker: { running: age != null && age < 90 && pidAlive(hb?.pid), pid: hb?.pid ?? null, ageSec: age, sameDataFolder: hb?.root ? hb.root === dataRoot() : null, build: hb?.build ?? null } };
+  }
+  return { ok: true, app: "jarvis", pid: process.pid, root: process.cwd(), dataRoot: dataRoot(), build: process.env.NEXT_PUBLIC_JARVIS_BUILD ?? "dev", builtAt: process.env.NEXT_PUBLIC_JARVIS_BUILT_AT ?? null, workspaces };
+}
 
 export function schedulerStatus(ctx: Ctx) {
   const hb = getSetting<{ at: string; pid: number } | null>(ctx.db, "worker_heartbeat", null);
   const ageMs = hb ? Date.now() - new Date(hb.at).getTime() : null;
-  const workerActive = ageMs != null && ageMs < 90_000;
+  const workerActive = ageMs != null && ageMs < 90_000 && pidAlive(hb?.pid);
   const enabled = getSetting(ctx.db, "scheduler_enabled", ctx.mode === "demo");
   const paused = getSetting(ctx.db, "scheduler_paused", false);
   const last = get(ctx.db, "SELECT * FROM schedule_runs ORDER BY ran_at DESC, rowid DESC LIMIT 1");

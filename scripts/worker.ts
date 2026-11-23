@@ -1,7 +1,7 @@
 /* Unattended scheduler. Writes a heartbeat so the app can truthfully say a worker is running.
    Run: npm run worker. It checks both workspaces every 30 seconds. Schedules are off for the private workspace until you enable them. */
 import { makeCtx, Mode } from "../src/lib/db";
-import { tick, heartbeat } from "../src/lib/scheduler";
+import { tick, heartbeat, clearHeartbeat } from "../src/lib/scheduler";
 import { scanCalendarFeed } from "../src/lib/adapters";
 import { processQueue, recoverStale } from "../src/lib/jobs";
 import { HANDLERS } from "../src/lib/handlers";
@@ -40,4 +40,4 @@ async function once() {
   }
 }
 console.log("Jarvis worker started. Ctrl+C to stop.");
-(async () => { while (!stopping) { await jobs(); if (Date.now() - lastTick > 30_000) { lastTick = Date.now(); await once(); } await new Promise((r) => setTimeout(r, 1000)); } console.log("Worker stopped."); process.exit(0); })();
+(async () => { while (!stopping) { await jobs(); if (Date.now() - lastTick > 30_000) { lastTick = Date.now(); await once(); } await new Promise((r) => setTimeout(r, 1000)); } for (const mode of modes) { try { clearHeartbeat(makeCtx(mode)); } catch { /* the folder may be gone */ } } console.log("Worker stopped."); process.exit(0); })();

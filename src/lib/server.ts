@@ -14,7 +14,7 @@ import { startCouncil, getCouncil, cancelCouncil, listCouncil, PRESETS, SAMPLE_D
 import { Router, routerStatus, RouterError } from "./router";
 import { previewImport, commitImport, ImportRequest } from "./imports";
 import { connections } from "./adapters";
-import { runNow, tick, schedulerStatus, scanInbox, inboxDir, weeklyFindings } from "./scheduler";
+import { runNow, tick, runtimeHealth, schedulerStatus, scanInbox, inboxDir, weeklyFindings } from "./scheduler";
 import { inbox as inboxList } from "./notify";
 import { addAdvisorSource, AdvisorSourceInput, listAdvisorSources, deleteAdvisorSource, LENSES, advise } from "./advisors";
 import { applyPractice } from "./study";
@@ -78,7 +78,7 @@ function on(method: string, path: string, h: Handler) {
 const idBody = z.object({}).passthrough();
 const demoOnly = (c: Ctx) => { if (c.mode !== "demo") throw new HttpError(403, "Only available in the demo workspace"); };
 
-on("GET", "/health", () => ({ ok: true }));
+on("GET", "/health", () => runtimeHealth());
 
 // ---- Talk to Jarvis, study guides, quizzes ----
 on("POST", "/assistant/message", (c, r) => {
