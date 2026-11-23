@@ -599,7 +599,7 @@ const goal_research: Handler = async (api) => {
   if (bundle.gap && needsEarlierWork(reqText) && answers.choice !== "skip") {
     // Nothing saved matches, and the request leans on earlier work that may live in a Claude chat. Ask once, continue when it arrives, or finish with what exists.
     const topic = intent.terms.slice(0, 4).join(" ") || "this";
-    const handoff = `Search your past chats for what we decided about ${topic}. Then call Jarvis's share_excerpt with only the minimum relevant excerpt, where it came from (chat title and date), project "${intent.projectName ?? ""}" and goalRequestId "${requestId}". Do not paste anything else.`;
+    const handoff = `Search your past chats for what we decided about ${topic}. Then call Jarvis's share_excerpt with only the minimum relevant excerpt, where it came from (chat title and date),${intent.projectName ? ` project "${intent.projectName}",` : ""} and goalRequestId "${requestId}". Do not paste anything else.`;
     blockWithAsk(api, "Earlier work is missing", { kind: "excerpt", question: `I could not find earlier material about “${topic}”. If it was in a Claude chat, give Jarvis the relevant excerpt: paste the text below, or send this to Claude. I will carry on as soon as it arrives. Or finish now with what is available.`, handoff, importText: true, choices: [{ id: "skip", guideId: "skip", label: "Finish with what is available" }] });
   }
   if (bundle.ambiguous) blockWithAsk(api, bundle.ambiguous.question, { question: bundle.ambiguous.question, choices: bundle.ambiguous.choices.map((c: any) => ({ id: c.id, guideId: c.id, label: c.label })) });

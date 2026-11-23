@@ -78,7 +78,8 @@ export default function ConnectionsPage() {
       <section aria-label="Sources Jarvis can read" data-testid="sources-panel" id="sources"><SectionTitle>What Jarvis can read</SectionTitle>
         <p className="text-[14px] text-muted mb-2">Every source says how it got here. Fixture and simulated sources are synthetic. A source that needs you is skipped, and results say so.</p>
         <ul className="space-y-2">{srcs.data?.sources.map((s: any) => <SourceRow key={s.id} s={s} />)}{srcs.data?.sources.length === 0 && <li className="text-[15px] text-muted">Nothing connected yet. Import a note, a transcript or an email below{sess.data?.mode !== "personal" ? ", or load the sample workspace" : ""}.</li>}</ul>
-        {sess.data?.mode !== "personal" && !srcs.data?.sources.some((s: any) => s.mode === "fixture") && <div className="mt-3"><SampleLoader /></div>}
+        {/* Only once both answers are in: before that the button would flash in, then vanish when the fixtures turn out to exist (or never belong here, in the private workspace). */}
+        {sess.data && srcs.data && sess.data.mode !== "personal" && !srcs.data.sources.some((s: any) => s.mode === "fixture") && <div className="mt-3"><SampleLoader /></div>}
         <ImportForm /></section>
       <ReaderCard />
       <BlackboardCard />

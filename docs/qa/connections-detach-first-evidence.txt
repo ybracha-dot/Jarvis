@@ -1,0 +1,27 @@
+# First evidence: Connections sample button "detached" in the full e2e run (before the fix), kept as recorded
+# Source: full browser run, step 'TAMID thread', after the long assistant journey. Not reproduced afterwards (see docs/qa/RELEASE-QA.md).
+
+# TAMID thread: from a spoken promise to a saved, sourced draft
+locator.click: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByTestId('load-sample')[22m
+[2m    - locator resolved to <button data-testid="load-sample" class="inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed select-none touch px-4 py-2 text-[15px] bg-accent text-on-accent hover:brightness-110">Load the sample workspace</button>[22m
+[2m  - attempting click action[22m
+[2m    - waiting for element to be visible, enabled and stable[22m
+[2m  - element was detached from the DOM, retrying[22m
+
+    at journeyThread (/home/user/Jarvis/scripts/e2e.ts:1244:77)
+    at async main (/home/user/Jarvis/scripts/e2e.ts:1588:5) {
+  log: [
+    "  - waiting for getByTestId('load-sample')",
+    '    - locator resolved to <button data-testid="load-sample" class="inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed select-none touch px-4 py-2 text-[15px] bg-accent text-on-accent hover:brightness-110">Load the sample workspace</button>',
+    '  - attempting click action',
+    '    - waiting for element to be visible, enabled and stable',
+    '  - element was detached from the DOM, retrying'
+  ],
+  name: 'TimeoutError'
+
+# Reproduced deterministically (before the fix): E2E_ONLY=detach npm run e2e, source list answered 1.5 s late (what a busy worker causes)
+   fixtures already loaded: the sample button was added 1 and removed 1 time(s)
+  FAIL the sample button never flashes in when the sample is already loaded (added 1, removed 1)
+# Cause: the page rendered the button as soon as its main data arrived, before it knew whether the sample was already loaded; when the source list answered, React removed it. A click aimed at it then reports 'element was detached from the DOM'.

@@ -1452,6 +1452,26 @@ async function journeyShare(browser: Browser) {
   await ctx.close(); stopWorker();
 }
 
+/** Item 5: reproduce "the Connections button detaches after the long journey" through the real UI, and count how often the element is replaced. */
+async function journeyDetach(page: Page, browser: Browser) {
+  step("Release QA: the Connections sample button after the long assistant journey (real UI; DOM insertions and removals counted)");
+  await journeyAssistant(page, browser);
+  await post("/demo/reset", { confirm: "RESET DEMO" });
+  const watchButton = async (url: string, label: string) => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await ctx.newPage(); watch(p, "detach");
+    await p.addInitScript(() => { const w = window as any; w.__sample = { added: 0, removed: 0, now: false }; setInterval(() => { const has = !!document.querySelector('[data-testid="load-sample"]'); if (has && !w.__sample.now) w.__sample.added++; if (!has && w.__sample.now) w.__sample.removed++; w.__sample.now = has; }, 40); });
+    // A slow answer for the source list is what a busy worker produces: the page then has its main data before it knows whether the sample is already loaded.
+    await p.route("**/api/evidence/sources", async (route) => { await new Promise((r) => setTimeout(r, 1500)); await route.continue(); });
+    await p.goto(base + url); await p.getByTestId("sources-panel").waitFor(); await p.waitForTimeout(6000);
+    const r = await p.evaluate(() => (window as any).__sample as { added: number; removed: number }); await ctx.close(); console.log(`   ${label}: the sample button was added ${r.added} and removed ${r.removed} time(s)`); return r;
+  };
+  const withFixtures = await watchButton("/connections", "fixtures already loaded");
+  ok(withFixtures.added === 0 && withFixtures.removed === 0, `the sample button never flashes in when the sample is already loaded (added ${withFixtures.added}, removed ${withFixtures.removed})`);
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, extraHTTPHeaders: {} }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]); const pp = await ctx.newPage(); watch(pp, "detach-private");
+  await pp.goto(base + "/connections"); await pp.getByTestId("sources-panel").waitFor(); await pp.waitForTimeout(2000);
+  ok((await pp.getByTestId("load-sample").count()) === 0, "in the private workspace the example-data button is never offered"); await ctx.close();
+}
+
 const FAKE_SPEECH = `(() => {
   const spoken = []; let cancels = 0; window.__spoken = spoken; window.__cancels = () => cancels;
   const voices = [{ name: "Alex", lang: "en-US", localService: true, voiceURI: "Alex" }, { name: "Daniel", lang: "en-GB", localService: true, voiceURI: "Daniel" }, { name: "Serena", lang: "en-GB", localService: true, voiceURI: "Serena" }];
@@ -1693,6 +1713,7 @@ async function main() {
     else if (only === "blackboard") { await journeyBlackboard(browser); }
     else if (only === "brief") { await journeyBrief(browser); }
     else if (only === "share") { await journeyShare(browser); }
+    else if (only === "detach") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const pg = await c.newPage(); watch(pg, "assistant"); await journeyDetach(pg, browser); await c.close(); }
     else if (only === "thread") { await journeyThread(browser); }
     else if (only === "assistant+thread") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "assistant"); await journeyAssistant(p, browser); await journeyThread(browser); await c.close(); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
