@@ -1350,6 +1350,83 @@ async function journeyThread(browser: Browser) {
   for (const v of views) await v.c.close();
 }
 
+/** Item 3: one project shared on purpose, in the private workspace (invented notes). Choose, preview, share, ask for a pitch draft, correct it, reopen it in a NEW Claude client, take everything back. */
+async function journeyShare(browser: Browser) {
+  step("Project continuity: share one project, preview exactly what Claude sees, reopen it in a new client, revoke every version (private workspace, invented notes)");
+  const OUT = path.resolve("docs/screenshots/share"); fs.mkdirSync(OUT, { recursive: true });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 }); await ctx.addCookies([{ name: "jarvis_mode", value: "personal", url: base }]);
+  const rq = ctx.request; const apiP = async (p: string, data?: unknown) => (await (await rq.post(base + "/api" + p, { data: data ?? {}, headers: { origin: base } })).json());
+  await apiP("/erase", { confirm: "ERASE PERSONAL" }); startWorker(300);
+  const tamid = await apiP("/projects", { name: "TAMID", kind: "club", aliases: ["sponsor pitch"] }); const alumni = await apiP("/projects", { name: "TAMID Alumni", kind: "club" });
+  const SYNC = ["[00:00:41] Dana Reyes: Thanks for joining. Let's follow up with the sponsors soon, because they asked for the revised budget before demo day.", "[00:01:12] Yonathan: I'll draft the follow-up and send it to Dana for review.", "[00:01:30] Dana Reyes: How about Monday for the sponsor follow-up?"].join("\n");
+  const MAIL = "Hi Yonathan,\nConfirming Wednesday for the sponsor follow-up. We moved it from Monday since Priya is out.\nThanks, Dana";
+  const day = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
+  await apiP("/evidence/import", { kind: "transcript", title: "TAMID sponsor pitch sync", text: SYNC, at: day(6), author: "Dana Reyes", projectId: tamid.id, label: "TAMID meeting notes" });
+  await apiP("/evidence/import", { kind: "email", title: "Re: TAMID sponsor pitch follow-up", text: MAIL, at: day(3), author: "Dana Reyes", projectId: tamid.id, label: "TAMID meeting notes" });
+  await apiP("/evidence/import", { kind: "note", title: "TAMID pitch: private worries", text: "I am worried the sponsors will compare us to last year. This is for me only.", at: day(4), projectId: tamid.id, label: "My private journal", localOnly: true });
+  await apiP("/evidence/import", { kind: "email", title: "TAMID sponsor pitch follow-up (alumni)", text: "Confirming Friday for the alumni sponsor follow-up. Budget is $50,000.", at: day(3), author: "Sam Ortiz", projectId: alumni.id, label: "Alumni mailbox", localOnly: true });
+  await apiP(`/projects/${tamid.id}/update`, { eventId: "e2e-share-0001", origin: "import", changes: [{ op: "decide", key: "sponsor-follow-up", text: "Monday", at: day(6) }] });
+  await apiP(`/projects/${tamid.id}/update`, { eventId: "e2e-share-0002", origin: "import", changes: [{ op: "decide", key: "sponsor-follow-up", text: "Wednesday, moved from Monday because Priya is out", at: day(3) }] });
+  const P = await ctx.newPage(); watch(P, "share"); await P.goto(base + `/projects/${tamid.id}`); await P.getByTestId("project-share").waitFor();
+
+  // 1-2. choose and preview: exactly what Claude would receive, and what it would not
+  ok(/Not shared/.test(await P.getByTestId("share-state").innerText()), "the project starts not shared");
+  const sees = await P.getByTestId("share-sees").innerText();
+  ok(/Wednesday, moved from Monday/.test(sees) && /TAMID sponsor pitch sync/.test(sees) && /Re: TAMID sponsor pitch follow-up/.test(sees) && /TAMID pitch: private worries/.test(sees), "the preview lists the decision and every note of this project by title");
+  ok(!/Sam Ortiz|alumni|50,000/i.test(sees), "another project's look-alike note is not in the preview");
+  const never = await P.getByTestId("share-never").innerText(); ok(/local-only note/.test(never) && /calendar/i.test(never) && /private morning brief/i.test(never) && /other projects/.test(never), "it says what Claude will not see");
+  await shot(P, "70-share-preview-laptop.png", true);
+  // 3. a new Claude client sees nothing yet
+  await P.goto(base + "/connections"); await P.getByTestId("token-create").click(); await P.getByTestId("token-fresh").waitFor(); const token = (await P.getByTestId("token-value").innerText()).trim();
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js"); const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+  const open = async (name: string) => { const c = new Client({ name, version: "1" }); await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } })); return c; };
+  const call = async (c: any, name: string, args: any) => { const r: any = await c.callTool({ name, arguments: args }); const t = r.content?.[0]?.text ?? ""; let j: any = null; try { j = JSON.parse(t); } catch { /* text */ } return { isError: !!r.isError, text: t, json: j }; };
+  const denied = (r: any) => r.isError || !!r.json?.error;
+  let c1 = await open("claude-new-1");
+  ok(denied(await call(c1, "get_project_context", { project: "TAMID" })) && ((await call(c1, "search_evidence", { query: "sponsor pitch follow-up" })).json?.hits ?? []).length === 0, "before sharing, a new Claude client reads nothing of this project");
+  await c1.close();
+  // 4. share the two meeting sources only
+  await P.goto(base + `/projects/${tamid.id}`); await P.getByTestId("project-share").waitFor();
+  const checks = P.getByTestId("share-source").filter({ hasText: "TAMID meeting notes" }).getByTestId("share-source-check"); ok((await checks.count()) === 2, "the two meeting sources can be chosen");
+  await checks.nth(0).check(); await checks.nth(1).check(); await P.getByTestId("share-confirm").click(); await P.getByTestId("share-reopen").waitFor({ timeout: 15000 });
+  ok(/Shared with Claude/.test(await P.getByTestId("share-state").innerText()) && /get_project_context for "TAMID"/.test(await P.getByTestId("share-prompt").innerText()), "after one confirmation it is shared and shows the prompt to reopen it in any new chat");
+  ok(!(await P.getByTestId("share-source").filter({ hasText: "My private journal" }).getByTestId("share-source-check").isChecked()), "the private journal stayed local-only");
+  await shot(P, "71-share-shared-laptop.png", true);
+  // 5. ask for a pitch draft from the normal composer; it produces a cited draft with one next action
+  await P.getByTestId("transcript").focus(); await P.getByTestId("transcript").fill("Pick up where we left off on the TAMID sponsor pitch and draft my follow-up."); await P.getByTestId("send").click();
+  await P.getByTestId("goal-result-link").waitFor({ timeout: 20000 }); await P.getByTestId("goal-result-link").click(); await P.getByTestId("result-body").waitFor({ timeout: 40000 });
+  const resultUrl = P.url(); const rid = resultUrl.split("/results/")[1].split("?")[0];
+  ok(/Wednesday/.test(await P.getByTestId("result-body").innerText()), "the draft uses the current decision (Wednesday)");
+  const usedText = (await P.getByTestId("result-body").innerText()) + (await P.getByTestId("result-sources").innerText()) + (await P.getByTestId("result-flags").innerText().catch(() => ""));
+  ok((await P.getByTestId("result-sources").getByRole("link").count()) >= 2 && !/private worries|50,000|Sam Ortiz/.test(usedText), "it cites its sources, and neither the private note nor the look-alike is in the draft, its flags or its sources");
+  ok(/Next:/.test(await P.getByTestId("result-next").innerText()) && /Jarvis sent nothing/.test(await P.getByTestId("result-next").innerText()), "it ends with one next action, and says nothing was sent");
+  await shot(P, "72-pitch-draft-laptop.png", true);
+  // 6. a correction makes version 2
+  await P.getByTestId("revise-text").fill("Use the Wednesday decision and keep it to three sentences."); await P.getByTestId("revise-send").click(); await P.getByTestId("version-list").waitFor({ timeout: 40000 });
+  ok(/Version 2/.test(await P.getByTestId("version-list").innerText()), "the correction made version 2 of the same result");
+  // 7. approve the draft with the project, reopen it in a NEW client
+  await P.goto(base + `/projects/${tamid.id}`); await P.getByTestId("share-result").first().waitFor({ timeout: 20000 });
+  await P.getByTestId("share-result").first().getByTestId("share-result-check").check(); await P.getByTestId("share-confirm").click(); await P.getByTestId("share-result").first().getByText("shared", { exact: true }).waitFor({ timeout: 15000 });
+  c1 = await open("claude-new-2");
+  const ctxr = await call(c1, "get_project_context", { project: "TAMID" }); ok(!denied(ctxr) && /Wednesday/.test(JSON.stringify(ctxr.json.current)), "a new Claude client opens the project and reads the decision");
+  const gr = await call(c1, "get_result", { id: rid }); ok(!denied(gr) && gr.json.version === 2 && /Wednesday/.test(gr.json.body), "and reopens the draft (version 2) by its id");
+  const leak = JSON.stringify([ctxr.json, gr.json, (await call(c1, "search_evidence", { query: "worried sponsors last year" })).json, (await call(c1, "search_evidence", { query: "Confirming Friday alumni 50,000" })).json]);
+  ok(!/private worries|worried|Sam Ortiz|50,000|alumni sponsor/.test(leak), "neither the local-only note nor the other project's similarly named note reaches Claude");
+  ok(denied(await call(c1, "get_project_context", { project: "TAMID Alumni" })), "the other project cannot be opened, by name or by a similar one");
+  await c1.close();
+  // 8. take everything back; every version is closed at once, in a new client
+  await P.reload(); await P.getByTestId("share-revoke-all").click(); await P.getByTestId("share-state").filter({ hasText: "Not shared" }).waitFor({ timeout: 15000 });
+  const c2 = await open("claude-new-3");
+  const after = [await call(c2, "get_result", { id: rid }), await call(c2, "get_result", { id: rid, version: 1 }), await call(c2, "get_result", { id: rid, version: 2 }), await call(c2, "get_project_context", { project: "TAMID" })];
+  ok(after.every(denied), "after Stop sharing everything, a new client cannot open the project or any version of the draft");
+  ok(((await call(c2, "search_evidence", { query: "sponsor pitch follow-up" })).json?.hits ?? []).length === 0, "and finds none of the notes");
+  await c2.close();
+  ok(/TAMID sponsor pitch sync/.test(await (await rq.get(base + `/api/sharing/projects/${tamid.id}/plan`)).text()), "nothing was deleted: the notes are still yours");
+  await shot(P, "73-share-revoked-laptop.png", true);
+  ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole sharing journey made zero model calls");
+  await ctx.close(); stopWorker();
+}
+
 const FAKE_SPEECH = `(() => {
   const spoken = []; let cancels = 0; window.__spoken = spoken; window.__cancels = () => cancels;
   const voices = [{ name: "Alex", lang: "en-US", localService: true, voiceURI: "Alex" }, { name: "Daniel", lang: "en-GB", localService: true, voiceURI: "Daniel" }, { name: "Serena", lang: "en-GB", localService: true, voiceURI: "Serena" }];
@@ -1590,6 +1667,7 @@ async function main() {
     else if (only === "private") { await journeyPrivate(browser); }
     else if (only === "blackboard") { await journeyBlackboard(browser); }
     else if (only === "brief") { await journeyBrief(browser); }
+    else if (only === "share") { await journeyShare(browser); }
     else if (only === "thread") { await journeyThread(browser); }
     else if (only === "assistant+thread") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "assistant"); await journeyAssistant(p, browser); await journeyThread(browser); await c.close(); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
@@ -1619,6 +1697,7 @@ async function main() {
     await desktop.close();
     await journeyMobile(browser);
     await journeyA11y(browser);
+    await journeyShare(browser);
     await journeyBrief(browser);        // last: it erases the private workspace to start from nothing
     }
   } finally { await browser.close(); killServer(); }

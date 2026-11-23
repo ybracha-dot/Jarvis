@@ -14,7 +14,7 @@ process.on("SIGINT", () => { stopping = true; });
 process.on("SIGTERM", () => { stopping = true; });
 
 const workerId = `worker-${process.pid}`;
-let lastTick = 0;
+let lastTick = 0, lastBeat = 0;
 async function jobs() {
   for (const mode of modes) {
     const ctx = makeCtx(mode);
@@ -40,4 +40,4 @@ async function once() {
   }
 }
 console.log("Jarvis worker started. Ctrl+C to stop.");
-(async () => { while (!stopping) { await jobs(); if (Date.now() - lastTick > 30_000) { lastTick = Date.now(); await once(); } await new Promise((r) => setTimeout(r, 1000)); } for (const mode of modes) { try { clearHeartbeat(makeCtx(mode)); } catch { /* the folder may be gone */ } } console.log("Worker stopped."); process.exit(0); })();
+(async () => { while (!stopping) { await jobs(); if (Date.now() - lastBeat > 5_000) { lastBeat = Date.now(); for (const mode of modes) { try { heartbeat(makeCtx(mode)); } catch { /* retry next beat */ } } } if (Date.now() - lastTick > 30_000) { lastTick = Date.now(); await once(); } await new Promise((r) => setTimeout(r, 1000)); } for (const mode of modes) { try { clearHeartbeat(makeCtx(mode)); } catch { /* the folder may be gone */ } } console.log("Worker stopped."); process.exit(0); })();

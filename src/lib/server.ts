@@ -29,7 +29,7 @@ import { blackboardStatus, readFeed, saveFeed, removeFeed } from "./blackboard";
 import { loadWorkspaceFixtures } from "./workspace-fixtures";
 import { briefToday, briefNow, briefFeedback, reserveBrief, shareBrief, unshareBrief, sharePreview } from "./brief";
 import { getBriefConfig, saveBriefConfig } from "./brief-config";
-import { sharingState, sourcePreview, setSourceSharing, setProjectSharing, grantResult, revokeResult, resultAccess } from "./share";
+import { sharingState, sourcePreview, setSourceSharing, setProjectSharing, projectSharePlan, shareProject, unshareProject, grantResult, revokeResult, resultAccess } from "./share";
 import { availabilityCoverage, confirmDay } from "./calendar-cover";
 import { issueReaderTask, submitReaderResult, createReaderTestProject, readerTestState, readerHandoff, confirmReader } from "./reader";
 import { createProject, listProjects, projectContext, projectOwe, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
@@ -226,6 +226,9 @@ on("GET", "/sharing", (c) => sharingState(c));
 on("GET", "/sharing/brief-preview", (c) => sharePreview(c));
 on("GET", "/sharing/sources/:id/preview", (c, r) => sourcePreview(c, r.params.id));
 on("POST", "/sharing/sources/:id", (c, r) => setSourceSharing(c, r.params.id, r.json(z.object({ share: z.boolean() }).strict()).share));
+on("GET", "/sharing/projects/:id/plan", (c, r) => projectSharePlan(c, r.params.id));
+on("POST", "/sharing/projects/:id/share", (c, r) => shareProject(c, r.params.id, r.json(z.object({ sources: z.array(z.string().max(60)).max(20).optional(), results: z.array(z.string().max(60)).max(20).optional() }).strict())));
+on("POST", "/sharing/projects/:id/revoke-all", (c, r) => unshareProject(c, r.params.id));
 on("POST", "/sharing/projects/:id", (c, r) => setProjectSharing(c, r.params.id, r.json(z.object({ share: z.boolean() }).strict()).share));
 on("POST", "/sharing/results/:id", (c, r) => {
   const share = r.json(z.object({ share: z.boolean() }).strict()).share; const isFullBrief = !!get(c.db, "SELECT 1 x FROM brief_runs WHERE result_id=? AND view='full'", r.params.id);

@@ -50,6 +50,7 @@ function Result({ id }: { id: string }) {
       {d.completion && d.completion !== "complete" && d.version > 0 && !/^Reader submission/.test(d.mode ?? "") && <ReaderHandoff id={d.id} />}
       {blockedJob && <Card className="p-4 space-y-2" data-testid="result-question"><b className="text-[15px] text-amber">Jarvis needs one answer</b><p className="text-[15px]">{r.blockers[0]}</p><BlockedAsk /></Card>}
       {d.stale && <Notice>This version is out of date: {d.stale} Ask again to rebuild it from what is still authorized.</Notice>}
+      {d.nextAction && <p className="text-[16px] leading-snug rounded-xl border border-accent-dim bg-accent-soft px-4 py-3" data-testid="result-next"><b className="font-semibold">Next: </b>{d.nextAction.text}</p>}
       {d.body && <section aria-label={KIND[d.kind]} className="rounded-2xl border border-line bg-surface metal p-5 md:p-6 space-y-1" data-testid="result-body">
         <div className="flex items-center gap-2 mb-2"><h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium flex-1">{KIND[d.kind]}. Nothing has been sent.</h2><Button size="sm" onClick={copy}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />}{copied ? "Copied" : "Copy"}</Button></div>
         {d.analysis?.type === "table" && d.analysis.form === "table" && d.analysis.rows.length > 0 ? <><TableView a={d.analysis} />{render(d.body.split("\n").filter((l: string) => !/^\|/.test(l) && l !== "**Handoff table**").join("\n").trim())}</> : render(d.body)}</section>}

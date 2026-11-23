@@ -6,6 +6,7 @@ import { api, useQuery, useAction } from "@/components/api";
 import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Notice, Field, inputCls, cx } from "@/components/ui";
 import { fmtDateTime } from "@/lib/time";
 import { ORIGIN } from "../page";
+import { ProjectShare } from "@/components/ProjectShare";
 
 export default function ProjectPage({ params }: { params: Promise<{ id: string }> }) { const { id } = use(params); return <Suspense fallback={<Spinner />}><Project id={id} /></Suspense>; }
 const KIND: Record<string, string> = { decision: "Decided", fact: "Fact", action: "To do", question: "Open question", option: "Option" };
@@ -91,6 +92,8 @@ function Project({ id }: { id: string }) {
           </div>
         </div>
       </section>
+
+      <ProjectShare id={id} />
 
       <div className={cx("grid gap-6", f ? "xl:grid-cols-[minmax(0,1fr)_340px]" : "")}>
         <div className="space-y-6 min-w-0">

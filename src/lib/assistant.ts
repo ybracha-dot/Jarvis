@@ -514,7 +514,17 @@ export function resultView(ctx: Ctx, id: string, version?: number) {
     analysis: v?.analysis ? JSON.parse(v.analysis as string) : null, mode: (v?.mode as string) ?? "rules", draft: (() => { if (!v) return null; const d = get(ctx.db, "SELECT * FROM result_drafts WHERE result_id=? AND version=?", res.id, v.version); return d ? { to: d.to_addr as string | null, subject: d.subject as string, body: (d.edited_body ?? d.body) as string, original: d.body as string, edited: !!d.edited_body, purpose: d.purpose as string } : null; })(),
     body: (v?.body as string) ?? null, summary: (v?.summary as string) ?? null, sources, flags: v ? JSON.parse(v.flags as string) : [], unavailable: v ? JSON.parse(v.unavailable as string) : [], stale: (v?.stale as string) ?? null,
     request: { id: req.id as string, text: req.text as string, revision: req.revision as number, origin: req.origin as string, revisions: revs, synthetic: !!req.synthetic }, receipt: rcpt, reads: readsFor(ctx, req.id as string, v ? (v.request_revision as number) : undefined),
-    applied: v ? parseInstructions(instructionsFor(ctx, req.id as string, v.request_revision as number)) : null, links: links(res.id as string, req.id as string) };
+    applied: v ? parseInstructions(instructionsFor(ctx, req.id as string, v.request_revision as number)) : null, links: links(res.id as string, req.id as string),
+    nextAction: v ? nextActionFor(res.kind as string, (JSON.parse(v.flags as string) as any[]), !!v.body, (v.stale as string | null) ?? null) : null };
+}
+/** One next action, in plain words. A draft is never sent by Jarvis: the next step is yours, and the first thing it asks you to settle is the first thing it could not support. */
+function nextActionFor(kind: string, flags: any[], hasBody: boolean, stale: string | null): { text: string } | null {
+  if (stale) return { text: "Ask again to rebuild it from what is still authorized." };
+  if (!hasBody) return null;
+  const fig = flags.find((f) => f.kind === "unsupported_figure"); if (fig) return { text: `Confirm ${fig.value} or point to a second source, then send the draft yourself. Jarvis sent nothing.` };
+  const flag = flags.find((f) => f.kind === "older_proposal" || f.kind === "owner_unknown"); if (flag && kind === "draft") return { text: "Read the draft, check the flag, then send it yourself. Jarvis sent nothing." };
+  if (kind === "draft") return { text: "Read the draft, adjust it if you like, then send it yourself. Jarvis sent nothing." };
+  return null;
 }
 export function editDraft(ctx: Ctx, resultId: string, body: string, version?: number) {
   const res = get(ctx.db, "SELECT id, version FROM results WHERE id=? AND owner_id=?", resultId, ctx.owner); if (!res) throw new HttpError(404, "No such result");
