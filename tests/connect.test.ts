@@ -102,7 +102,7 @@ describe("the same work from ordinary Claude (official MCP client over the authe
     expect(res).toMatchObject({ kind: "draft", version: 1, requestRevision: 1, ready: true }); expect(res.body).toMatch(/Wednesday, [A-Z][a-z]{2} \d{1,2}/); expect(res.body).not.toMatch(/Confirming Friday|50,000/);
     expect(res.sources.find((x: any) => x.role === "confirms the date")).toMatchObject({ stillAvailable: true, url: expect.stringMatching(/\/evidence\/ev_/) });
     expect(res.flags.map((f: any) => f.kind)).toEqual(expect.arrayContaining(["older_proposal", "unsupported_figure"]));
-    const hits = (await fresh2.call("search_evidence", { query: "Confirming Wednesday sponsor follow-up" })).json.hits; expect(hits.map((h: any) => h.title)).toContain("Re: Lantern Club sponsor pitch follow-up"); expect(JSON.stringify(hits)).not.toMatch(/Sam Ortiz|50,000/);
+    const hits = (await fresh2.call("search_evidence", { query: "Confirming Wednesday sponsor follow-up" })).json.hits; expect(hits.map((h: any) => h.title)).toContain("Re: TAMID sponsor pitch follow-up"); expect(JSON.stringify(hits)).not.toMatch(/Sam Ortiz|50,000/);
   });
   it("start by voice, close the tab, then change it from Claude: one request, one current draft, the instruction applied, a late old result refused", async () => {
     const ctx = fresh(); loadWorkspaceFixtures(ctx); shareAll(ctx); const t = createToken(ctx, { label: "Claude" });
@@ -124,8 +124,8 @@ describe("the same work from ordinary Claude (official MCP client over the authe
     const ctx = fresh(); loadWorkspaceFixtures(ctx); shareAll(ctx); const ro = createToken(ctx, { label: "ro", scopes: ["read"] }); const rw = createToken(ctx, { label: "rw" });
     const r = await connect(ro.token); expect((await r.call("submit_goal", { text: PITCH })).isError).toBe(true); expect((await r.call("share_excerpt", { excerpt: "A".repeat(20), origin: "Chat" })).isError).toBe(true);
     expect((await r.call("get_result", {})).isError).toBe(false);
-    const w = await connect(rw.token); const sh = (await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "Lantern Club", dedupKey: "x1" })).json;
-    expect(sh).toMatchObject({ saved: true }); expect((await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "Lantern Club", dedupKey: "x1" })).json.unchanged).toBe(true);
+    const w = await connect(rw.token); const sh = (await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "TAMID", dedupKey: "x1" })).json;
+    expect(sh).toMatchObject({ saved: true }); expect((await w.call("share_excerpt", { excerpt: "We decided the pilot checkpoint is Thursday because the venue is free then.", origin: "Claude chat 'Pilot planning', Nov 10", project: "TAMID", dedupKey: "x1" })).json.unchanged).toBe(true);
     expect((await w.call("search_evidence", { query: "pilot checkpoint venue" })).json.hits[0].source).toMatch(/Shared from Claude/);
   });
 });

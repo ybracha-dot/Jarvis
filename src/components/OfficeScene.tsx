@@ -50,7 +50,7 @@ export function place(jobs: OfficeJob[]): Placed[] {
     const fresh = (j.createdAgoMs ?? 1e9) < 2600;
     if (j.area === "supervisor") {
       const active = !["done", "cancelled", "failed"].includes(j.status);
-      return { waitIndex: -1, j, pos: { x: SUP.x, y: SUP.y }, pose: (active ? (j.status === "waiting" ? "idle" : "type") : "idle") as Pose, seated: true, visible: active, label: "Jarvis", sub: active ? (j.status === "waiting" ? "waiting on helpers" : (j.stage ?? "working").slice(0, 26)) : "idle", zone: "supervisor", fresh };
+      return { waitIndex: -1, j, pos: { x: SUP.x, y: SUP.y }, pose: (active ? (j.status === "waiting" ? "idle" : "type") : "idle") as Pose, seated: true, visible: active, label: "Jarvis", sub: active ? (j.status === "waiting" ? "delegating" : (j.stage ?? "working")) : "idle", zone: "supervisor", fresh };
     }
     if (j.needsYou) { const wi = waitK++; const pos = waitSpot(wi); return { waitIndex: wi, j, pos, pose: (j.needsYou.kind === "question" ? "ask" : "carry") as Pose, seated: false, visible: true, label: displayName(j.area), sub: j.needsYou.kind === "question" ? "needs your answer" : "needs your decision", zone, fresh }; }
     if (j.status === "queued") return { waitIndex: -1, j, pos: doorSpot(doorK++), pose: "stand" as Pose, seated: false, visible: true, label: displayName(j.area), sub: "just arrived", zone, fresh };
@@ -62,7 +62,7 @@ export function place(jobs: OfficeJob[]): Placed[] {
     const i = next[zone] ?? 0; next[zone] = i + 1; const s = seat(j.area, i);
     const reading = READING.test(j.stage ?? "") && j.status === "running";
     return { waitIndex: -1, j, pos: { x: s.x, y: s.y }, pose: (j.status === "running" ? (reading ? "read" : "type") : "idle") as Pose, seated: true, visible: true, label: displayName(j.area),
-      sub: j.status === "waiting" ? "waiting on helpers" : `${reading ? "reading" : "typing"}${progress}`, zone, fresh };
+      sub: j.status === "waiting" ? "waiting" : `${reading ? "reading" : "typing"}${progress}`, zone, fresh };
   });
 }
 
@@ -128,7 +128,7 @@ function DeskFront({ x, y, label, sub, glow, tone, selected }: { x: number; y: n
       {/* nameplate: compact, high contrast */}
       <rect x={x - 54} y={y + 15} width="108" height="31" rx="2" fill="#0b1630" stroke={selected ? "#67d4ff" : tone} strokeWidth={selected ? 3 : 2} />
       <text x={x} y={y + 29} textAnchor="middle" fill="#f6f1e6" fontSize="14" fontWeight="700" letterSpacing="1" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{label.toUpperCase()}</text>
-      <text x={x} y={y + 42} textAnchor="middle" fill="#bcd0ee" fontSize="12" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{sub.length > 17 ? `${sub.slice(0, 16)}…` : sub}</text>
+      <text x={x} y={y + 42} textAnchor="middle" fill="#bcd0ee" fontSize="12" fontFamily="var(--font-geist-sans), system-ui, sans-serif">{fit(sub, 17)}</text>
     </g>
   );
 }
@@ -138,8 +138,10 @@ function actionLabel(p: Placed): string | null {
   if (!p.visible || p.j.needsYou || p.j.status !== "running" || p.zone === "supervisor" || !p.j.stage) return null;
   const st = p.j.stage.toLowerCase();
   if (/calendar/.test(st)) return "READ CALENDAR"; if (/read|source|search|find/.test(st)) return "READ SOURCES"; if (/writ|compos|draft|saving/.test(st)) return "WRITE DRAFT"; if (/check|verif|review/.test(st)) return "CHECK CLAIMS";
-  return p.j.stage.toUpperCase().slice(0, 14).trim();
+  return fit(p.j.stage.toUpperCase(), 14);
 }
+/** Cut at a word boundary so a nameplate never ends mid-word. */
+function fit(s: string, n: number) { if (s.length <= n) return s; const words = s.split(" "); let out = ""; for (const w of words) { if ((out + " " + w).trim().length > n - 1) break; out = (out + " " + w).trim(); } return `${out || s.slice(0, n - 1)}…`; }
 const trunc = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function Worker({ p, selected, reduce, onSelect }: { p: Placed; selected: boolean; reduce: boolean; onSelect: (id: string) => void }) {
@@ -199,7 +201,7 @@ export function OfficeScene({ jobs, pendingDecisions, selected, onSelect, onOpen
   const pathD = (pts: Pt[]) => pts.map((q, i) => `${i ? "L" : "M"}${q.x} ${q.y}`).join(" ");
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto max-h-[calc(100dvh-210px)] min-h-[420px] rounded-xl border border-line" role="group" aria-label="The Jarvis office. Cyan lines show who assigned work, nameplates say who is working, and amber question bubbles show who needs you. The same workers are listed below." data-testid="office-scene">
+    <svg viewBox={`0 0 ${W} ${H}`} className="block h-full w-full" role="group" aria-label="The Jarvis office. Cyan lines show who assigned work, nameplates say who is working, and amber question bubbles show who needs you. The same workers are listed below." data-testid="office-scene">
       <defs>
         <pattern id="planks" width="64" height="24" patternUnits="userSpaceOnUse"><rect width="64" height="24" fill="#d08a4c" /><rect width="64" height="2" fill="#a86333" /><rect x="0" y="12" width="64" height="12" fill="#d99556" /><rect x="31" y="12" width="2" height="12" fill="#a86333" /><rect x="15" y="0" width="2" height="12" fill="#a86333" /><rect y="12" width="64" height="2" fill="#a86333" /></pattern>
       </defs>

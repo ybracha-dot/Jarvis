@@ -7,7 +7,7 @@ import { findDates, resolveWeekday, splitSentences } from "./extract";
 import { tokens, ownerName } from "./evidence";
 import { findTaskRefs } from "./extract";
 import { Interval, plannerSettings, planWork, collides, weeklyEntries } from "./planner";
-import { availabilityCoverage, uncoveredIntervals, uncoveredDays, Coverage, coveredOn } from "./calendar-cover";
+import { availabilityCoverage, uncoveredIntervals, uncoveredDays, Coverage, coveredOn, confirmedByUser } from "./calendar-cover";
 import { addDays, dayOfWeek, diffDays, fmtDateTime, localDate, localHM, parseLocal } from "./time";
 import { saveResult, verifyResult } from "./assistant";
 import { enqueue } from "./notify";
@@ -356,7 +356,7 @@ export function unshareBrief(ctx: Ctx, _resultId?: string) {
 
 // ---------- the agenda beside the brief ----------
 export interface AgendaItem { id: string; kind: "busy" | "class" | "quiet" | "deadline" | "proposed" | "reserved"; start: string; end: string | null; label: string; detail: string | null; href: string | null }
-export interface AgendaDay { day: string; name: string; covered: boolean; coverageNote: string; items: AgendaItem[] }
+export interface AgendaDay { day: string; name: string; covered: boolean; confirmedByYou: boolean; coverageNote: string; items: AgendaItem[] }
 /** Real busy periods, the instructor's deadlines, suggested times and reserved times, each kept distinct. A day no calendar covers is unknown, never free. */
 export function agendaFor(ctx: Ctx, a: BriefAnalysis | null): { days: AgendaDay[]; coverage: string[] } {
   const tz = plannerSettings(ctx).tz; const now = ctx.now(); const today = localDate(now, tz); const cov = availabilityCoverage(ctx);
@@ -375,9 +375,9 @@ export function agendaFor(ctx: Ctx, a: BriefAnalysis | null): { days: AgendaDay[
     }
     for (const b of reserved) if (localDate(b.start_at as string, tz) === d) items.push({ id: String(b.id), kind: "reserved", start: String(b.start_at), end: String(b.end_at), label: String(b.title), detail: "Reserved on this computer", href: null });
     items.sort((x, y) => Date.parse(x.start) - Date.parse(y.start) || x.kind.localeCompare(y.kind));
-    out.push({ day: d, name: dayNames(d), covered, items, coverageNote: covered ? "A calendar you read covers this day." : cov.some((c) => c.trusted) ? "No calendar covers this day, so open time here is unknown, not free." : "No calendar has been read, so open time is unknown, not free." });
+    const you = confirmedByUser(cov, d); out.push({ day: d, name: dayNames(d), covered, confirmedByYou: you, items, coverageNote: you ? "You confirmed your calendar is complete for this day. Jarvis cannot check that." : covered ? "A calendar you read lists events on this day." : cov.some((c) => c.trusted) ? "No calendar lists anything on this day, so open time here is unknown, not free. Confirm it if you know it is open." : "No calendar has been read, so open time is unknown, not free." });
   }
-  const notes = cov.map((c) => c.mode === "declared" ? `${c.label}: ${c.fromDay} to ${c.toDay}.` : c.trusted ? `${c.label}: covers ${c.fromDay} to ${c.toDay}, judged from its first and last event${c.mode === "imported" ? "; it is a snapshot and does not update by itself" : ""}.` : `${c.label}: ${c.note}`);
+  const notes = cov.map((c) => c.mode === "declared" ? `${c.label}: ${c.fromDay} to ${c.toDay}.` : c.trusted ? `${c.label}: lists events on ${c.days.length} day${c.days.length === 1 ? "" : "s"} (${c.fromDay} to ${c.toDay}). Days in between with no events stay unknown until you confirm them${c.mode === "imported" ? "; it is a snapshot and does not update by itself" : ""}.` : `${c.label}: ${c.note}`);
   return { days: out, coverage: notes };
 }
 

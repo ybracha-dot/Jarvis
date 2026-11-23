@@ -222,6 +222,17 @@ export function officeState(ctx: Ctx, clock: Clock = real) {
   const now = clock().getTime();
   const rows = all(ctx.db, "SELECT * FROM jobs WHERE owner_id=? AND (finished_at IS NULL OR finished_at>?) ORDER BY created_at", ctx.owner, now - 6 * 3600_000).map(parseJob);
   const byId = new Map(rows.map((r) => [r.id, r]));
+  // What you asked for: the words you wrote, taken from the capture or request that started the root job.
+  const askedCache = new Map<string, { text: string; from: string } | null>();
+  const askedFor = (root: any) => {
+    if (!root) return null;
+    if (askedCache.has(root.id)) return askedCache.get(root.id)!;
+    let out: { text: string; from: string } | null = null;
+    const cid = root.input?.captureId, rid = root.input?.requestId;
+    if (cid) { const c = get(ctx.db, "SELECT text, source_label FROM captures WHERE id=? AND owner_id=?", cid, ctx.owner); if (c) out = { text: String(c.text).slice(0, 400), from: String(c.source_label ?? "a capture") }; }
+    else if (rid) { const r = get(ctx.db, "SELECT text, origin FROM requests WHERE id=? AND owner_id=?", rid, ctx.owner); if (r) out = { text: String(r.text).slice(0, 400), from: String(r.origin ?? "a request") }; }
+    askedCache.set(root.id, out); return out;
+  };
   const jobs = rows.map((j) => ({
     id: j.id, title: j.title, role: j.role, area: j.area, kind: j.kind, status: j.status, stage: j.stage, depth: j.depth,
     progress: j.progress_total ? { done: j.progress_done ?? 0, total: j.progress_total } : null,
@@ -234,6 +245,7 @@ export function officeState(ctx: Ctx, clock: Clock = real) {
     rootId: j.root_id, requestId: (j.input as any)?.requestId ?? null, createdAgoMs: now - j.created_at, parentRole: j.parent_id ? byId.get(j.parent_id)?.role ?? null : null,
     // Who needs you: a helper stopped on a question, or a finished helper whose decision you have not answered yet.
     needsYou: needsYou(ctx, j),
+    asked: askedFor(j.depth === 0 ? j : byId.get(j.root_id ?? "")) ?? null,
   }));
   void byId;
   const active = jobs.filter((j) => !TERMINAL.includes(j.status as JobStatus));

@@ -24,6 +24,6 @@ describe("first private run: one note, one correction, one question", () => {
     expect(v.sources.every((s: any) => s.link.startsWith("/evidence/ev_") && s.live)).toBe(true); expect(v.sources.find((s: any) => s.role === "original wording, replaced").quote).toMatch(/March 12|\$180/);
     expect(listSources(ctx).every((s) => s.localOnly && s.mode === "imported")).toBe(true);        // nothing marked live or fixture, everything local-only
     expect(all(ctx.db, "SELECT COUNT(*) n FROM runs")[0].n).toBe(0); expect(all(ctx.db, "SELECT model_calls FROM jobs").every((j) => j.model_calls === 0)).toBe(true);
-    expect(JSON.stringify(v)).not.toMatch(/Lantern|Okafor|fixture/i);                             // no demo material leaks into a private request
+    expect(JSON.stringify(v)).not.toMatch(/TAMID|Okafor|fixture/i);                             // no demo material leaks into a private request
   });
 });

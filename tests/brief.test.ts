@@ -3,6 +3,7 @@ import { memCtx } from "./helpers";
 import { all, get, getSetting } from "@/lib/db";
 import { importText, registerSource, ingestItem, markSource, addCorrection } from "@/lib/evidence";
 import { upsertCalendar } from "@/lib/bundle";
+import { confirmDay } from "@/lib/calendar-cover";
 import { buildBrief, runBrief, briefNow, briefFeedback, reserveBrief, briefToday, agendaFor, sharePreview } from "@/lib/brief";
 import { saveBriefConfig } from "@/lib/brief-config";
 import { eventBody, SOURCE_LABEL } from "@/lib/blackboard";
@@ -199,11 +200,32 @@ describe("the agenda beside the brief", () => {
     expect(ag.days.find((x) => x.day === "2026-11-17")!.items.map((i) => i.kind)).toEqual(expect.arrayContaining(["busy", "reserved"])); expect(ag.days.flatMap((d) => d.items).some((i) => i.kind === "proposed" && /Essay 2/.test(i.label))).toBe(false);
   });
   it("labels a day no calendar covers as unknown, and says coverage is judged from the first and last event; with no calendar nothing is called free", () => {
-    const { ctx } = world(); const ag = agendaFor(ctx, null); expect(ag.coverage.join(" ")).toMatch(/covers 2026-11-17 to 2026-11-19, judged from its first and last event; it is a snapshot/); expect(ag.days.every((d) => d.covered === (d.day >= "2026-11-17" && d.day <= "2026-11-19"))).toBe(true);
+    const { ctx } = world(); const ag = agendaFor(ctx, null); expect(ag.coverage.join(" ")).toMatch(/lists events on 3 days \(2026-11-17 to 2026-11-19\).*it is a snapshot/); expect(ag.days.every((d) => d.covered === (d.day >= "2026-11-17" && d.day <= "2026-11-19"))).toBe(true);
     const bare = memCtx(CLOCK, "personal"); const g = agendaFor(bare, null); expect(g.days.every((d) => !d.covered && /unknown, not free/.test(d.coverageNote))).toBe(true); expect(g.coverage).toEqual([]);
   });
   it("previews what Claude would receive: titles of shared notes, only a count of what is kept out", () => {
     const { ctx } = world(); importText(ctx, { kind: "note", title: "Shared poster", text: "The poster is due Friday, November 20 at 3:00 PM.", at: "2026-11-12T12:00:00.000Z", label: "Shared notes", shareable: true });
     const p = sharePreview(ctx); expect(p.included.map((x) => x.title)).toEqual(["Shared poster"]); expect(p.withheld).toBe(1); expect(JSON.stringify(p)).not.toMatch(/Essay 2/);
+  });
+});
+
+describe("a calendar export with events on Monday and Friday and nothing on Wednesday", () => {
+  const clockMon = "2026-11-16T08:00:00-05:00";
+  const mk = () => { const ctx = memCtx(clockMon, "personal"); importText(ctx, { kind: "note", title: "Poster", text: "The poster is due Friday, November 20 at 5:00 PM. Please bring a printed handout.", at: "2026-11-10T12:00:00.000Z", label: "n" });
+    upsertCalendar(ctx, "ics", [{ title: "Lecture", start: "2026-11-16T15:00:00Z", end: "2026-11-16T16:00:00Z" }, { title: "Review", start: "2026-11-20T15:00:00Z", end: "2026-11-20T16:00:00Z" }], "week.ics"); return ctx; };
+  it("keeps Wednesday unknown (and Tuesday, Thursday): a quiet day inside the span is not evidence that it is free", () => {
+    const ctx = mk(); const ag = agendaFor(ctx, null); const by = (d: string) => ag.days.find((x) => x.day === d); void by;
+    const days = agendaFor(ctx, buildBrief(ctx, { occurrenceKey: "t", kind: "ondemand" }).analysis).days; const known = Object.fromEntries(days.map((d) => [d.day, d.covered]));
+    expect(known["2026-11-16"]).toBe(true); expect(known["2026-11-20"]).toBe(true);
+    const wed = agendaFor(ctx, null).days; void wed;
+    const p = buildBrief(ctx, { occurrenceKey: "t2", kind: "ondemand" }).analysis.priorities[0];
+    for (const b of p.blocks) expect(["2026-11-16", "2026-11-20"]).toContain(new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date(b.start)));
+    expect(agendaFor(ctx, null).coverage.join(" ")).toMatch(/lists events on 2 days.*Days in between with no events stay unknown until you confirm them/);
+  });
+  it("Wednesday becomes usable only when you confirm it, is labelled as your statement, and can be taken back", () => {
+    const ctx = mk(); const wedKey = "2026-11-18"; const dayOf = (ag: any, d: string) => ag.days.find((x: any) => x.day === d);
+    (ctx as any).setNow("2026-11-18T07:00:00-05:00"); let ag = agendaFor(ctx, null); expect(dayOf(ag, wedKey)).toMatchObject({ covered: false, confirmedByYou: false }); expect(dayOf(ag, wedKey).coverageNote).toMatch(/unknown, not free/);
+    confirmDay(ctx, wedKey, true); ag = agendaFor(ctx, null); expect(dayOf(ag, wedKey)).toMatchObject({ covered: true, confirmedByYou: true }); expect(dayOf(ag, wedKey).coverageNote).toMatch(/You confirmed.*cannot check/);
+    confirmDay(ctx, wedKey, false); expect(dayOf(agendaFor(ctx, null), wedKey)).toMatchObject({ covered: false, confirmedByYou: false });
   });
 });

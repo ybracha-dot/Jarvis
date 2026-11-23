@@ -20,16 +20,16 @@ describe("Ask Jarvis: the pitch follow-up, end to end", () => {
     const r = await ask(ctx, clock, PITCH);
     expect(get(ctx.db, "SELECT kind FROM messages WHERE role='jarvis' ORDER BY rowid LIMIT 1")!.kind).toBe("goal"); expect(r.jobId).toMatch(/^job_/); expect(r.reply.data.path).toMatch(/^\/results\/res_/);
     const v = resultView(ctx, r.reply.data.resultId);
-    expect(v).toMatchObject({ kind: "draft", version: 1, projectName: "Lantern Club" });
+    expect(v).toMatchObject({ kind: "draft", version: 1, projectName: "TAMID" });
     expect(v.body).toMatch(/Wednesday, Nov 18/); expect(v.body).not.toMatch(/Confirming Friday|50,000|Sam Ortiz|\$12,000/);
     expect(v.body).toMatch(/“Let's follow up with the sponsors soon, because they asked for the revised budget before demo day\.”/);   // the reason, quoted from the transcript
     const roles = v.sources.map((s: any) => `${s.title}|${s.role}`);
-    expect(roles).toEqual(expect.arrayContaining(["Re: Lantern Club sponsor pitch follow-up|confirms the date", expect.stringMatching(/sync\|states the reason/)]));
+    expect(roles).toEqual(expect.arrayContaining(["Re: TAMID sponsor pitch follow-up|confirms the date", expect.stringMatching(/sync\|states the reason/)]));
     expect(v.sources.every((s: any) => s.link.startsWith("/evidence/ev_") && s.live)).toBe(true);
     expect(v.flags.find((f: any) => f.kind === "older_proposal")!.text).toMatch(/Monday.*earlier proposal.*replaced by Wednesday/);
     expect(v.flags.find((f: any) => f.kind === "unsupported_figure")!.text).toMatch(/\$12,000.*only once.*left it out/);
     expect(v.sources.some((s: any) => /Design Memo|advising/i.test(s.title))).toBe(false);                       // unrelated school sources stay out
-    expect(v.reads.some((x: any) => x.kind === "search" && /Re: Lantern/.test(x.label))).toBe(true);
+    expect(v.reads.some((x: any) => x.kind === "search" && /Re: TAMID/.test(x.label))).toBe(true);
     expect(all(ctx.db, "SELECT model_calls FROM jobs").every((j) => j.model_calls === 0)).toBe(true);
     expect(all(ctx.db, "SELECT role, area FROM jobs ORDER BY rowid").map((j) => j.area)).toEqual(expect.arrayContaining(["supervisor", "research", "planning", "review"]));
     expect(get(ctx.db, "SELECT COUNT(*) n FROM messages WHERE kind='result'")!.n).toBe(1);                       // one spoken completion in the conversation
@@ -83,7 +83,7 @@ describe("authorization follows the evidence", () => {
     expect(resultView(ctx, rid).sources.some((s: any) => !s.live)).toBe(true);
     const r2: any = await ask(ctx, clock, PITCH); const v = resultView(ctx, r2.reply.data.resultId);
     expect(v.version).toBe(2); expect(v.body).not.toMatch(/Wednesday/); expect(v.flags.some((f: any) => f.kind === "no_decision")).toBe(true);
-    expect(v.sources.every((s: any) => !/Re: Lantern/.test(s.title))).toBe(true);
+    expect(v.sources.every((s: any) => !/Re: TAMID/.test(s.title))).toBe(true);
   });
   it("another owner's records never appear in results, reads or searches", async () => {
     const { ctx, clock } = fresh(); const r: any = await ask(ctx, clock, PITCH);
@@ -123,7 +123,7 @@ describe("Get me ready for tomorrow: a different request through the same execut
 describe("What did I promise after that meeting: ambiguity and ownership", () => {
   it("asks one question when two meetings fit, then separates your promises from a teammate's", async () => {
     const { ctx, clock } = fresh();
-    importText(ctx, { kind: "transcript", title: "Lantern Club sponsor pitch sync (second)", label: "Meeting transcripts (fixture)", text: "[00:00:10] Priya Nair: I'll send the venue quote tomorrow.\n[00:00:50] Yonathan: I'll update the sponsor list by Thursday.", at: new Date(ctx.now().getTime() - 86400_000).toISOString(), author: "Priya Nair", participants: ["Priya Nair", "Yonathan"] });
+    importText(ctx, { kind: "transcript", title: "TAMID sponsor pitch sync (second)", label: "Meeting transcripts (fixture)", text: "[00:00:10] Priya Nair: I'll send the venue quote tomorrow.\n[00:00:50] Yonathan: I'll update the sponsor list by Thursday.", at: new Date(ctx.now().getTime() - 86400_000).toISOString(), author: "Priya Nair", participants: ["Priya Nair", "Yonathan"] });
     const r: any = await ask(ctx, clock, "What did I promise after that meeting?"); const rid = r.reply.data.requestId;
     expect(receipt(ctx, rid)).toMatchObject({ status: "blocked", ready: false }); expect(receipt(ctx, rid).blockers[0]).toMatch(/Which one/);
     const q = get(ctx.db, "SELECT * FROM jobs WHERE status='blocked'")!; const ask_ = JSON.parse(q.result as string).ask; expect(ask_.choices.length).toBeGreaterThanOrEqual(2);

@@ -141,7 +141,7 @@ function Lead({ a, d, tz, now }: { a: any; d: any; tz: string; now: string }) {
         {p.reserved.length > 0
           ? <><p className="inline-flex items-center gap-2 text-[16px] font-semibold settle" data-testid="brief-reserved"><Check className="size-5 text-accent" aria-hidden />Reserved, {p.reserved.map((b: any) => `${clock(b.start, tz)}–${clock(b.end, tz)}`).join(" and ")}</p>{ev && <Link href={ev.href} className="touch inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-4 font-medium hover:bg-surface2" data-testid="brief-open"><FileText className="size-4" aria-hidden />Open the assignment</Link>}</>
           : p.blocks.length > 0
-            ? <><Button variant="primary" busy={reserve.busy} onClick={() => reserve.run()} data-testid="brief-reserve" className="min-h-11 px-5 text-base">Reserve {minutes} min</Button><p className="t-meta max-w-[22rem]" data-testid="brief-when-note">{blockWords(p.blocks, tz, now)}. Reserved on this computer only.</p></>
+            ? <><Button variant="primary" busy={reserve.busy} onClick={() => reserve.run()} data-testid="brief-reserve" className="min-h-11 px-5 text-base">Reserve {minutes} min</Button><p className="t-meta max-w-[22rem]" data-testid="brief-when-note"><span className="font-medium text-fg">Suggested: </span>{blockWords(p.blocks, tz, now)}. {reserve.busy ? "Saving the reservation…" : "Nothing is reserved until you press the button, and a reservation stays on this computer."}</p></>
             : !d.hasCalendar
               ? <><Link href="/sources" className="touch inline-flex items-center gap-2 rounded-lg bg-accent text-on-accent font-medium px-5 min-h-11 text-base hover:brightness-110" data-testid="brief-add-calendar"><CalendarPlus className="size-4" aria-hidden />Add a calendar</Link><p className="t-meta max-w-[22rem]" data-testid="brief-no-block">No time is proposed: no calendar has been read, so open time would be a guess.</p></>
               : <>{ev && <Link href={ev.href} className="touch inline-flex items-center gap-2 rounded-lg bg-accent text-on-accent font-medium px-5 min-h-11 text-base hover:brightness-110" data-testid="brief-open"><FileText className="size-4" aria-hidden />Open the assignment</Link>}<p className="t-meta max-w-[24rem]" data-testid="brief-no-block">No time proposed. {p.blockNote ?? ""}</p></>}
@@ -230,7 +230,7 @@ function Agenda({ d, tz }: { d: any; tz: string }) {
       <h2 className="t-meta uppercase tracking-[0.1em] font-medium hidden lg:block">Agenda</h2>
       {ag.days.map((day: any) => (
         <section key={day.day} aria-label={day.name}>
-          <div className="flex items-baseline gap-2 border-b border-line pb-1.5"><h3 className="text-[15px] font-semibold">{day.name}</h3><span className={cx("t-meta ml-auto", !day.covered && "text-amber font-medium")}>{day.covered ? "Calendar read" : "Calendar unknown"}</span></div>
+          <div className="flex items-baseline gap-2 border-b border-line pb-1.5"><h3 className="text-[15px] font-semibold">{day.name}</h3><span className={cx("t-meta ml-auto", !day.covered && "text-amber font-medium")} data-testid={day.covered ? "agenda-day-known" : "agenda-day-unknown"}>{day.confirmedByYou ? "You confirmed" : day.covered ? "Calendar read" : "Calendar unknown"}</span></div>
           {day.items.length === 0 ? <p className="t-meta py-2">{day.covered ? "Nothing on your calendar." : day.coverageNote}</p> :
             <ul className="divide-y divide-line">{day.items.map((it: any) => { const k = KIND[it.kind]; return (
               <li key={it.id} className="py-2 flex gap-3 items-start" data-testid={`agenda-${it.kind}`}>
@@ -239,11 +239,18 @@ function Agenda({ d, tz }: { d: any; tz: string }) {
                 <span className="min-w-0 flex-1"><span className="block text-[15px] leading-snug break-words">{it.href ? <Link href={it.href} className="underline underline-offset-4">{it.label}</Link> : it.label}</span><span className={cx("block text-[12.5px] font-medium", k.cls)}>{k.label}<span className="font-normal text-muted"> · {it.detail}</span></span></span>
               </li>); })}</ul>}
           {day.items.length > 0 && !day.covered && <p className="t-meta pt-1.5 text-amber">{day.coverageNote}</p>}
+          {!day.covered && d.hasCalendar && <ConfirmDay day={day} />}
+          {day.confirmedByYou && <ConfirmDay day={day} undo />}
         </section>))}
       <details className="t-meta" data-testid="agenda-coverage"><summary className="disc cursor-pointer min-h-8 flex items-center">How Jarvis knows what is free</summary><ul className="mt-1 space-y-1">{ag.coverage.length ? ag.coverage.map((c: string, i: number) => <li key={i}>{c}</li>) : <li>No calendar has been read. Open time is unknown, not free.</li>}</ul></details>
       <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-muted" aria-label="Legend">{["deadline", "proposed", "reserved", "busy"].map((k) => <li key={k} className="flex items-center gap-1.5"><span className={cx("w-1 h-3 rounded-full", KIND[k].bar)} aria-hidden />{KIND[k].label === "Due" ? "Instructor's deadline" : KIND[k].label}</li>)}</ul>
     </div>
   );
+}
+
+function ConfirmDay({ day, undo }: { day: any; undo?: boolean }) {
+  const go = useAction(async () => { await api("/brief/coverage", { body: { day: day.day, confirmed: !undo } }); });
+  return <div className="pt-1.5">{go.error && <ErrorBox error={go.error} />}<button type="button" onClick={() => go.run()} disabled={go.busy} aria-label={undo ? `Take back my confirmation for ${day.name}` : `Confirm ${day.name} is open`} data-testid={undo ? "agenda-unconfirm" : "agenda-confirm"} className="touch text-[13.5px] text-accent underline underline-offset-4 disabled:opacity-50">{undo ? "Take back my confirmation" : `I know ${day.name} is open: confirm it`}</button></div>;
 }
 
 // ---------- Claude, quietly ----------

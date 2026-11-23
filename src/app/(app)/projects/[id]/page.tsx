@@ -1,7 +1,7 @@
 "use client";
 import { Suspense, use, useState } from "react";
 import Link from "next/link";
-import { Pin, PinOff, Pencil, Trash2, Check, X, Undo2, ArrowLeft, Plug } from "lucide-react";
+import { Pin, PinOff, Pencil, Trash2, Check, X, Undo2, ArrowLeft, Plug, FileText } from "lucide-react";
 import { api, useQuery, useAction } from "@/components/api";
 import { Button, Card, Badge, Mono, SectionTitle, Spinner, ErrorBox, Notice, Field, inputCls, cx } from "@/components/ui";
 import { fmtDateTime } from "@/lib/time";
@@ -29,6 +29,7 @@ function Project({ id }: { id: string }) {
   const d = q.data; const all = [...d.current, ...d.options, ...d.suggestions, ...d.actions, ...d.questions, ...d.history];
   const f = all.find((x: any) => x.id === sel) ?? null;
   const latest = d.events.find((e: any) => !e.undone_at);
+  const latestDraft = (results.data?.results ?? []).find((r: any) => r.kind === "draft") ?? results.data?.results?.[0] ?? null;
   const err = [edit.error, forget.error, undo.error, decide.error, addItem.error, resolve.error].find(Boolean);
 
   const Row = ({ x, children }: { x: any; children?: React.ReactNode }) => (
@@ -60,16 +61,41 @@ function Project({ id }: { id: string }) {
       </header>
       {err && <ErrorBox error={err as any} />}{msg && <Notice>{msg}</Notice>}
 
-      <section aria-label="Current answer" className="rounded-2xl border border-line bg-surface metal p-5" data-testid="project-answer">
-        <h2 className="text-[12px] uppercase tracking-[0.12em] text-muted font-medium mb-2">What we decided</h2>
-        <p className="text-[17px] leading-relaxed break-words">{d.answer}</p>
-        <p className="text-[13px] text-muted mt-3">Open this in Claude with <Mono>get_project_context</Mono>. Claude will read this same page.</p>
+      <section aria-label="Where this stands" className="grid md:grid-cols-3 gap-4" data-testid="project-brief">
+        <div className="rounded-2xl border border-line bg-surface p-5 lift space-y-3" data-testid="project-answer">
+          <h2 className="t-meta uppercase tracking-[0.12em] font-medium text-muted">What we decided</h2>
+          {d.current.filter((x: any) => x.kind === "decision").length === 0 ? <p className="text-[16px] leading-relaxed break-words">{d.answer}</p> : (
+            <ul className="space-y-3.5">{d.current.filter((x: any) => x.kind === "decision").map((x: any) => (
+              <li key={x.id} data-testid="decided-row">
+                <div className="text-[12.5px] uppercase tracking-wider text-muted">{x.key.replace(/-/g, " ")}</div>
+                <p className="text-[19px] leading-snug font-medium break-words">{x.text}</p>
+                <p className="text-[13.5px] text-muted mt-0.5">{x.replaced ? <>Changed {fmtDateTime(x.asOf)}. Replaced <s className="decoration-line-strong">{x.replaced.text}</s>{x.replaced.sourceRef ? <> ({x.replaced.sourceRef})</> : null}. </> : <>Decided {fmtDateTime(x.asOf)}. </>}{x.sourceRef ? <>Source: {x.sourceRef}.</> : <>{ORIGIN[x.origin] ?? x.origin}.</>}</p>
+              </li>))}
+            </ul>)}
+          {d.options.length > 0 && <p className="text-[14px] text-muted">Still deciding: {[...new Set(d.options.map((o: any) => o.key.replace(/-/g, " ")))].join(", ")}.</p>}
+          <p className="text-[13px] text-muted">Claude reads this same page through <Mono>get_project_context</Mono>.</p>
+        </div>
+        <div className="contents">
+          <div className="rounded-2xl border border-line bg-surface p-5 lift space-y-2" data-testid="project-owe">
+            <h2 className="t-meta uppercase tracking-[0.12em] font-medium text-muted">What I owe next</h2>
+            {(d.owe ?? []).length === 0 ? <p className="text-[15px] text-muted">Nothing owed on this project right now.</p> : <ul className="space-y-2">{d.owe.map((o: any) => (
+              <li key={o.id} className="flex items-start gap-2.5" data-testid="owe-row"><span className="mt-[7px] size-2 rounded-full bg-amber-solid shrink-0" aria-hidden /><div className="min-w-0"><p className="text-[16px] leading-snug break-words">{o.text}</p><p className="text-[13.5px] text-muted">{o.owedTo ? <>To {o.owedTo}</> : "To do"}{o.due ? <> · due {new Date(`${o.due}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" })}</>  : null}</p></div></li>))}</ul>}
+          </div>
+          <div className="rounded-2xl border border-line bg-surface p-5 lift space-y-2" data-testid="project-latest-draft">
+            <h2 className="t-meta uppercase tracking-[0.12em] font-medium text-muted">Latest draft</h2>
+            {latestDraft ? <>
+              <p className="text-[16px] leading-snug font-medium break-words">{latestDraft.title}</p>
+              {latestDraft.summary && <p className="text-[14px] text-muted line-clamp-3 break-words">{latestDraft.summary}</p>}
+              <div className="flex items-center gap-2 flex-wrap pt-1"><Link href={latestDraft.link} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[14px] bg-accent text-on-accent font-medium hover:brightness-110" data-testid="open-latest-draft"><FileText className="size-4" aria-hidden />Open the draft</Link><span className="text-[13px] text-muted">version {latestDraft.version}{latestDraft.state === "stale" ? " · out of date" : ""}</span></div>
+            </> : <p className="text-[15px] text-muted">No draft yet. Ask Jarvis for one from the box below and it will land here.</p>}
+          </div>
+        </div>
       </section>
 
       <div className={cx("grid gap-6", f ? "xl:grid-cols-[minmax(0,1fr)_340px]" : "")}>
         <div className="space-y-6 min-w-0">
           {d.suggestions.length > 0 && <section aria-label="Waiting for you"><SectionTitle>Waiting for your confirmation</SectionTitle><ul className="space-y-3">{d.suggestions.map((x: any) => <Row key={x.id} x={x}><div className="mt-3 flex gap-2"><Button size="sm" variant="primary" onClick={() => resolve.run(x.id, true)}>Confirm as decided</Button><Button size="sm" onClick={() => resolve.run(x.id, false)}>Not this</Button></div></Row>)}</ul></section>}
-          <section aria-label="Decided"><SectionTitle>Decided and known</SectionTitle>
+          <section aria-label="Decided"><SectionTitle>All decisions and facts</SectionTitle>
             {d.current.length === 0 ? <p className="text-[15px] text-muted">Nothing decided yet.</p> : <ul className="space-y-3">{d.current.map((x: any) => <Row key={x.id} x={x}>{sel === x.id && <Actions x={x} />}</Row>)}</ul>}</section>
           {d.options.length > 0 && <section aria-label="Open options"><SectionTitle>Still deciding</SectionTitle><ul className="space-y-3">{d.options.map((x: any) => <Row key={x.id} x={x}><div className="mt-3 flex gap-1.5 flex-wrap"><Button size="sm" variant="primary" busy={decide.busy} onClick={() => decide.run(x)}>Choose this</Button>{sel === x.id && <Actions x={x} />}</div></Row>)}</ul></section>}
           {(d.actions.length > 0 || d.questions.length > 0) && <section aria-label="To do and questions"><SectionTitle>To do and open questions</SectionTitle><ul className="space-y-3">{[...d.actions, ...d.questions].map((x: any) => <Row key={x.id} x={x}>{sel === x.id && <Actions x={x} />}</Row>)}</ul></section>}

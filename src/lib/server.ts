@@ -30,9 +30,9 @@ import { loadWorkspaceFixtures } from "./workspace-fixtures";
 import { briefToday, briefNow, briefFeedback, reserveBrief, shareBrief, unshareBrief, sharePreview } from "./brief";
 import { getBriefConfig, saveBriefConfig } from "./brief-config";
 import { sharingState, sourcePreview, setSourceSharing, setProjectSharing, grantResult, revokeResult, resultAccess } from "./share";
-import { availabilityCoverage } from "./calendar-cover";
+import { availabilityCoverage, confirmDay } from "./calendar-cover";
 import { issueReaderTask, submitReaderResult, createReaderTestProject, readerTestState, readerHandoff, confirmReader } from "./reader";
-import { createProject, listProjects, projectContext, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
+import { createProject, listProjects, projectContext, projectOwe, projectEvents, applyProjectUpdate, editFact, undoEvent, forgetFact, pinFact, resolveSuggestion, ProjectUpdate } from "./projects";
 import { createToken, listTokens, revokeToken, rotateToken, NewToken, startProbe, probeState, editProbe } from "./mcp-auth";
 import { officeState, cancelJob, getJob, TERMINAL } from "./jobs";
 import { kick, runnerStatus } from "./runner";
@@ -153,7 +153,7 @@ on("POST", "/evidence/fixtures", (c) => { demoOnly(c); return loadWorkspaceFixtu
 on("GET", "/outcomes", (c, r) => ({ outcomes: outcomes(c, Math.min(Number(r.query.get("limit") ?? 20) || 20, 60)) }));
 on("GET", "/projects", (c) => ({ projects: listProjects(c) }));
 on("POST", "/projects", (c, r) => createProject(c, r.json(z.object({ name: z.string().trim().min(1).max(120), kind: z.enum(["trip", "course", "club", "project", "other"]).default("project"), aliases: z.array(z.string().max(80)).max(8).optional() }).strict())));
-on("GET", "/projects/:id", (c, r) => ({ ...projectContext(c, r.params.id), events: projectEvents(c, r.params.id) }));
+on("GET", "/projects/:id", (c, r) => ({ ...projectContext(c, r.params.id), events: projectEvents(c, r.params.id), owe: projectOwe(c, r.params.id).items }));
 on("POST", "/projects/:id/update", (c, r) => { const b = r.json(z.record(z.string(), z.unknown())); return applyProjectUpdate(c, { ...(b as any), project: r.params.id, origin: "jarvis-ui" }); });
 on("POST", "/projects/facts/:id/edit", (c, r) => { const b = r.json(z.object({ text: z.string().trim().min(1).max(1000), expectedRevision: z.number().int().min(0) }).strict()); return editFact(c, r.params.id, b.text, b.expectedRevision); });
 on("POST", "/projects/facts/:id/forget", (c, r) => { r.json(z.object({ confirm: z.literal(true) })); return forgetFact(c, r.params.id); });
@@ -215,6 +215,7 @@ on("GET", "/brief", (c) => { const b = briefToday(c, schedulerStatus(c)); return
 on("POST", "/brief/run", (c) => { const out = briefNow(c); return { ...out, brief: briefToday(c, schedulerStatus(c)) }; });
 on("POST", "/brief/feedback", (c, r) => { const b = r.json(z.object({ key: z.string().max(120), kind: z.enum(["dismiss", "undismiss", "due", "estimate", "done", "undo"]), value: z.union([z.string().max(60), z.number()]).nullish(), note: z.string().max(300).nullish() }).strict()); briefFeedback(c, b); const out = briefNow(c); return { ok: true, ...out, brief: briefToday(c, schedulerStatus(c)) }; });
 on("POST", "/brief/reserve", (c, r) => { const b = r.json(z.object({ key: z.string().max(120), blocks: z.array(z.object({ start: z.string(), end: z.string() })).max(4).optional() }).strict()); const out = reserveBrief(c, b); const rebuilt = briefNow(c); return { ...out, resultId: rebuilt.resultId }; });
+on("POST", "/brief/coverage", (c, r) => { const b = r.json(z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), confirmed: z.boolean() }).strict()); const out = confirmDay(c, b.day, b.confirmed); const rebuilt = briefNow(c); return { ...out, resultId: rebuilt.resultId, brief: briefToday(c, schedulerStatus(c)) }; });
 on("GET", "/brief/config", (c) => getBriefConfig(c));
 on("POST", "/brief/config", (c, r) => saveBriefConfig(c, r.json(z.any())));
 on("GET", "/sharing", (c) => sharingState(c));

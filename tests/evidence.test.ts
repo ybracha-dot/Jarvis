@@ -42,7 +42,7 @@ describe("evidence: retrieval is authorized", () => {
   it("returns the confirming email within the first five hits and never another owner's look-alike", () => {
     const { ctx, projectId } = fresh();
     const hits = searchEvidence(ctx, ["sponsor", "pitch", "follow-up"], { projectId, limit: 5 });
-    expect(hits.map((h) => h.title)).toContain("Re: Lantern Club sponsor pitch follow-up");
+    expect(hits.map((h) => h.title)).toContain("Re: TAMID sponsor pitch follow-up");
     expect(JSON.stringify(hits)).not.toMatch(/Friday|50,000|Sam Ortiz/);
     const wide = searchEvidence(ctx, ["lantern", "follow"], { limit: 10 });
     expect(wide.every((h) => !/Sam Ortiz/.test(String(h.author)))).toBe(true);
@@ -52,10 +52,10 @@ describe("evidence: retrieval is authorized", () => {
     const { ctx, projectId } = fresh();
     const mail = listSources(ctx).find((s) => s.kind === "email")!;
     revokeSource(ctx, mail.id);
-    expect(searchEvidence(ctx, ["confirming", "wednesday"], { projectId }).some((h) => /Re: Lantern/.test(h.title))).toBe(false);
+    expect(searchEvidence(ctx, ["confirming", "wednesday"], { projectId }).some((h) => /Re: TAMID/.test(h.title))).toBe(false);
     expect(getItem(ctx, get(ctx.db, "SELECT id FROM evidence_items WHERE external_id='re-follow-up' AND owner_id=?", ctx.owner)!.id as string)).toMatchObject({ revoked: true });
     expect(() => ingestItem(ctx, { sourceId: mail.id, externalId: "x", kind: "email", title: "t", at: ctx.now().toISOString(), body: "hello" })).toThrow(/revoked/);
-    reauthorizeSource(ctx, mail.id); expect(searchEvidence(ctx, ["confirming", "wednesday"], { projectId }).some((h) => /Re: Lantern/.test(h.title))).toBe(true);
+    reauthorizeSource(ctx, mail.id); expect(searchEvidence(ctx, ["confirming", "wednesday"], { projectId }).some((h) => /Re: TAMID/.test(h.title))).toBe(true);
     const id = get(ctx.db, "SELECT id FROM evidence_items WHERE external_id='re-follow-up' AND owner_id=?", ctx.owner)!.id as string;
     forgetItem(ctx, id);
     expect(searchEvidence(ctx, ["confirming", "wednesday", "budget", "12,000"], { projectId }).every((h) => h.itemId !== id)).toBe(true);

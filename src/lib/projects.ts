@@ -69,8 +69,11 @@ export function projectContext(ctx: Ctx, ref: string) {
     byKey.size ? [...byKey].map(([k, v]) => `Still deciding ${k.replace(/-/g, " ")}: ${v.join(" or ")}.`).join(" ") : "",
     earlier.length ? `Earlier: ${earlier.map((f) => `${f.text} (replaced)`).join("; ")}.` : "",
     suggestions.length ? `Waiting for your confirmation: ${suggestions.map((f) => f.text).join("; ")}.` : ""].filter(Boolean).join(" ");
+  // For each decision that replaced an earlier one: what it replaced, and when the change was recorded.
+  const byId = new Map(rows.map((f) => [f.id, f]));
+  const withReplaced = (list: typeof current) => list.map((f) => { const was = f.supersedes ? byId.get(f.supersedes) : null; return { ...f, replaced: was && !was.forgotten ? { text: was.text, asOf: was.asOf, sourceRef: was.sourceRef } : null }; });
   return { project: { id: p.id as string, name: p.name as string, slug: p.slug as string, kind: p.kind as string, revision: p.revision as number, updatedAt: p.updated_at as string, lastOrigin: p.last_origin as string | null, course: p.course as string | null },
-    workspace: workspaceIdentity(ctx), current, options, suggestions, actions: cur(["action"]), questions: cur(["question"]), history, sources, answer };
+    workspace: workspaceIdentity(ctx), current: withReplaced(current), options, suggestions, actions: cur(["action"]), questions: cur(["question"]), history, sources, answer };
 }
 
 export class ProjectConflict extends Error { constructor(public keys: string[], public currentRevision: number) { super(`Newer edits exist for: ${keys.join(", ")}`); } }
@@ -171,3 +174,15 @@ export function forgetFact(ctx: Ctx, factId: string) {
 }
 export function pinFact(ctx: Ctx, factId: string, pinned: boolean) { run(ctx.db, "UPDATE project_facts SET pinned=? WHERE id=? AND project_id IN (SELECT id FROM projects WHERE owner_id=?)", pinned ? 1 : 0, factId, ctx.owner); return { ok: true }; }
 export const projectEvents = (ctx: Ctx, projectId: string) => all(ctx.db, "SELECT event_id, origin, client, at, resulting_revision rev, undone_at FROM project_events WHERE owner_id=? AND project_id=? ORDER BY at DESC, rowid DESC LIMIT 30", ctx.owner, projectId);
+
+/** What you owe next on this project: your open promises that name it (or one of its aliases), soonest first, plus its to-do items. */
+export function projectOwe(ctx: Ctx, ref: string) {
+  const p = findProject(ctx, ref); if (!p) throw new HttpError(404, `No project matches "${ref}".`);
+  const me = String(getSetting<string>(ctx.db, "owner_name", "Yonathan")).toLowerCase();
+  const names = [String(p.name), ...((p.aliases as string[]) ?? [])].map((n) => n.toLowerCase()).filter((n) => n.length >= 3);
+  const rows = all(ctx.db, "SELECT id, who, owed_to, action, due_date FROM commitments WHERE owner_id=? AND status='open' AND accepted=1 ORDER BY COALESCE(due_date,'9999'), created_at", ctx.owner);
+  const promises = rows.filter((c) => [String(c.who).toLowerCase()].some((w) => w === me || w === "me" || w === "i") && names.some((n) => `${c.owed_to} ${c.action}`.toLowerCase().includes(n)))
+    .map((c) => ({ id: c.id as string, kind: "promise" as const, text: `${c.action}`, owedTo: c.owed_to as string, due: (c.due_date as string | null) ?? null, href: `/tasks` }));
+  const todo = all(ctx.db, "SELECT id, text, asserted_at FROM project_facts WHERE project_id=? AND kind='action' AND status='current' AND forgotten=0 ORDER BY asserted_at", p.id).map((f) => ({ id: f.id as string, kind: "todo" as const, text: f.text as string, owedTo: null, due: null, href: null }));
+  return { items: [...promises, ...todo] };
+}

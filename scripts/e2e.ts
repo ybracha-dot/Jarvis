@@ -540,7 +540,7 @@ async function journeyAssistant(page: Page, browser: Browser) {
   ok(/read/.test(await page.getByTestId("result-reads").innerText()), "the page shows what Jarvis actually read");
   const resultUrl = page.url();
   await shot(page, "31-result-draft-desktop.png");
-  await page.getByTestId("result-sources").getByRole("link", { name: /Re: Lantern/ }).click();
+  await page.getByTestId("result-sources").getByRole("link", { name: /Re: TAMID/ }).click();
   await page.getByTestId("evidence-quote").waitFor();
   ok(/Confirming Wednesday/.test(await page.getByTestId("evidence-quote").innerText()), "the source link opens the original with the quote highlighted");
   await shot(page, "32-evidence-original-desktop.png");
@@ -1131,6 +1131,7 @@ async function journeyOffice(page: Page, browser: Browser) {
   await page.goto(base + "/office");
   await page.getByTestId("capture-send").waitFor();
   ok(/Idle desks make zero model calls/.test(await page.getByTestId("office-runner").innerText()), "idle office says it makes zero model calls");
+  ok((await page.getByTestId("handoff-strip").count()) === 1 && (await page.getByTestId("handoff-assigned").count()) === 0 && (await page.getByTestId("handoff-working").count()) === 0 && (await page.getByTestId("handoff-needs").count()) === 0, "idle: one status line, not three empty cards");
   await page.getByTestId("capture-send").click();
   await page.getByTestId("capture-receipt").waitFor();
   ok(/SYNTHETIC SOURCE EVENT/.test(await page.getByTestId("capture-receipt").innerText()), "the receipt labels the source event as synthetic");
@@ -1150,8 +1151,11 @@ async function journeyOffice(page: Page, browser: Browser) {
   await spec.click();
   const insp = page.getByTestId("inspector");
   await insp.getByText("Assigned by", { exact: true }).waitFor();
+  await insp.getByTestId("run-details").locator("summary").click();
   const it = await insp.innerText();
   ok(/Handle:/.test(it) && /cap_/.test(it) && /No model used/.test(it) && /Last heartbeat/.test(it), "inspector shows who delegated it, evidence, usage and heartbeat");
+  ok(/You asked/.test(it) && /three pitch angles/.test(await insp.getByTestId("inspector-asked").innerText()), "the inspector quotes what you asked for, in your words");
+  ok(/Needs from you/.test(it) && /Result/.test(it) && /Doing now/.test(it), "the inspector answers: asked, assigned by, doing now, needs from you, result");
   await shot(page, "15-office-desktop.png");
   await waitFor("the decision to arrive", async () => (await api("/decisions")).decisions.some((d: any) => d.kind === "commitment_plan"));
   await page.getByTestId("handoff-needs").getByText(/TAMID/).waitFor();
@@ -1208,6 +1212,100 @@ async function journeyOffice(page: Page, browser: Browser) {
   await m.getByTestId("inspector").getByText("Assigned by", { exact: true }).waitFor();
   await shot(m, "16-office-mobile.png");
   await ctx.close();
+}
+
+/** One TAMID pitch, end to end: the Office shows the handoff, the agent that needs a decision, and a saved draft; Projects and Memory tell the same story. */
+async function journeyThread(browser: Browser) {
+  step("TAMID thread: from a spoken promise to a saved, sourced draft");
+  const OUT = path.resolve("docs/screenshots/thread"); fs.mkdirSync(OUT, { recursive: true });
+  await post("/demo/reset", { confirm: "RESET DEMO" });
+  startWorker(1100);
+  const mk = async (label: string, w: number, h: number, scheme: "light" | "dark", phone: boolean) => { const c = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme, deviceScaleFactor: phone ? 2 : 1, isMobile: phone, hasTouch: phone }); const p = await c.newPage(); watch(p, `thread-${label}`); return { label, c, p, phone }; };
+  const views = [await mk("laptop-light", 1440, 900, "light", false), await mk("laptop-dark", 1440, 900, "dark", false), await mk("phone-light", 390, 844, "light", true), await mk("phone-dark", 390, 844, "dark", true)];
+  const lp = views[0].p;
+  const snap = async (v: { label: string; p: Page }, name: string) => { await v.p.evaluate(() => window.scrollTo(0, 0)); await v.p.waitForTimeout(250); await v.p.screenshot({ path: path.join(OUT, `${name}-${v.label}.png`) }); };
+
+  await lp.goto(base + "/connections"); await lp.getByTestId("load-sample").click(); await lp.getByTestId("sources-panel").getByText(/Mail \(fixture\)/).waitFor();
+  for (const v of views) { await v.p.goto(base + "/office"); await v.p.getByTestId("handoff-strip").waitFor(); }
+
+  step("Office: the room is first, and the composer does not cover it");
+  for (const [w, h] of [[1440, 900], [1280, 720], [1024, 768]] as const) {
+    await lp.setViewportSize({ width: w, height: h }); await lp.waitForTimeout(300);
+    const r = await lp.evaluate(() => { const room = document.querySelector('[data-testid="room-frame"]')!.getBoundingClientRect(); const bar = document.querySelector('[data-testid="voice-dock"]')!.getBoundingClientRect(); const you = document.querySelector('[data-testid="you-desk"]')!.getBoundingClientRect(); const sup = document.querySelector('[data-testid="office-scene"]')!.getBoundingClientRect(); return { roomTop: room.top, roomBottom: room.bottom, barTop: bar.top, youBottom: you.bottom, scene: sup.bottom, h: window.innerHeight }; });
+    ok(r.roomTop < r.h * 0.4 && r.roomBottom <= r.barTop + 1 && r.youBottom <= r.barTop, `${w}x${h}: the whole room, including your desk, sits above the composer (room ${Math.round(r.roomTop)}-${Math.round(r.roomBottom)}, composer from ${Math.round(r.barTop)})`);
+  }
+  await lp.setViewportSize({ width: 1440, height: 900 }); await lp.waitForTimeout(300);
+  ok((await lp.getByTestId("handoff-strip").count()) === 1 && (await lp.getByTestId("handoff-needs").count()) === 0, "idle: a single status line, no empty cards");
+  await snap(views[0], "0-idle");
+
+  await lp.getByTestId("capture-text").scrollIntoViewIfNeeded(); await lp.getByTestId("capture-send").click(); await lp.getByTestId("capture-receipt").waitFor();
+  step("Office: an agent is working");
+  await lp.getByTestId("handoff-working").getByText(/Planner/).waitFor({ timeout: 25000 });
+  ok(/Jarvis/.test(await lp.getByTestId("handoff-assigned").innerText()), "the status line shows Jarvis handed the work to the Planner");
+  await lp.evaluate(() => window.scrollTo(0, 0)); await lp.getByTestId("roster-job").filter({ hasText: "Planner" }).filter({ hasText: "TAMID" }).first().click();
+  await lp.getByTestId("inspector").getByText("You asked").waitFor();
+  ok(/three pitch angles/.test(await lp.getByTestId("inspector-asked").innerText()) && /Jarvis/.test(await lp.getByTestId("inspector").innerText()), "clicking the Planner shows what you asked, in your words, and who assigned it");
+  for (const v of views) { if (v.phone) await v.p.getByTestId("phone-now").waitFor({ timeout: 25000 }); await snap(v, "1-working"); }
+  ok(/planner|jarvis/i.test(await views[2].p.getByTestId("phone-now").innerText()), "on the phone the active agent is the first thing under the title");
+
+  step("Office: an agent needs your decision");
+  await lp.getByTestId("handoff-needs").waitFor({ timeout: 40000 });
+  await lp.getByTestId("ask-bubble").waitFor();
+  await lp.evaluate(() => window.scrollTo(0, 0)); await lp.locator('[data-testid="office-worker"][data-needs-you="1"]').first().dispatchEvent("click");
+  await lp.getByTestId("needs-block").waitFor();
+  const nb = await lp.getByTestId("needs-block").innerText();
+  ok(/Reviewer is waiting for you/i.test(nb) && /TAMID/.test(nb) && (await lp.getByTestId("inspector-open-decision").isVisible()), "the inspector says who is waiting, what they need decided, and where to click");
+  ok(!/npx|setup|token|install/i.test(nb), "the moment an agent needs you has no setup instructions in it");
+  for (const v of views) { if (v.phone) { await v.p.getByTestId("phone-now").and(v.p.locator('[data-kind="needs"]')).waitFor({ timeout: 40000 }); } await snap(v, "2-needs-you"); }
+  const pn = await views[2].p.getByTestId("phone-now").innerText(); ok(/waiting for you/i.test(pn) && /TAMID/.test(pn), "on the phone the decision is the first card");
+
+  step("Office on the phone: the last control is reachable above the tab bar");
+  const pp = views[2].p; await pp.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight)); await pp.waitForTimeout(300);
+  const last = await pp.evaluate(() => { const els = [...document.querySelectorAll("main a[href], main button, main summary, main textarea")].filter((e) => (e as HTMLElement).offsetParent) as HTMLElement[]; const e = els[els.length - 1]; const r = e.getBoundingClientRect(); const nav = document.querySelector('nav[aria-label="Primary mobile"]')!.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { text: (e.textContent ?? "").trim().slice(0, 40), bottom: r.bottom, navTop: nav.top, hit: !!top && (top === e || e.contains(top)) }; });
+  ok(last.bottom <= last.navTop && last.hit, `the last control (“${last.text}”) is fully visible and tappable above the tab bar`);
+
+  step("Office: decide, then ask Jarvis for the draft from the same screen");
+  await lp.evaluate(() => window.scrollTo(0, 0)); await lp.getByTestId("inspector-open-decision").click(); const dlg = lp.getByRole("dialog"); await dlg.waitFor();
+  const reserve = dlg.getByRole("button", { name: "Reserve" }); if (await reserve.isEnabled()) await reserve.click(); else await dlg.getByRole("button", { name: "Already handled" }).click();
+  await dlg.getByTestId("decision-state").waitFor({ timeout: 15000 }); await lp.keyboard.press("Escape").catch(() => {});
+  await waitFor("helpers to finish", async () => (await api("/office")).jobs.every((j: any) => ["done", "cancelled", "failed"].includes(j.status)), 40000);
+  await lp.getByTestId("transcript").focus(); await lp.getByTestId("transcript").fill("Pick up where we left off on the TAMID sponsor pitch and draft my follow-up."); await lp.getByTestId("send").click();
+  await lp.getByTestId("goal-result-link").waitFor();
+  await waitFor("the draft to be saved", async () => (await api("/results")).results.some((r: any) => r.kind === "draft" && /TAMID/.test(r.title + (r.summary ?? ""))), 40000);
+  await waitFor("the goal job to finish", async () => (await api("/office")).jobs.filter((j: any) => j.kind === "supervise_goal").every((j: any) => j.status === "done"), 40000);
+
+  step("Office: the finished result");
+  for (const v of views) {
+    await v.p.goto(base + "/office"); await v.p.getByTestId("roster").waitFor();
+    await v.p.getByTestId("roster-job").filter({ hasText: "Pick up where we left off" }).first().click();
+    await v.p.getByTestId("inspector-open-result").waitFor({ timeout: 15000 }); await v.p.waitForTimeout(500);
+    if (v.phone) { await v.p.waitForTimeout(700); await v.p.screenshot({ path: path.join(OUT, `3-finished-${v.label}.png`) }); } else await snap(v, "3-finished");
+  }
+  ok(/Open what it produced/.test(await lp.getByTestId("inspector").innerText()), "the finished agent offers the saved deliverable");
+  await lp.getByTestId("inspector-open-result").click(); await lp.getByTestId("result-body").waitFor({ timeout: 30000 });
+  const body = await lp.getByTestId("result-body").innerText(); ok(/Wednesday/.test(body), "the saved draft uses the current decision (Wednesday)");
+  await lp.screenshot({ path: path.join(OUT, "4-result-laptop-light.png") });
+
+  step("Projects: what we decided, what I owe, the latest draft");
+  await lp.goto(base + "/projects"); await lp.getByTestId("project-card").filter({ hasText: "TAMID" }).click(); await lp.getByTestId("project-brief").waitFor();
+  const dec = await lp.getByTestId("project-answer").innerText();
+  ok(/Wednesday/.test(dec) && /Replaced\s*Monday/.test(dec.replace(/\n/g, " ")) && /Changed/.test(dec), "Projects says Wednesday is decided, when it changed, and that it replaced Monday");
+  ok(/three pitch angles/.test(await lp.getByTestId("project-owe").innerText()), "Projects lists what I owe next (the three pitch angles)");
+  ok((await lp.getByTestId("open-latest-draft").count()) === 1, "Projects links the latest draft");
+  await snap({ label: "laptop-light", p: lp }, "5-project");
+  const lpD = views[1].p; await lpD.goto(lp.url()); await lpD.getByTestId("project-brief").waitFor(); await snap(views[1], "5-project");
+  await lp.getByTestId("open-latest-draft").click(); await lp.getByTestId("result-sources").waitFor({ timeout: 20000 });
+  await lp.getByTestId("result-sources").getByRole("link", { name: /Re: TAMID/ }).first().click(); await lp.getByTestId("evidence-quote").waitFor();
+  ok(/Wednesday/.test(await lp.getByTestId("evidence-quote").innerText()), "from the draft, the source behind the claim opens with the quote highlighted");
+  await snap({ label: "laptop-light", p: lp }, "6-source");
+
+  step("Memory: the same topic, with when it changed and what it replaced");
+  await lp.goto(base + "/memory"); await lp.getByTestId("memory-ask").fill("sponsor follow-up"); await lp.getByTestId("memory-history").waitFor();
+  const mh = (await lp.getByTestId("memory-answer").innerText()).replace(/\n/g, " ");
+  ok(/Wednesday/.test(mh) && /Current since/.test(mh) && /It replaced\s*Monday/.test(mh), "Memory shows the current decision, when it changed and that it replaced Monday");
+  await snap({ label: "laptop-light", p: lp }, "7-memory"); await lpD.goto(base + "/memory"); await lpD.getByTestId("memory-ask").fill("sponsor follow-up"); await lpD.getByTestId("memory-history").waitFor(); await snap(views[1], "7-memory");
+  ok(((await (await fetch(`${base}/api/office`)).json()).modelCalls ?? 0) === 0, "the whole thread made zero model calls");
+  for (const v of views) await v.c.close();
 }
 
 const FAKE_SPEECH = `(() => {
@@ -1450,6 +1548,7 @@ async function main() {
     else if (only === "private") { await journeyPrivate(browser); }
     else if (only === "blackboard") { await journeyBlackboard(browser); }
     else if (only === "brief") { await journeyBrief(browser); }
+    else if (only === "thread") { await journeyThread(browser); }
     else if (only === "roundtrip") { await journeyRoundTrip(browser); }
     else if (only === "mcp") { startWorker(300); await journeyMcp(); }
     else if (only === "office") { const c = await browser.newContext({ viewport: { width: 1440, height: 900 } }); const p = await c.newPage(); watch(p, "office"); await journeyOffice(p, browser); await c.close(); }
@@ -1464,6 +1563,7 @@ async function main() {
     await journeyMcp();
     await journeyProjects(page);
     await journeyAssistant(page, browser);
+    await journeyThread(browser);
     await journeyQuizLatency(page);
     await journeyDecision(page, browser);
     await journeyPlan(page, browser);
